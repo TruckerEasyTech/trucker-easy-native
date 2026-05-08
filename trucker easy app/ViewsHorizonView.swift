@@ -14,6 +14,16 @@ import HealthKit
 import Speech
 import AVFoundation
 
+#if DEBUG
+import OSLog
+
+private func horizonLogDebugWorkingDirectory() {
+    let debugPath = FileManager.default.currentDirectoryPath
+    let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TruckerEasy", category: "HorizonView")
+    logger.debug("📁 Debug path: \(debugPath, privacy: .public)")
+}
+#endif
+
 private func agentLogHorizon(
     runId: String,
     hypothesisId: String,
@@ -21,6 +31,7 @@ private func agentLogHorizon(
     message: String,
     data: [String: Any] = [:]
 ) {
+    #if DEBUG
     let payload: [String: Any] = [
         "sessionId": "ff95f6",
         "runId": runId,
@@ -33,7 +44,9 @@ private func agentLogHorizon(
     guard let json = try? JSONSerialization.data(withJSONObject: payload),
           var line = String(data: json, encoding: .utf8) else { return }
     line.append("\n")
-    let path = "/Users/thaiskeller/Desktop/trucker easy app/.cursor/debug-ff95f6.log"
+    let logURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        .appendingPathComponent("debug-horizon-ff95f6.ndjson", isDirectory: false)
+    let path = logURL.path
     if let handle = FileHandle(forWritingAtPath: path) {
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: Data(line.utf8))
@@ -41,6 +54,7 @@ private func agentLogHorizon(
     } else {
         try? line.write(toFile: path, atomically: true, encoding: .utf8)
     }
+    #endif
 }
 
 // MARK: - Horizon View (Tab 1) — Map + Load Management
@@ -274,6 +288,9 @@ struct HorizonView: View {
     @ViewBuilder private var withLifecycleModifiers: some View {
         mainStack
             .onAppear {
+                #if DEBUG
+                horizonLogDebugWorkingDirectory()
+                #endif
                 isIdleBottomSheetReady = false
                 launchSafeScreenHeight = UIScreen.main.bounds.height
                 DispatchQueue.main.async {

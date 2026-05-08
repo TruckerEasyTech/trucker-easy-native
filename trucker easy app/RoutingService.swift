@@ -74,7 +74,7 @@ final class RoutingService {
     // MARK: - Truck Route Request
     //
     // Returns a TruckRoute which HorizonView renders via MKPolyline.
-    // Chain: Valhalla (if ValhallaServerURL) → MapKit → OSRM → Cached offline.
+    // Chain: Valhalla (if ValhallaServerURL) → OSRM → MapKit → Cached offline.
 
     func calculateTruckRoute(
         from origin: CLLocation,
@@ -134,36 +134,7 @@ final class RoutingService {
             }
         }
 
-        // === Provider 3: MapKit (car-only, most reliable in US) ===
-        do {
-            let mkRoute = try await fallbackMKDirections(
-                from: origin, to: destination, destinationName: destinationName
-            )
-            guard Self.isRoutePlausible(origin: origin, destination: destination, route: mkRoute) else {
-                failureReasons.append("MapKit: implausible route rejected")
-                agentLogRouting(
-                    runId: "baseline",
-                    hypothesisId: "H8",
-                    location: "RoutingService.swift:calculateTruckRoute",
-                    message: "Rejected implausible MapKit route",
-                    data: [
-                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                        "routeMeters": Int(mkRoute.distanceMeters),
-                        "destinationName": destinationName
-                    ]
-                )
-                throw RoutingServiceError.noRoute
-            }
-            lastProvider = .mapKit
-            cacheRoute(mkRoute, from: origin.coordinate, to: destination)
-            print("[Routing] ✅ MapKit OK (car-only)")
-            return mkRoute
-        } catch {
-            failureReasons.append("MapKit: \(error.localizedDescription)")
-            print("[Routing] MapKit failed: \(error.localizedDescription)")
-        }
-
-        // === Provider 4: OSRM (public server, less reliable) ===
+        // === Provider 3: OSRM (driving profile; NOT truck-aware unless your server is) ===
         do {
             let osrmRoute = try await requestRouteFromOSRM(
                 from: origin, to: destination, destinationName: destinationName
@@ -191,12 +162,41 @@ final class RoutingService {
                 stage: .fallbackUsed,
                 destinationName: destinationName,
                 startedAt: startedAt,
-                detail: "fallback after MapKit failed"
+                detail: "fallback after Valhalla unavailable or failed"
             )
             return osrmRoute
         } catch {
             failureReasons.append("OSRM: \(error.localizedDescription)")
             print("[Routing] OSRM failed: \(error.localizedDescription)")
+        }
+
+        // === Provider 4: MapKit (car-only, most reliable in US) ===
+        do {
+            let mkRoute = try await fallbackMKDirections(
+                from: origin, to: destination, destinationName: destinationName
+            )
+            guard Self.isRoutePlausible(origin: origin, destination: destination, route: mkRoute) else {
+                failureReasons.append("MapKit: implausible route rejected")
+                agentLogRouting(
+                    runId: "baseline",
+                    hypothesisId: "H8",
+                    location: "RoutingService.swift:calculateTruckRoute",
+                    message: "Rejected implausible MapKit route",
+                    data: [
+                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
+                        "routeMeters": Int(mkRoute.distanceMeters),
+                        "destinationName": destinationName
+                    ]
+                )
+                throw RoutingServiceError.noRoute
+            }
+            lastProvider = .mapKit
+            cacheRoute(mkRoute, from: origin.coordinate, to: destination)
+            print("[Routing] ✅ MapKit OK (car-only)")
+            return mkRoute
+        } catch {
+            failureReasons.append("MapKit: \(error.localizedDescription)")
+            print("[Routing] MapKit failed: \(error.localizedDescription)")
         }
 
         // === Fallback 5: Cached route ===
@@ -242,6 +242,18 @@ final class RoutingService {
 
     // MARK: - OSRM Fallback (NOT truck-aware)
 
+    /// Base URL from Info.plist `OSRMServerURL` / build setting `OSRM_SERVER_URL`, or public OSRM demo.
+    private static func osrmServerBaseURL() -> String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "OSRMServerURL") as? String ?? ""
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "||", with: "//")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !t.isEmpty, !t.contains("$(") else {
+            return "https://router.project-osrm.org"
+        }
+        return t
+    }
+
     private func requestRouteFromOSRM(
         from origin: CLLocation,
         to destination: CLLocationCoordinate2D,
@@ -249,7 +261,8 @@ final class RoutingService {
     ) async throws -> TruckRoute {
         let originPart = Self.osrmCoordinateString(origin.coordinate)
         let destinationPart = Self.osrmCoordinateString(destination)
-        let path = "https://router.project-osrm.org/route/v1/driving/\(originPart);\(destinationPart)"
+        let base = Self.osrmServerBaseURL()
+        let path = "\(base)/route/v1/driving/\(originPart);\(destinationPart)"
         var components = URLComponents(string: path)
         components?.queryItems = [
             .init(name: "overview", value: "full"),

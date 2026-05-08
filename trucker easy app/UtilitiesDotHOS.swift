@@ -250,7 +250,7 @@ final class DotHosContext {
 // MARK: 2 — DotSpeedFeeder
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Bridges live CLLocation speed from UtilitiesLocationManager into DotHosContext.
+/// Bridges live CLLocation speed from `LocationManager` (`LocationManager.swift`) into DotHosContext.
 /// Drop this into any view with access to both objects.
 struct DotSpeedFeeder: ViewModifier {
     let locationManager: LocationManager

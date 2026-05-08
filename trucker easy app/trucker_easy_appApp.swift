@@ -3,6 +3,26 @@ import SwiftData
 import UserNotifications
 import Foundation
 
+#if DEBUG
+import OSLog
+
+private func validateBuildConfig() {
+    let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "TruckerEasy", category: "BuildConfig")
+    let mapboxToken = Bundle.main.infoDictionary?["MBXAccessToken"] as? String
+    let valhallaURL = Bundle.main.infoDictionary?["ValhallaServerURL"] as? String
+
+    let mapboxPreview = mapboxToken.map { String($0.prefix(10)) } ?? "MISSING"
+    let valhallaPreview = valhallaURL.map { String($0.prefix(48)) } ?? "MISSING"
+
+    logger.debug("🗺️ Mapbox token (prefix): \(mapboxPreview, privacy: .public)")
+    logger.debug("🛣️ Valhalla URL (prefix): \(valhallaPreview, privacy: .public)")
+
+    if mapboxToken?.contains("$(") == true || valhallaURL?.contains("$(") == true {
+        logger.warning("⚠️ Unresolved build variables in Info.plist — check Config/TruckerEasy.secrets.xcconfig and target Base Configuration.")
+    }
+}
+#endif
+
 extension Notification.Name {
     static let medicationReminderFired = Notification.Name("medicationReminderFired")
 }
@@ -14,10 +34,11 @@ struct trucker_easy_appApp: App {
     @State private var modelContainer: ModelContainer?
     @State private var didStartBootstrap = false
 
-    // #region agent log
-    private static let agentLogPath = "/Users/thaiskeller/Desktop/trucker easy app/.cursor/debug-2417a5.log"
-
+    // #region agent log (DEBUG only — path under app Caches, never a repo absolute path)
     private static func agentNDJSONLog(hypothesisId: String, location: String, message: String, data: [String: String] = [:]) {
+        #if DEBUG
+        let logURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("debug-bootstrap-2417a5.ndjson", isDirectory: false)
         let dict: [String: Any] = [
             "sessionId": "2417a5",
             "hypothesisId": hypothesisId,
@@ -31,13 +52,14 @@ struct trucker_easy_appApp: App {
               let json = try? JSONSerialization.data(withJSONObject: dict),
               var line = String(data: json, encoding: .utf8) else { return }
         line.append("\n")
-        if !FileManager.default.fileExists(atPath: agentLogPath) {
-            FileManager.default.createFile(atPath: agentLogPath, contents: nil)
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
         }
-        guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: agentLogPath)) else { return }
+        guard let handle = try? FileHandle(forWritingTo: logURL) else { return }
         defer { try? handle.close() }
-        try? handle.seekToEnd()
+        _ = try? handle.seekToEnd()
         if let d = line.data(using: .utf8) { try? handle.write(contentsOf: d) }
+        #endif
     }
     // #endregion
 
@@ -79,6 +101,10 @@ struct trucker_easy_appApp: App {
     private func bootstrapIfNeeded() async {
         guard !didStartBootstrap else { return }
         didStartBootstrap = true
+
+        #if DEBUG
+        validateBuildConfig()
+        #endif
 
         // #region agent log
         Self.agentNDJSONLog(hypothesisId: "H1", location: "trucker_easy_appApp.swift:bootstrapIfNeeded", message: "bootstrap start (main-actor container)", data: [:])

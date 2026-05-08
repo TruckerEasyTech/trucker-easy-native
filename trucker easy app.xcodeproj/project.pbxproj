@@ -443,7 +443,7 @@
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "trucker-easy-app-Info.plist";
+				INFOPLIST_FILE = "trucker easy app.xcodeproj/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
@@ -493,7 +493,7 @@
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "trucker-easy-app-Info.plist";
+				INFOPLIST_FILE = "trucker easy app.xcodeproj/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
@@ -568,8 +568,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
 			requirement = {
-				kind = exactVersion;
-				version = 11.22.1;
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.22.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

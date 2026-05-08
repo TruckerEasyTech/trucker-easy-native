@@ -1,10 +1,10 @@
 //
-//  TruckLocationManager.swift
+//  ServicesTruckLocationTracking.swift
 //  trucker easy app
 //
 //  Created by AI Assistant on 3/31/26.
 //
-//  Location manager for truck navigation with heading and speed
+//  Truck GPS + heading + speed for navigation surfaces (distinct from app `LocationManager` in LocationManager.swift).
 
 import Foundation
 import CoreLocation
@@ -193,15 +193,7 @@ extension TruckLocationManager {
             }
             
             let coord = route[index]
-            let location = CLLocation(
-                coordinate: coord,
-                altitude: 0,
-                horizontalAccuracy: 5,
-                verticalAccuracy: 5,
-                course: index < route.count - 1 ? coord.bearing(to: route[index + 1]) : 0,
-                speed: speed,  // m/s
-                timestamp: Date()
-            )
+            let location = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
             
             Task { @MainActor in
                 self.currentLocation = location

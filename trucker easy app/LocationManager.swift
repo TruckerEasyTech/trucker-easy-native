@@ -13,6 +13,19 @@ import MapKit
 class LocationManager: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
 
+#if DEBUG
+    /// When true (Simulator + `setDebugLocation`), Core Location updates are ignored so Valhalla/navigation can use the injected fix.
+    private var debugLocationOverrideActive = false
+
+    private var shouldIgnoreDelegateLocationsForDebugInject: Bool {
+        #if targetEnvironment(simulator)
+        return debugLocationOverrideActive && ProcessInfo.processInfo.environment["DISABLE_FAKE_LOCATION"] == nil
+        #else
+        return false
+        #endif
+    }
+#endif
+
     var currentLocation: CLLocation?
     var currentHeading: CLHeading?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -92,6 +105,9 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+#if DEBUG
+        if shouldIgnoreDelegateLocationsForDebugInject { return }
+#endif
         // Accept only accurate fixes — discard stale or low-accuracy updates
         guard let loc = locations.last, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 else { return }
         if #available(iOS 15.0, *), let source = loc.sourceInformation, source.isSimulatedBySoftware {
@@ -151,3 +167,28 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         }
     }
 }
+
+#if DEBUG
+extension LocationManager {
+    /// Simulator: permite injetar coordenadas quando a variável de ambiente `DISABLE_FAKE_LOCATION` **não** está definida (útil porque updates “simulated by software” são ignorados no delegate).
+    var useFakeLocationInSimulator: Bool {
+        #if targetEnvironment(simulator)
+        return ProcessInfo.processInfo.environment["DISABLE_FAKE_LOCATION"] == nil
+        #else
+        return false
+        #endif
+    }
+
+    /// Injeta um fix GPS para testes no Simulator (ex.: ponto ao longo de uma rota Valhalla). Não faz nada em device ou se `DISABLE_FAKE_LOCATION` estiver definido.
+    func setDebugLocation(_ coordinate: CLLocationCoordinate2D) {
+        guard useFakeLocationInSimulator else { return }
+        debugLocationOverrideActive = true
+        currentLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        print("[LocationManager][DEBUG] setDebugLocation \(coordinate.latitude),\(coordinate.longitude)")
+    }
+
+    func clearDebugLocationOverride() {
+        debugLocationOverrideActive = false
+    }
+}
+#endif

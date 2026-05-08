@@ -45,11 +45,19 @@ final class ValhallaRoutingService {
     // Read the self-hosted Valhalla server URL from Info.plist.
     // Add key "ValhallaServerURL" with your server's base URL.
     var serverURL: String {
-        Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURL") as? String ?? ""
+        let raw = Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURL") as? String ?? ""
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "||", with: "//")
     }
 
+    /// Same source as the merged app Info.plist — fails closed if xcconfig did not substitute `$(VALHALLA_SERVER_URL)`.
     var isAvailable: Bool {
-        !serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard let url = Bundle.main.infoDictionary?["ValhallaServerURL"] as? String,
+              !url.isEmpty,
+              !url.contains("$(") else {
+            return false
+        }
+        return true
     }
 
     // MARK: - Calculate Truck Route

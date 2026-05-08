@@ -1,124 +1,131 @@
-//
-//  Info.plist Configuration
-//  Trucker Easy
-//
-
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- App Configuration -->
-    <key>CFBundleDisplayName</key>
-    <string>Trucker Easy</string>
-    
-    <key>CFBundleIdentifier</key>
-    <string>com.driverfordriver.truckereasy</string>
-    
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    
-    <!-- Permissions -->
-    <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Trucker Easy needs your location for truck navigation and real-time community alerts on the road.</string>
-    
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.</string>
-    
-    <key>NSCameraUsageDescription</key>
-    <string>Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.</string>
-    
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>Trucker Easy needs photo access to upload document images to your secure digital vault.</string>
-    
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.</string>
-    
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.</string>
-    
-    <!-- Background Modes -->
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>location</string>
-        <string>audio</string>
-        <string>remote-notification</string>
-    </array>
-    
-    <!-- Supported Interface Orientations (iPhone) -->
-    <key>UISupportedInterfaceOrientations</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
-    
-    <!-- Appearance -->
-    <key>UIUserInterfaceStyle</key>
-    <string>Automatic</string>
-    
-    <!-- Maps Configuration -->
-    <key>MKDirectionsApplicationSupportedModes</key>
-    <array>
-        <string>MKDirectionsModeTruck</string>
-    </array>
-    
-    <!-- Launch Screen -->
-    <key>UILaunchScreen</key>
-    <dict>
-        <key>UIImageName</key>
-        <string>LaunchIcon</string>
-        <key>UIColorName</key>
-        <string>TruckerOrange</string>
-    </dict>
-    
-    <!-- App Transport Security -->
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <false/>
-        <key>NSExceptionDomains</key>
-        <dict>
-            <!-- Allow HERE Maps API -->
-            <key>router.hereapi.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-            <!-- Allow NewsAPI -->
-            <key>newsapi.org</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-        </dict>
-    </dict>
-    
-    <!-- Localization -->
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    
-    <key>CFBundleLocalizations</key>
-    <array>
-        <string>en</string>
-        <string>es</string>
-        <string>pt-BR</string>
-    </array>
-    
-    <!-- Notifications -->
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>remote-notification</string>
-    </array>
-    
-    <!-- App Category -->
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.navigation</string>
+	<key>AgoraAppID</key>
+	<string>$(AgoraAppID)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Trucker Easy</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+		<string>pt-BR</string>
+		<string>fr-CA</string>
+	</array>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>truckereasy</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>ELDProviderAPIKey</key>
+	<string>$(ELDProviderAPIKey)</string>
+	<key>ELDProviderBaseURL</key>
+	<string>$(ELDProviderBaseURL)</string>
+	<key>ELDVehicleID</key>
+	<string>$(ELDVehicleID)</string>
+	<key>JurisdictionPolicyAPIBaseURL</key>
+	<string>$(JurisdictionPolicyAPIBaseURL)</string>
+	<key>JurisdictionPolicyAPIKey</key>
+	<string>$(JurisdictionPolicyAPIKey)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.navigation</string>
+	<key>MBXAccessToken</key>
+	<string>$(MBXAccessToken)</string>
+	<key>MKDirectionsApplicationSupportedModes</key>
+	<array>
+		<string>MKDirectionsModeTruck</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>router.hereapi.com</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+			</dict>
+			<key>newsapi.org</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trucker Easy needs your location for truck navigation and real-time community alerts on the road.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Trucker Easy needs photo access to upload document images to your secure digital vault.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.</string>
+	<key>OBD2BLEDeviceName</key>
+	<string>$(OBD2BLEDeviceName)</string>
+	<key>OpenRouterAPIKey</key>
+	<string>$(OpenRouterAPIKey)</string>
+	<key>OpenWeatherMapAPIKey</key>
+	<string>$(OpenWeatherMapAPIKey)</string>
+	<key>OperationalFeedAPIBaseURL</key>
+	<string>$(OperationalFeedAPIBaseURL)</string>
+	<key>OperationalFeedAPIKey</key>
+	<string>$(OperationalFeedAPIKey)</string>
+	<key>OperationalFeedProviderURLs</key>
+	<string>$(OperationalFeedProviderURLs)</string>
+	<key>OSRMServerURL</key>
+	<string>$(OSRM_SERVER_URL)</string>
+	<key>SupabaseAnonKey</key>
+	<string>$(SupabaseAnonKey)</string>
+	<key>SupabaseURL</key>
+	<string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIImageName</key>
+		<string>LaunchIcon</string>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIUserInterfaceStyle</key>
+	<string>Automatic</string>
+	<key>ValhallaServerURL</key>
+	<string>$(VALHALLA_SERVER_URL)</string>
 </dict>
 </plist>
