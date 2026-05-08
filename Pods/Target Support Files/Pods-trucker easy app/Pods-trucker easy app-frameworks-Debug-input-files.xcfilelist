@@ -1,0 +1,5 @@
+${PODS_ROOT}/Target Support Files/Pods-trucker easy app/Pods-trucker easy app-frameworks.sh
+${PODS_XCFRAMEWORKS_BUILD_DIR}/NextBillionMap/Nbmap.framework/Nbmap
+${PODS_XCFRAMEWORKS_BUILD_DIR}/NextBillionNavigation/NbmapCoreNavigation.framework/NbmapCoreNavigation
+${PODS_XCFRAMEWORKS_BUILD_DIR}/NextBillionNavigation/NbmapNavigation.framework/NbmapNavigation
+${PODS_XCFRAMEWORKS_BUILD_DIR}/NextBillionTurf/NBTurf.framework/NBTurf

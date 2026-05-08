@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AgoraAppID</key>
+	<string>$(AgoraAppID)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>es</string>
+		<string>pt-BR</string>
+		<string>fr-CA</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>truckereasy</string>
+			</array>
+		</dict>
+	</array>
+	<key>ELDProviderAPIKey</key>
+	<string>$(ELDProviderAPIKey)</string>
+	<key>ELDProviderBaseURL</key>
+	<string>$(ELDProviderBaseURL)</string>
+	<key>ELDVehicleID</key>
+	<string>$(ELDVehicleID)</string>
+	<key>JurisdictionPolicyAPIBaseURL</key>
+	<string>$(JurisdictionPolicyAPIBaseURL)</string>
+	<key>JurisdictionPolicyAPIKey</key>
+	<string>$(JurisdictionPolicyAPIKey)</string>
+	<key>MBXAccessToken</key>
+	<string>$(MBXAccessToken)</string>
+	<key>OBD2BLEDeviceName</key>
+	<string>$(OBD2BLEDeviceName)</string>
+	<key>OpenRouterAPIKey</key>
+	<string>$(OpenRouterAPIKey)</string>
+	<key>OpenWeatherMapAPIKey</key>
+	<string>$(OpenWeatherMapAPIKey)</string>
+	<key>OperationalFeedAPIBaseURL</key>
+	<string>$(OperationalFeedAPIBaseURL)</string>
+	<key>OperationalFeedAPIKey</key>
+	<string>$(OperationalFeedAPIKey)</string>
+	<key>OperationalFeedProviderURLs</key>
+	<string>$(OperationalFeedProviderURLs)</string>
+	<key>SupabaseAnonKey</key>
+	<string>$(SupabaseAnonKey)</string>
+	<key>SupabaseURL</key>
+	<string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+	</dict>
+</dict>
+</plist>

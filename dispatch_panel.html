@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trucker Easy — Painel do Despachante</title>
+
+  <!-- Supabase JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --gold:    #c9a84c;
+      --gold2:   #f5d07a;
+      --bg:      #0a0906;
+      --surface: #141210;
+      --card:    #1c1a16;
+      --border:  #2e2a20;
+      --text:    #f5f0e8;
+      --muted:   #8a8070;
+      --green:   #34d399;
+      --blue:    #60a5fa;
+      --orange:  #fb923c;
+      --red:     #f87171;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo { font-size: 20px; font-weight: 800; letter-spacing: .5px; }
+    .logo span { color: var(--gold); }
+    .badge {
+      background: var(--gold);
+      color: #000;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      letter-spacing: .5px;
+    }
+
+    /* ── Layout ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 0;
+      height: calc(100vh - 53px);
+    }
+
+    /* ── Sidebar form ── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 24px 20px;
+    }
+
+    h2 { font-size: 13px; font-weight: 700; color: var(--gold); letter-spacing: 1px;
+         text-transform: uppercase; margin-bottom: 16px; }
+
+    .field { margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+
+    input, select, textarea {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--gold); }
+    textarea { resize: vertical; min-height: 60px; }
+    select option { background: var(--card); }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* Address geocode row */
+    .addr-row { position: relative; }
+    .addr-row input { padding-right: 90px; }
+    .geocode-badge {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+      pointer-events: none;
+    }
+    .geocode-badge.ok  { background: #064e3b; color: var(--green); }
+    .geocode-badge.err { background: #450a0a; color: var(--red); }
+    .geocode-badge.searching { background: #1e3a5f; color: var(--blue); }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+    /* Load number */
+    .load-num-row { display: flex; align-items: center; gap: 8px; }
+    .load-num-row input { flex: 1; }
+    .btn-regen {
+      background: var(--card); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 8px; padding: 10px 12px; cursor: pointer; font-size: 13px;
+    }
+    .btn-regen:hover { color: var(--gold); border-color: var(--gold); }
+
+    /* Submit */
+    .btn-send {
+      width: 100%; padding: 14px; background: var(--gold);
+      color: #0a0906; font-weight: 800; font-size: 15px;
+      border: none; border-radius: 10px; cursor: pointer; letter-spacing: .3px;
+      transition: background .15s, transform .1s;
+      margin-top: 6px;
+    }
+    .btn-send:hover  { background: var(--gold2); }
+    .btn-send:active { transform: scale(.98); }
+    .btn-send:disabled { background: #3a3020; color: #6b5a3a; cursor: not-allowed; transform: none; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #064e3b; color: var(--green);
+      padding: 12px 24px; border-radius: 10px; font-weight: 600; font-size: 14px;
+      opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999;
+    }
+    #toast.err { background: #450a0a; color: var(--red); }
+    #toast.show { opacity: 1; }
+
+    /* ── Loads panel ── */
+    .panel {
+      overflow-y: auto;
+      padding: 24px;
+      background: var(--bg);
+    }
+
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+    }
+    .btn-refresh {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 8px; padding: 6px 14px;
+      font-size: 12px; cursor: pointer;
+    }
+    .btn-refresh:hover { color: var(--gold); border-color: var(--gold); }
+
+    .loads-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
+
+    .load-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+    }
+    .load-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+    .load-num { font-weight: 700; font-size: 14px; }
+    .status-chip {
+      font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    }
+    .s-pending    { background: #3b2800; color: #fb923c; }
+    .s-received   { background: #1e3a5f; color: #60a5fa; }
+    .s-en_route   { background: #064e3b; color: #34d399; }
+    .s-delivered  { background: #1a2e1a; color: #86efac; }
+    .s-cancelled  { background: #2d1515; color: #f87171; }
+
+    .load-dest { font-size: 13px; color: var(--muted); margin: 4px 0 10px; }
+    .load-dest strong { color: var(--text); }
+    .load-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+    .load-meta span {
+      font-size: 11px; background: var(--surface); border: 1px solid var(--border);
+      padding: 3px 8px; border-radius: 6px; color: var(--muted);
+    }
+    .load-meta span b { color: var(--text); }
+
+    .empty-state {
+      text-align: center; color: var(--muted); padding: 60px 20px;
+      grid-column: 1/-1;
+    }
+    .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+
+    /* Loading spinner */
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid transparent; border-top-color: currentColor;
+      border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Driver ID helper */
+    .driver-hint {
+      font-size: 11px; color: var(--muted); margin-top: 4px;
+    }
+    .driver-hint a { color: var(--gold); text-decoration: none; }
+
+    @media (max-width: 800px) {
+      .layout { grid-template-columns: 1fr; height: auto; }
+      .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">TRUCKER <span>EASY</span></div>
+  <div class="badge">DISPATCH</div>
+</header>
+
+<div class="layout">
+
+  <!-- ═══════════════════ FORM ═══════════════════ -->
+  <div class="sidebar">
+    <h2>Nova Carga</h2>
+
+    <div class="field">
+      <label>Número da Carga</label>
+      <div class="load-num-row">
+        <input id="loadNumber" type="text" placeholder="LOAD-001" />
+        <button class="btn-regen" onclick="regenLoadNum()" title="Gerar novo número">↻</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Driver ID (ID do motorista no app)</label>
+      <input id="driverId" type="text" placeholder="UUID do motorista" />
+      <div class="driver-hint">
+        O motorista vê o próprio ID em <b>My Profile → Driver ID</b>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Nome da Empresa</label>
+      <input id="companyName" type="text" placeholder="Ex: Transportadora XYZ" />
+    </div>
+
+    <hr class="divider" />
+
+    <div class="field">
+      <label>Endereço de Origem</label>
+      <input id="originAddress" type="text" placeholder="Ex: Chicago, IL" />
+    </div>
+
+    <div class="field">
+      <label>Endereço de Destino *</label>
+      <div class="addr-row">
+        <input id="destAddress" type="text" placeholder="Ex: Dallas, TX 75201"
+               oninput="scheduleGeocode()" />
+        <span id="geocodeBadge" class="geocode-badge" style="display:none"></span>
+      </div>
+      <input id="destLat" type="hidden" />
+      <input id="destLng" type="hidden" />
+    </div>
+
+    <div class="row2">
+      <div class="field">
+        <label>Tipo de Carga</label>
+        <select id="commodity">
+          <option value="">-- Selecionar --</option>
+          <option>Dry Goods</option>
+          <option>Refrigerated</option>
+          <option>Flatbed / Steel</option>
+          <option>Hazmat</option>
+          <option>Automotive</option>
+          <option>Liquid / Tanker</option>
+          <option>Oversized</option>
+          <option>General Freight</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Peso (lbs)</label>
+        <input id="weightLbs" type="number" placeholder="42000" min="0" />
+      </div>
+    </div>
+
+    <div class="row2">
+      <div class="field">
+        <label>Valor do Frete (USD)</label>
+        <input id="valorFrete" type="number" placeholder="2500.00" min="0" step="0.01" />
+      </div>
+      <div class="field">
+        <label>Preço Diesel EIA (USD/gal)</label>
+        <input id="precoDiesel" type="number" placeholder="3.85" min="0" step="0.01" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Instruções Especiais</label>
+      <textarea id="instructions" placeholder="Ex: Entrar pela portaria B, aguardar 30 min para descarga..."></textarea>
+    </div>
+
+    <button class="btn-send" id="sendBtn" onclick="sendLoad()">
+      Enviar Carga para Motorista
+    </button>
+  </div>
+
+  <!-- ═══════════════════ LOADS PANEL ═══════════════════ -->
+  <div class="panel">
+    <div class="panel-header">
+      <h2 style="margin-bottom:0">Cargas Ativas</h2>
+      <button class="btn-refresh" onclick="loadLoads()">↻ Atualizar</button>
+    </div>
+    <div class="loads-grid" id="loadsGrid">
+      <div class="empty-state">
+        <div class="icon">🚛</div>
+        <div>Carregando...</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── CONFIG ────────────────────────────────────────────────
+// Preencha com os valores do projeto (não commitar chaves reais).
+const SUPABASE_URL  = 'https://YOUR_PROJECT.supabase.co';
+const SUPABASE_KEY  = 'YOUR_SUPABASE_ANON_KEY';
+const TOMTOM_KEY    = 'YOUR_TOMTOM_API_KEY';
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─── HELPERS ───────────────────────────────────────────────
+function toast(msg, isErr = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 3000);
+}
+
+function regenLoadNum() {
+  const n = Math.floor(Math.random() * 9000) + 1000;
+  document.getElementById('loadNumber').value = `LOAD-${n}`;
+}
+
+// ─── GEOCODE (TomTom) ──────────────────────────────────────
+let geocodeTimer = null;
+
+function scheduleGeocode() {
+  document.getElementById('destLat').value = '';
+  document.getElementById('destLng').value = '';
+  setBadge('', '');
+  clearTimeout(geocodeTimer);
+  const addr = document.getElementById('destAddress').value.trim();
+  if (addr.length < 5) return;
+  setBadge('searching', '...');
+  geocodeTimer = setTimeout(() => geocode(addr), 700);
+}
+
+function setBadge(type, text) {
+  const b = document.getElementById('geocodeBadge');
+  if (!type) { b.style.display = 'none'; return; }
+  b.style.display = 'inline-block';
+  b.className = `geocode-badge ${type}`;
+  b.textContent = text;
+}
+
+async function geocode(address) {
+  try {
+    const enc = encodeURIComponent(address);
+    const url = `https://api.tomtom.com/search/2/geocode/${enc}.json?key=${TOMTOM_KEY}&limit=1`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.results && data.results.length > 0) {
+      const pos = data.results[0].position;
+      document.getElementById('destLat').value = pos.lat;
+      document.getElementById('destLng').value = pos.lon;
+      setBadge('ok', '✓ ' + data.results[0].address.freeformAddress.split(',').slice(-2).join(',').trim());
+    } else {
+      setBadge('err', 'Não encontrado');
+    }
+  } catch (e) {
+    setBadge('err', 'Erro');
+  }
+}
+
+// ─── SEND LOAD ─────────────────────────────────────────────
+async function sendLoad() {
+  const driverId    = document.getElementById('driverId').value.trim();
+  const destAddress = document.getElementById('destAddress').value.trim();
+  const destLat     = parseFloat(document.getElementById('destLat').value);
+  const destLng     = parseFloat(document.getElementById('destLng').value);
+  const loadNumber  = document.getElementById('loadNumber').value.trim() || `LOAD-${Date.now()}`;
+
+  if (!driverId)    return toast('Informe o Driver ID do motorista', true);
+  if (!destAddress) return toast('Informe o endereço de destino', true);
+  if (!destLat || !destLng) return toast('Aguarde a geocodificação do endereço ou corrija-o', true);
+
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>  Enviando...';
+
+  const load = {
+    id:                   crypto.randomUUID(),
+    driver_id:            driverId,
+    load_number:          loadNumber,
+    origin_address:       document.getElementById('originAddress').value.trim() || 'Dispatch',
+    destination_address:  destAddress,
+    destination_lat:      destLat,
+    destination_lng:      destLng,
+    commodity:            document.getElementById('commodity').value || null,
+    weight_lbs:           parseFloat(document.getElementById('weightLbs').value) || null,
+    special_instructions: document.getElementById('instructions').value.trim() || null,
+    status:               'pending',
+    company_name:         document.getElementById('companyName').value.trim() || null,
+    valor_frete:          parseFloat(document.getElementById('valorFrete').value) || null,
+    preco_diesel_eia:     parseFloat(document.getElementById('precoDiesel').value) || null,
+  };
+
+  const { error } = await db.from('dispatched_loads').insert(load);
+
+  btn.disabled = false;
+  btn.innerHTML = 'Enviar Carga para Motorista';
+
+  if (error) {
+    console.error(error);
+    toast('Erro ao enviar: ' + error.message, true);
+    return;
+  }
+
+  toast(`✓ Carga ${loadNumber} enviada!`);
+  regenLoadNum();
+  document.getElementById('destAddress').value = '';
+  document.getElementById('destLat').value = '';
+  document.getElementById('destLng').value = '';
+  setBadge('', '');
+  document.getElementById('instructions').value = '';
+  loadLoads();
+}
+
+// ─── LOAD LIST ─────────────────────────────────────────────
+const STATUS_LABEL = {
+  pending:   { label: 'Pendente',      cls: 's-pending'   },
+  received:  { label: 'Recebida',      cls: 's-received'  },
+  en_route:  { label: 'Em Rota',       cls: 's-en_route'  },
+  delivered: { label: 'Entregue',      cls: 's-delivered' },
+  cancelled: { label: 'Cancelada',     cls: 's-cancelled' },
+};
+
+async function loadLoads() {
+  const grid = document.getElementById('loadsGrid');
+  grid.innerHTML = '<div class="empty-state"><span class="spinner"></span></div>';
+
+  const { data, error } = await db
+    .from('dispatched_loads')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(40);
+
+  if (error) {
+    grid.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div>${error.message}</div></div>`;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><div class="icon">🚛</div><div>Nenhuma carga ainda.<br>Use o formulário ao lado para enviar a primeira.</div></div>`;
+    return;
+  }
+
+  grid.innerHTML = data.map(d => {
+    const s = STATUS_LABEL[d.status] || { label: d.status, cls: 's-pending' };
+    const frete = d.valor_frete ? `$${Number(d.valor_frete).toFixed(2)}` : null;
+    const peso  = d.weight_lbs  ? `${Number(d.weight_lbs).toLocaleString()} lbs` : null;
+    const metas = [
+      frete && `<span>Frete <b>${frete}</b></span>`,
+      peso  && `<span>Peso <b>${peso}</b></span>`,
+      d.commodity && `<span><b>${d.commodity}</b></span>`,
+      d.company_name && `<span>🏢 <b>${d.company_name}</b></span>`,
+    ].filter(Boolean).join('');
+
+    const created = new Date(d.created_at).toLocaleString('pt-BR', {
+      day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'
+    });
+
+    return `
+      <div class="load-card">
+        <div class="load-card-header">
+          <div class="load-num">${d.load_number}</div>
+          <div class="status-chip ${s.cls}">${s.label}</div>
+        </div>
+        <div class="load-dest">
+          <div style="font-size:11px;margin-bottom:2px;color:var(--muted)">DESTINO</div>
+          <strong>${d.destination_address}</strong>
+        </div>
+        ${metas ? `<div class="load-meta">${metas}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:10px">${created}</div>
+      </div>`;
+  }).join('');
+}
+
+// ─── REALTIME (auto-refresh quando status muda) ────────────
+db.channel('dispatch-changes')
+  .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'dispatched_loads' },
+      () => loadLoads())
+  .subscribe();
+
+// ─── INIT ──────────────────────────────────────────────────
+regenLoadNum();
+loadLoads();
+</script>
+</body>
+</html>

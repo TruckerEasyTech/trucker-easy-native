@@ -1,0 +1,3 @@
+// Base configuration for Debug — includes CocoaPods, then optional local secrets.
+#include "../Pods/Target Support Files/Pods-trucker easy app/Pods-trucker easy app.debug.xcconfig"
+#include? "TruckerEasy.secrets.xcconfig"

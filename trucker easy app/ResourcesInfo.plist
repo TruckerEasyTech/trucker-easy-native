@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Location Permissions -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>We need your location to show your current position on the map and provide navigation to your destination.</string>
+    
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>We need your location to track your trips and provide geofencing alerts even when the app is in the background.</string>
+    
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>We need your location to track your trips and provide geofencing alerts.</string>
+    
+    <!-- Camera Permission -->
+    <key>NSCameraUsageDescription</key>
+    <string>We need camera access to scan receipts, documents, and capture images for expenses.</string>
+    
+    <!-- Photo Library Permission -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>We need photo library access to save and view receipts and document scans.</string>
+    
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>We need permission to save photos of receipts and documents to your photo library.</string>
+    
+    <!-- Background Modes -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+        <string>fetch</string>
+        <string>processing</string>
+    </array>
+    
+    <!-- Supported Interface Orientations (iPhone) -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    
+    <!-- Supported Interface Orientations (iPad) -->
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    
+    <!-- Localization -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <!-- Backend / APIs -->
+    <key>SupabaseURL</key>
+    <string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+
+    <key>SupabaseAnonKey</key>
+    <string>$(SupabaseAnonKey)</string>
+
+    <key>MapProvider</key>
+    <string>Mapbox</string>
+
+    <key>MBXAccessToken</key>
+    <string>$(MBXAccessToken)</string>
+
+    <key>OpenRouterAPIKey</key>
+    <string>$(OpenRouterAPIKey)</string>
+
+    <key>OpenWeatherMapAPIKey</key>
+    <string>$(OpenWeatherMapAPIKey)</string>
+
+    <key>EIAAPIKey</key>
+    <string></string>
+
+    <key>OPISAPIKey</key>
+    <string></string>
+    
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>es</string>
+        <string>pt-BR</string>
+        <string>fr-CA</string>
+    </array>
+    
+    <!-- Privacy -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+</dict>
+</plist>

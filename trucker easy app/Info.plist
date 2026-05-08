@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- ============================================ -->
+	<!-- API Keys for Truck Navigation               -->
+	<!-- ============================================ -->
+	
+	<!-- Valhalla self-hosted truck routing server (zero per-user cost).
+	     Demo: valhalla1.openstreetmap.de (rate-limited, for testing only).
+	     Production: replace with your own server URL after running docker setup. -->
+	<key>ValhallaServerURL</key>
+	<string>https://valhalla1.openstreetmap.de</string>
+
+	<!-- TollGuru API Key - Real toll costs on truck routes. Free at tollguru.com/developers -->
+	<key>TollGuruAPIKey</key>
+	<string>$(TollGuruAPIKey)</string>
+
+	<key>TomTomAPIKey</key>
+	<string>$(TomTomAPIKey)</string>
+	
+	<!-- Mapbox Access Token - For satellite maps and navigation -->
+	<key>MBXAccessToken</key>
+	<string>$(MBXAccessToken)</string>
+	
+		<!-- OpenRouter API Key - For AI chat fallback (optional - leave empty for on-device only) -->
+		<key>OpenRouterAPIKey</key>
+		<string>$(OpenRouterAPIKey)</string>
+		
+		<!-- OpenWeatherMap API Key - Real weather data -->
+		<key>OpenWeatherMapAPIKey</key>
+		<string>$(OpenWeatherMapAPIKey)</string>
+		
+		<!-- ELD / OBD integration -->
+		<key>ELDProviderBaseURL</key>
+		<string>$(ELDProviderBaseURL)</string>
+		<key>ELDProviderAPIKey</key>
+		<string>$(ELDProviderAPIKey)</string>
+		<key>ELDVehicleID</key>
+		<string>$(ELDVehicleID)</string>
+		<key>OBD2BLEDeviceName</key>
+		<string>$(OBD2BLEDeviceName)</string>
+		
+		<!-- Official jurisdiction policy API (state/province legal rules) -->
+		<key>JurisdictionPolicyAPIBaseURL</key>
+		<string>$(JurisdictionPolicyAPIBaseURL)</string>
+		<key>JurisdictionPolicyAPIKey</key>
+		<string>$(JurisdictionPolicyAPIKey)</string>
+		
+		<!-- Partner operational feed (parking/weigh in real-time) -->
+		<key>OperationalFeedAPIBaseURL</key>
+		<string>$(OperationalFeedAPIBaseURL)</string>
+		<key>OperationalFeedAPIKey</key>
+		<string>$(OperationalFeedAPIKey)</string>
+		
+		<!-- ============================================ -->
+		<!-- Location Permissions                         -->
+		<!-- ============================================ -->
+	
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trucker Easy needs your location to show your position on the map, calculate truck routes with height and weight restrictions, find nearby truck stops, and provide turn-by-turn navigation.</string>
+	
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Trucker Easy needs your location always to track your trips automatically, monitor Hours of Service (HOS) compliance, and provide navigation alerts even when the app is in the background.</string>
+	
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Trucker Easy needs your location always to track your trips automatically and monitor HOS compliance.</string>
+	
+	<!-- ============================================ -->
+	<!-- Background Modes                             -->
+	<!-- ============================================ -->
+	
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+		<string>remote-notification</string>
+	</array>
+	
+	<!-- ============================================ -->
+	<!-- Other Permissions                            -->
+	<!-- ============================================ -->
+	
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Trucker Easy needs access to your photo library to save receipts, documents, and truck photos.</string>
+	
+	<key>NSCameraUsageDescription</key>
+	<string>Trucker Easy needs camera access to scan receipts and documents, and to take photos of your truck for records.</string>
+	
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Trucker Easy needs microphone access for voice commands while driving, so you can navigate hands-free safely.</string>
+	
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Trucker Easy uses speech recognition for voice commands, allowing you to enter destinations and control navigation hands-free.</string>
+	
+	<key>NSMotionUsageDescription</key>
+	<string>Trucker Easy uses motion sensors to detect when you're driving and automatically track your trips for HOS compliance.</string>
+	
+	<!-- ============================================ -->
+	<!-- App Transport Security                       -->
+	<!-- ============================================ -->
+	
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<!-- Allow Valhalla routing (OSM public demo + your own server) -->
+			<key>valhalla1.openstreetmap.de</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+			<!-- Allow OpenRouter API -->
+			<key>openrouter.ai</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+	
+	<!-- ============================================ -->
+	<!-- Privacy - Health (for HOS fatigue tracking) -->
+	<!-- ============================================ -->
+	
+	<key>NSHealthShareUsageDescription</key>
+	<string>Trucker Easy can integrate with Apple Health to monitor your wellness and fatigue levels for safer driving.</string>
+	
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Trucker Easy can save your wellness data to Apple Health for comprehensive health tracking.</string>
+	
+	<!-- ============================================ -->
+	<!-- App Configuration                            -->
+	<!-- ============================================ -->
+	
+	<!-- ============================================ -->
+	<!-- Supabase Configuration                       -->
+	<!-- ============================================ -->
+
+	<key>SupabaseURL</key>
+	<string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+
+	<key>SupabaseAnonKey</key>
+	<string>$(SupabaseAnonKey)</string>
+
+	<key>CFBundleDisplayName</key>
+	<string>Trucker Easy</string>
+
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+
+	<key>CFBundleVersion</key>
+	<string>1</string>
+
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+
+	<!-- REQUIRED: Tells Apple this app uses standard HTTPS only (no custom encryption) -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- Supported orientations: portrait only (safer for truck drivers) -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	
+	<!-- ============================================ -->
+	<!-- Supported Features                           -->
+	<!-- ============================================ -->
+	
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+		<string>gps</string>
+		<string>location-services</string>
+	</array>
+	
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+	</dict>
+	
+	<!-- ============================================ -->
+	<!-- URL Schemes (for deep linking)              -->
+	<!-- ============================================ -->
+	
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>truckereasy</string>
+			</array>
+		</dict>
+	</array>
+	
+</dict>
+</plist>

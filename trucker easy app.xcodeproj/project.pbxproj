@@ -1,0 +1,586 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		54054F4B2F7B76E8002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh in Resources */ = {isa = PBXBuildFile; fileRef = 54054F4A2F7B76E7002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh */; };
+		5498D2172F57A255007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
+		5498D2182F57A255007240ED /* heresdk.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		5498D21A2F57A3EE007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
+		5498D21B2F57A3FF007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
+		5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 5498D4AB2F527E73007240ED /* MapboxMaps */; };
+		6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		CP020202020202020202020202 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CP0101010101010101010101 /* Pods.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = B2184AD21D57758870A00DD6DB06DE5D;
+			remoteInfo = "Pods-trucker easy app";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5498D2192F57A255007240ED /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				5498D2182F57A255007240ED /* heresdk.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_trucker_easy_app.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		374E84DEADFE6F30D2046790 /* Pods-trucker easy app.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-trucker easy app.debug.xcconfig"; path = "Target Support Files/Pods-trucker easy app/Pods-trucker easy app.debug.xcconfig"; sourceTree = "<group>"; };
+		54001A132F62232600AF51DC /* ViewsTruckStopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsTruckStopView.swift; sourceTree = "<group>"; };
+		54001A182F6389FF00AF51DC /* ViewsSplashScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsSplashScreen.swift; sourceTree = "<group>"; };
+		54001A1A2F638A4400AF51DC /* ViewsStopsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsStopsView.swift; sourceTree = "<group>"; };
+		54001A1C2F638A8B00AF51DC /* ViewsReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsReportView.swift; sourceTree = "<group>"; };
+		54001A1E2F6394B500AF51DC /* AppEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEntryView.swift; sourceTree = "<group>"; };
+		54001A202F6394E300AF51DC /* WelcomeOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeOnboardingView.swift; sourceTree = "<group>"; };
+		54001A222F639A4C00AF51DC /* TruckSignsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TruckSignsView.swift; sourceTree = "<group>"; };
+		54001A242F63D38200AF51DC /* ViewsDriverProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsDriverProfileView.swift; sourceTree = "<group>"; };
+		54001A262F63D4BE00AF51DC /* UtilitiesDotHOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilitiesDotHOS.swift; sourceTree = "<group>"; };
+		54001A2C2F70A21800AF51DC /* ServicesStoreKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesStoreKitManager.swift; sourceTree = "<group>"; };
+		54001AA02F73862400AF51DC /* UtilitiesVoiceNavigationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilitiesVoiceNavigationManager.swift; sourceTree = "<group>"; };
+		54054F4A2F7B76E7002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = REMOVER_ARQUIVOS_EXAMPLES.sh; sourceTree = "<group>"; };
+		54819BEA2F7CCEA90073DAD8 /* UtilitiesCountryComplianceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilitiesCountryComplianceManager.swift; sourceTree = "<group>"; };
+		54819BEC2F7CD52A0073DAD8 /* ServicesFleetTelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesFleetTelemetryService.swift; sourceTree = "<group>"; };
+		54819BEE2F7CD52B0073DAD8 /* ServicesJurisdictionPolicyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesJurisdictionPolicyService.swift; sourceTree = "<group>"; };
+		54819BF02F7CD52B0073DAD8 /* ServicesOperationalFeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesOperationalFeedService.swift; sourceTree = "<group>"; };
+		5498CBE32F527E73007240ED /* trucker easy app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "trucker easy app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5498D2162F57A255007240ED /* heresdk.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = heresdk.xcframework; path = ../heresdk.xcframework; sourceTree = "<group>"; };
+		5498D5A02F527E73007240ED /* TruckerEasy.debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TruckerEasy.debug.xcconfig; sourceTree = "<group>"; };
+		5498D5A12F527E73007240ED /* TruckerEasy.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TruckerEasy.release.xcconfig; sourceTree = "<group>"; };
+		7D152D24639292788573B949 /* Pods-trucker easy app.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-trucker easy app.release.xcconfig"; path = "Target Support Files/Pods-trucker easy app/Pods-trucker easy app.release.xcconfig"; sourceTree = "<group>"; };
+		CP0101010101010101010101 /* Pods.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = Pods.xcodeproj; path = Pods/Pods.xcodeproj; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		54819AD42F7B786B0073DAD8 /* Exceptions for "trucker easy app" folder in "trucker easy app" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5498CBE22F527E73007240ED /* trucker easy app */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		5498CBE52F527E73007240ED /* trucker easy app */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				54819AD42F7B786B0073DAD8 /* Exceptions for "trucker easy app" folder in "trucker easy app" target */,
+			);
+			path = "trucker easy app";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5498CBE02F527E73007240ED /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5498D21B2F57A3FF007240ED /* heresdk.xcframework in Frameworks */,
+				5498D2172F57A255007240ED /* heresdk.xcframework in Frameworks */,
+				5498D21A2F57A3EE007240ED /* heresdk.xcframework in Frameworks */,
+				6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */,
+				5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5498CBDA2F527E73007240ED = {
+			isa = PBXGroup;
+			children = (
+				5498CBE52F527E73007240ED /* trucker easy app */,
+				5498D5B02F527E73007240ED /* Config */,
+				5498D2142F57A04B007240ED /* Frameworks */,
+				5498CBE42F527E73007240ED /* Products */,
+				54001A132F62232600AF51DC /* ViewsTruckStopView.swift */,
+				54001A182F6389FF00AF51DC /* ViewsSplashScreen.swift */,
+				54001A1A2F638A4400AF51DC /* ViewsStopsView.swift */,
+				54001A1C2F638A8B00AF51DC /* ViewsReportView.swift */,
+				54001A1E2F6394B500AF51DC /* AppEntryView.swift */,
+				54001A202F6394E300AF51DC /* WelcomeOnboardingView.swift */,
+				54001A222F639A4C00AF51DC /* TruckSignsView.swift */,
+				54001A242F63D38200AF51DC /* ViewsDriverProfileView.swift */,
+				54001A262F63D4BE00AF51DC /* UtilitiesDotHOS.swift */,
+				54001A2C2F70A21800AF51DC /* ServicesStoreKitManager.swift */,
+				54001AA02F73862400AF51DC /* UtilitiesVoiceNavigationManager.swift */,
+				54054F4A2F7B76E7002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh */,
+				54819BEA2F7CCEA90073DAD8 /* UtilitiesCountryComplianceManager.swift */,
+				54819BEC2F7CD52A0073DAD8 /* ServicesFleetTelemetryService.swift */,
+				54819BEE2F7CD52B0073DAD8 /* ServicesJurisdictionPolicyService.swift */,
+				54819BF02F7CD52B0073DAD8 /* ServicesOperationalFeedService.swift */,
+				ACE6138ACA1BC6E32A4ABE85 /* Pods */,
+				CP0101010101010101010101 /* Pods.xcodeproj */,
+			);
+			sourceTree = "<group>";
+		};
+		5498CBE42F527E73007240ED /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5498CBE32F527E73007240ED /* trucker easy app.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5498D2142F57A04B007240ED /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5498D2162F57A255007240ED /* heresdk.xcframework */,
+				5498D2152F57A04C007240ED /* frameworks */,
+				24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		5498D2152F57A04C007240ED /* frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = frameworks;
+			sourceTree = "<group>";
+		};
+		5498D5B02F527E73007240ED /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				5498D5A02F527E73007240ED /* TruckerEasy.debug.xcconfig */,
+				5498D5A12F527E73007240ED /* TruckerEasy.release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		54DFF6562FA6A09A00F67D66 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		ACE6138ACA1BC6E32A4ABE85 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				374E84DEADFE6F30D2046790 /* Pods-trucker easy app.debug.xcconfig */,
+				7D152D24639292788573B949 /* Pods-trucker easy app.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		5498CBE22F527E73007240ED /* trucker easy app */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5498CC062F527E75007240ED /* Build configuration list for PBXNativeTarget "trucker easy app" */;
+			buildPhases = (
+				CCA6FE8194E35228A811F18A /* [CP] Check Pods Manifest.lock */,
+				5498CBDF2F527E73007240ED /* Sources */,
+				5498CBE02F527E73007240ED /* Frameworks */,
+				5498CBE12F527E73007240ED /* Resources */,
+				5498D2192F57A255007240ED /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CP030303030303030303030303 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				5498CBE52F527E73007240ED /* trucker easy app */,
+			);
+			name = "trucker easy app";
+			packageProductDependencies = (
+				5498D4AB2F527E73007240ED /* MapboxMaps */,
+			);
+			productName = "trucker easy app";
+			productReference = 5498CBE32F527E73007240ED /* trucker easy app.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5498CBDB2F527E73007240ED /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					5498CBE22F527E73007240ED = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = 5498CBDE2F527E73007240ED /* Build configuration list for PBXProject "trucker easy app" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 5498CBDA2F527E73007240ED;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				54001A992F72F20200AF51DC /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5498CBE42F527E73007240ED /* Products */;
+			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 54DFF6562FA6A09A00F67D66 /* Products */;
+					ProjectRef = CP0101010101010101010101 /* Pods.xcodeproj */;
+				},
+			);
+			projectRoot = "";
+			targets = (
+				5498CBE22F527E73007240ED /* trucker easy app */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5498CBE12F527E73007240ED /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54054F4B2F7B76E8002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CCA6FE8194E35228A811F18A /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-trucker easy app-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5498CBDF2F527E73007240ED /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CP030303030303030303030303 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Pods-trucker easy app";
+			targetProxy = CP020202020202020202020202 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		5498CC042F527E75007240ED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = V28A2H52N2;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		5498CC052F527E75007240ED /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = V28A2H52N2;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		5498CC072F527E75007240ED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5498D5A02F527E73007240ED /* TruckerEasy.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy app.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = 5K8B4JY4WT;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "trucker-easy-app-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy uses the camera to scan receipts and truck documents.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trucker Easy can read Apple Health data to estimate fatigue and suggest safer rest timing.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trucker Easy can write wellness records to Apple Health when you enable this option.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy needs background location to track trips, monitor HOS, and issue route safety alerts while driving.";
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Trucker Easy needs location access to keep truck trip and compliance tracking active.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location to show your position on the map, calculate truck routes with restrictions, and guide navigation safely.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy uses the microphone for hands-free voice commands while driving.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Trucker Easy uses motion sensors to improve trip detection and driving status.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Trucker Easy saves captured receipt and document images to your library when requested.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy uses your photo library to attach receipts and documents.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition for voice navigation commands.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arm64 gps location-services";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.thais.truckereasy.trucker-easy-app";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5498CC082F527E75007240ED /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5498D5A12F527E73007240ED /* TruckerEasy.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy appRelease.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = 5K8B4JY4WT;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "trucker-easy-app-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy uses the camera to scan receipts and truck documents.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trucker Easy can read Apple Health data to estimate fatigue and suggest safer rest timing.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trucker Easy can write wellness records to Apple Health when you enable this option.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy needs background location to track trips, monitor HOS, and issue route safety alerts while driving.";
+				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Trucker Easy needs location access to keep truck trip and compliance tracking active.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location to show your position on the map, calculate truck routes with restrictions, and guide navigation safely.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy uses the microphone for hands-free voice commands while driving.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Trucker Easy uses motion sensors to improve trip detection and driving status.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Trucker Easy saves captured receipt and document images to your library when requested.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy uses your photo library to attach receipts and documents.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition for voice navigation commands.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arm64 gps location-services";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.thais.truckereasy.trucker-easy-app";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5498CBDE2F527E73007240ED /* Build configuration list for PBXProject "trucker easy app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5498CC042F527E75007240ED /* Debug */,
+				5498CC052F527E75007240ED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5498CC062F527E75007240ED /* Build configuration list for PBXNativeTarget "trucker easy app" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5498CC072F527E75007240ED /* Debug */,
+				5498CC082F527E75007240ED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		54001A992F72F20200AF51DC /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+		5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 11.22.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5498D4AB2F527E73007240ED /* MapboxMaps */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
+			productName = MapboxMaps;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 5498CBDB2F527E73007240ED /* Project object */;
+}

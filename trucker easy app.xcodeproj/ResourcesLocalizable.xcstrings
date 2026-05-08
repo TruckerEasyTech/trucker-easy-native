@@ -1,0 +1,18 @@
+{
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "Placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Placeholder" } },
+        "pt-BR": { "stringUnit": { "state": "translated", "value": "Substituto" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Marcador" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Espace réservé" } },
+        "fr-CA": { "stringUnit": { "state": "translated", "value": "Espace réservé" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Platzhalter" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Segnaposto" } }
+      }
+    }
+  }
+}

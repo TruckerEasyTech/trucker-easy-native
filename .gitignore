@@ -1,0 +1,22 @@
+# Local secrets (never commit)
+Config/TruckerEasy.secrets.xcconfig
+
+# Xcode / SPM / build caches in repo folder
+.derivedData*/
+*.xcuserstate
+
+# Cursor / local tooling
+.cursor/
+
+# Copied DerivedData inside repo (if present)
+.xcodeDerivedData/
+
+# Env files (backend / scripts)
+.env
+.env.*
+!.env.example
+
+# Node (if any tooling added later)
+node_modules/
+dist/
+build/

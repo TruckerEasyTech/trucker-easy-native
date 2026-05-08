@@ -1,0 +1,124 @@
+//
+//  Info.plist Configuration
+//  Trucker Easy
+//
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Configuration -->
+    <key>CFBundleDisplayName</key>
+    <string>Trucker Easy</string>
+    
+    <key>CFBundleIdentifier</key>
+    <string>com.driverfordriver.truckereasy</string>
+    
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    
+    <!-- Permissions -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Trucker Easy needs your location for truck navigation and real-time community alerts on the road.</string>
+    
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.</string>
+    
+    <key>NSCameraUsageDescription</key>
+    <string>Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.</string>
+    
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Trucker Easy needs photo access to upload document images to your secure digital vault.</string>
+    
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.</string>
+    
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.</string>
+    
+    <!-- Background Modes -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>
+        <string>audio</string>
+        <string>remote-notification</string>
+    </array>
+    
+    <!-- Supported Interface Orientations (iPhone) -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    
+    <!-- Appearance -->
+    <key>UIUserInterfaceStyle</key>
+    <string>Automatic</string>
+    
+    <!-- Maps Configuration -->
+    <key>MKDirectionsApplicationSupportedModes</key>
+    <array>
+        <string>MKDirectionsModeTruck</string>
+    </array>
+    
+    <!-- Launch Screen -->
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIImageName</key>
+        <string>LaunchIcon</string>
+        <key>UIColorName</key>
+        <string>TruckerOrange</string>
+    </dict>
+    
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <!-- Allow HERE Maps API -->
+            <key>router.hereapi.com</key>
+            <dict>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <false/>
+            </dict>
+            <!-- Allow NewsAPI -->
+            <key>newsapi.org</key>
+            <dict>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                <false/>
+            </dict>
+        </dict>
+    </dict>
+    
+    <!-- Localization -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>es</string>
+        <string>pt-BR</string>
+    </array>
+    
+    <!-- Notifications -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
+    
+    <!-- App Category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.navigation</string>
+</dict>
+</plist>
