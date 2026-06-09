@@ -5,7 +5,7 @@
 	<key>AgoraAppID</key>
 	<string>$(AgoraAppID)</string>
 	<key>ValhallaServerURL</key>
-	<string>https://valhalla1.openstreetmap.de</string>
+	<string>$(ValhallaServerURL)</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>

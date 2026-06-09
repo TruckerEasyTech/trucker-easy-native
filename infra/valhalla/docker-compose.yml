@@ -1,0 +1,20 @@
+services:
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    restart: unless-stopped
+    ports:
+      - "${VALHALLA_PORT:-8002}:8002"
+    volumes:
+      - ./data:/custom_files
+    environment:
+      # Build tiles on first start when no tile archive exists.
+      build_tiles: "True"
+      force_rebuild: "${VALHALLA_FORCE_REBUILD:-False}"
+      serve_tiles: "True"
+      server_threads: "${VALHALLA_SERVER_THREADS:-4}"
+      use_tiles_ignore_pbf: "True"
+      use_default_speeds_config: "True"
+      tileset_name: "truckereasy"
+      # Put the target .osm.pbf filename in infra/valhalla/data before starting.
+      path_extension: "osm.pbf"
+      mjolnir_timezone: "America/New_York"

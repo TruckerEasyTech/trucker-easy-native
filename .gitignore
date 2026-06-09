@@ -16,6 +16,9 @@ Config/TruckerEasy.secrets.xcconfig
 .env.*
 !.env.example
 
+# Valhalla map extracts / generated tiles
+infra/valhalla/data/
+
 # Node (if any tooling added later)
 node_modules/
 dist/
