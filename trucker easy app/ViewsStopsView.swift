@@ -313,7 +313,7 @@ struct StopsView: View {
                     let itemName = item.name ?? "Unknown"
                     switch selectedCategory {
                     case .weighStations:
-                        switch weighStationService.latestStatus(for: itemName) {
+                        switch weighStationService.latestStatus(for: itemName, near: coord) {
                         case .open:       avail = .open
                         case .closed:     avail = .closed
                         case .monitoring: avail = .limited
@@ -330,10 +330,8 @@ struct StopsView: View {
                         distanceMiles: distMi,
                         category: selectedCategory,
                         availability: avail,
-                        rating: selectedCategory == .restaurants || selectedCategory == .truckStops
-                            ? Double.random(in: 2.5...5.0).rounded(toPlaces: 1)
-                            : nil,
-                        reviewCount: Int.random(in: 1...250),
+                        rating: nil,
+                        reviewCount: 0,
                         coordinate: coord
                     )
                 }

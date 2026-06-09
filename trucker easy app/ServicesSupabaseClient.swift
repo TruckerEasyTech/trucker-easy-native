@@ -10,8 +10,15 @@ enum SupabaseConfig {
     private static let defaultProjectURL = "https://qhwuwiiwdzqkjzjqgpvx.supabase.co"
     private static let placeholderAnonKey = "YOUR_SUPABASE_ANON_KEY"
 
+    private static func configuredInfoValue(_ key: String) -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("$(") else { return nil }
+        return trimmed
+    }
+
     static var projectRef: String {
-        if let configuredURL = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String,
+        if let configuredURL = configuredInfoValue("SupabaseURL"),
            let host = URL(string: configuredURL)?.host,
            let ref = host.split(separator: ".").first,
            !ref.isEmpty {
@@ -21,8 +28,7 @@ enum SupabaseConfig {
     }
 
     static var projectURL: String {
-        if let configured = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String,
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let configured = configuredInfoValue("SupabaseURL") {
             return configured
         }
         return defaultProjectURL
@@ -33,8 +39,7 @@ enum SupabaseConfig {
     }
 
     static var anonKey: String {
-        if let configured = Bundle.main.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String,
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let configured = configuredInfoValue("SupabaseAnonKey") {
             return configured
         }
         return placeholderAnonKey

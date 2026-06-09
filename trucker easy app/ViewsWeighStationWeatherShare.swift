@@ -106,8 +106,22 @@ final class WeighStationStatusService {
     private(set) var reports: [String: [WeighStationReport]] = [:]
     private(set) var isSyncing = false
     private var partnerOverrides: [String: (status: WeighStationStatus, updatedAt: Date)] = [:]
+    private var partnerLocationOverrides: [(name: String, status: WeighStationStatus, coordinate: CLLocationCoordinate2D, updatedAt: Date)] = []
 
-    func latestStatus(for stationName: String) -> WeighStationStatus? {
+    func latestStatus(for stationName: String, near coordinate: CLLocationCoordinate2D? = nil) -> WeighStationStatus? {
+        if let coordinate = coordinate {
+            let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            var nearest: (status: WeighStationStatus, distance: CLLocationDistance)?
+            for override in partnerLocationOverrides where Date().timeIntervalSince(override.updatedAt) <= 900 {
+                let target = CLLocation(latitude: override.coordinate.latitude, longitude: override.coordinate.longitude)
+                let distance = origin.distance(from: target)
+                guard distance <= 2_000 else { continue }
+                if nearest == nil || distance < nearest!.distance {
+                    nearest = (override.status, distance)
+                }
+            }
+            if let nearest = nearest { return nearest.status }
+        }
         if let partner = partnerOverrides[stationName],
            Date().timeIntervalSince(partner.updatedAt) <= 900 {
             return partner.status
@@ -115,8 +129,26 @@ final class WeighStationStatusService {
         return reports[stationName]?.first?.status
     }
 
-    func setPartnerStatus(_ status: WeighStationStatus, for stationName: String, updatedAt: Date = Date()) {
+    func setPartnerStatus(
+        _ status: WeighStationStatus,
+        for stationName: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        updatedAt: Date = Date()
+    ) {
         partnerOverrides[stationName] = (status, updatedAt)
+        if let latitude = latitude, let longitude = longitude {
+            let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            partnerLocationOverrides.removeAll {
+                CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+                    .distance(from: CLLocation(latitude: latitude, longitude: longitude)) <= 250
+            }
+            partnerLocationOverrides.append((stationName, status, coordinate, updatedAt))
+            partnerLocationOverrides = partnerLocationOverrides
+                .filter { Date().timeIntervalSince($0.updatedAt) <= 900 }
+                .suffix(100)
+                .map { $0 }
+        }
     }
 
     /// Submit a report locally and sync to Supabase backend

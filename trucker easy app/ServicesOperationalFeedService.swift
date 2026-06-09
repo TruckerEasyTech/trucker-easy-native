@@ -3,12 +3,18 @@ import CoreLocation
 import Observation
 
 private enum OperationalFeedConfig {
+    private static func configuredValue(for key: String) -> String {
+        let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.hasPrefix("$(") ? "" : value
+    }
+
     static var baseURL: String {
-        Bundle.main.object(forInfoDictionaryKey: "OperationalFeedAPIBaseURL") as? String ?? ""
+        configuredValue(for: "OperationalFeedAPIBaseURL")
     }
 
     static var apiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "OperationalFeedAPIKey") as? String ?? ""
+        configuredValue(for: "OperationalFeedAPIKey")
     }
 
     static var isConfigured: Bool {
@@ -16,7 +22,7 @@ private enum OperationalFeedConfig {
     }
 
     static var providerURLs: [String] {
-        let raw = Bundle.main.object(forInfoDictionaryKey: "OperationalFeedProviderURLs") as? String ?? ""
+        let raw = configuredValue(for: "OperationalFeedProviderURLs")
         return raw
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -114,6 +120,8 @@ final class OperationalFeedService {
             service.setPartnerStatus(
                 status,
                 for: signal.stationName,
+                latitude: signal.latitude,
+                longitude: signal.longitude,
                 updatedAt: signal.updatedAt ?? Date()
             )
         }

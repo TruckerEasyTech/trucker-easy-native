@@ -326,7 +326,12 @@ struct HorizonView: View {
                             await countryCompliance.refreshIfNeeded(for: loc)
                             await jurisdictionPolicyService.refreshIfNeeded(for: loc)
                             await operationalFeedService.refreshIfNeeded(for: loc.coordinate)
-                            await MainActor.run { syncRegionalPolicyFromLocation() }
+                            await MainActor.run {
+                                syncRegionalPolicyFromLocation()
+                                operationalFeedService.applyWeighSignals()
+                                truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
+                                refreshNearestParking(from: loc)
+                            }
                         }
                         Task { await weatherService.refresh(for: loc.coordinate) }
                     }
@@ -1529,6 +1534,8 @@ struct HorizonView: View {
                 await MainActor.run {
                     syncRegionalPolicyFromLocation()
                     operationalFeedService.applyWeighSignals()
+                    truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
+                    refreshNearestParking(from: loc)
                 }
             }
         }
@@ -2112,7 +2119,7 @@ struct HorizonView: View {
             let distMiles = distMeters / 1609.34; let stationName = nearestItem.name ?? "Weigh Station"
             let weighService = WeighStationStatusService.shared
             await weighService.fetchRemoteReports()
-            let liveStatus = weighService.latestStatus(for: stationName)
+            let liveStatus = weighService.latestStatus(for: stationName, near: nearestItem.location.coordinate)
             await MainActor.run {
                 scaleAlertName = stationName; scaleAlertDistanceMiles = distMiles
                 switch liveStatus {
