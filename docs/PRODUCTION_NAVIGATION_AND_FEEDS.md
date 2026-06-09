@@ -80,6 +80,14 @@ supabase link --project-ref qhwuwiiwdzqkjzjqgpvx
 supabase functions deploy ops-feed
 ```
 
+For headless/CI environments, configure:
+
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_PROJECT_REF`
+
+Then use `.github/workflows/deploy-supabase-functions.yml` or the MCP template in `.mcp.example.json`.
+See `docs/SUPABASE_HEADLESS_MCP.md`.
+
 Optional partner feed secrets:
 
 ```bash
@@ -139,7 +147,7 @@ Expected:
 
 ## 4. What still requires external operations
 
-- Deploying the Valhalla host on real infrastructure.
-- Deploying the Supabase Edge Function to the live Supabase project.
+- Running `infra/valhalla/provision_valhalla.sh` on the Docker-capable Valhalla host.
+- Deploying the Supabase Edge Function to the live Supabase project via Dashboard, local Supabase CLI, or GitHub Actions.
 - Adding partner/state feed URLs and credentials.
 - Running the iPhone smoke test on real hardware.
