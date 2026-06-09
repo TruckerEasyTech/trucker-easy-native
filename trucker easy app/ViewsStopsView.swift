@@ -287,8 +287,11 @@ struct StopsView: View {
                 span: MKCoordinateSpan(latitudeDelta: 0.4, longitudeDelta: 0.4)
             )
             let items = (try? await MKLocalSearch(request: request).start())?.mapItems ?? []
+            let officialStations = selectedCategory == .weighStations
+                ? await OfficialWeighStationDirectoryService.shared.nearbyStations(near: location.coordinate, radiusMeters: 80_000)
+                : []
             await MainActor.run {
-                stops = items.prefix(20).compactMap { item in
+                var loadedStops = items.prefix(20).compactMap { item -> StopItem? in
                     let coord: CLLocationCoordinate2D
                     let addr: String
                     if #available(iOS 26, *) {
@@ -335,7 +338,35 @@ struct StopsView: View {
                         coordinate: coord
                     )
                 }
-                .sorted { $0.distanceMiles < $1.distanceMiles }
+                if selectedCategory == .weighStations {
+                    for station in officialStations {
+                        let isDuplicate = loadedStops.contains {
+                            CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+                                .distance(from: CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)) < 500
+                        }
+                        guard !isDuplicate else { continue }
+                        let stationLocation = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+                        let status = weighStationService.latestStatus(for: station.name, near: station.coordinate)
+                        let availability: StopItem.StopAvailability
+                        switch status {
+                        case .open: availability = .open
+                        case .closed: availability = .closed
+                        case .monitoring: availability = .limited
+                        case nil: availability = .unknown
+                        }
+                        loadedStops.append(StopItem(
+                            name: station.stateCode.map { "\(station.name) · \($0)" } ?? station.name,
+                            address: station.source,
+                            distanceMiles: location.distance(from: stationLocation) / 1609.34,
+                            category: .weighStations,
+                            availability: availability,
+                            rating: nil,
+                            reviewCount: 0,
+                            coordinate: station.coordinate
+                        ))
+                    }
+                }
+                stops = loadedStops.sorted { $0.distanceMiles < $1.distanceMiles }.prefix(30).map { $0 }
                 isLoading = false
             }
         }

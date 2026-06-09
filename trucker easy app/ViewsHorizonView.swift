@@ -161,6 +161,7 @@ struct HorizonView: View {
     @State private var hasShownMoodAtDuskToday = false
     @State private var lastSpeedCheckDate: Date = .distantPast
     @State private var speedMonitorTimer: Timer? = nil
+    @State private var gpsWatchdogTimer: Timer? = nil
     @AppStorage("lastMoodCheckDate") private var lastMoodCheckDateString: String = ""
     @AppStorage("lastCheckInDate") private var lastCheckInDateStr: String = ""
 
@@ -345,6 +346,7 @@ struct HorizonView: View {
                     }
                 }
                 startSpeedMonitoringForDusk()
+                startGPSWatchdog()
                 Task { await fetchPendingDispatchLoads() }
                 let hos = regionalSettings.hosRules
                 hosContext.updateRules(maxDriving: hos.maxDrivingHours, serviceWindow: hos.serviceWindowHours,
@@ -352,6 +354,7 @@ struct HorizonView: View {
             }
             .onDisappear {
                 locationManager.stopTracking(); speedMonitorTimer?.invalidate(); speedMonitorTimer = nil
+                gpsWatchdogTimer?.invalidate(); gpsWatchdogTimer = nil
                 UIApplication.shared.isIdleTimerDisabled = false
                 mapAlerts.removeAll(); dismissedRestrictionIds.removeAll(); truckWarnings = []
                 URLCache.shared.removeAllCachedResponses()
@@ -2053,6 +2056,16 @@ struct HorizonView: View {
         withAnimation(.spring(response: 0.5)) { showingCheapestDiesel = true }
     }
 
+    private func startGPSWatchdog() {
+        gpsWatchdogTimer?.invalidate()
+        gpsWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
+            locationManager.ensureTracking(
+                reason: isNavigating ? "active-navigation" : "horizon-map",
+                staleAfter: isNavigating ? 12 : 25
+            )
+        }
+    }
+
     private func refreshNearestParking(from location: CLLocation) {
         Task {
             let request = MKLocalSearch.Request()
@@ -2091,20 +2104,40 @@ struct HorizonView: View {
                 let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
                 allItems.append(contentsOf: items)
             }
+            let officialStations = await OfficialWeighStationDirectoryService.shared.nearbyStations(
+                near: location.coordinate,
+                radiusMeters: 24_140
+            )
             var deduped: [MKMapItem] = []
             for item in allItems {
                 let loc = item.location
                 if !deduped.contains(where: { $0.location.distance(from: loc) < 500 }) { deduped.append(item) }
             }
+            var candidates: [(name: String, coordinate: CLLocationCoordinate2D, distance: CLLocationDistance)] = deduped.map { item in
+                let coord = item.location.coordinate
+                let dist = location.distance(from: item.location)
+                return (item.name ?? "Weigh Station", coord, dist)
+            }
+            for station in officialStations {
+                let stationLocation = CLLocation(latitude: station.coordinate.latitude, longitude: station.coordinate.longitude)
+                let distance = location.distance(from: stationLocation)
+                let isDuplicate = candidates.contains {
+                    CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+                        .distance(from: stationLocation) < 500
+                }
+                if !isDuplicate {
+                    let stateSuffix = station.stateCode.map { " · \($0)" } ?? ""
+                    candidates.append(("\(station.name)\(stateSuffix)", station.coordinate, distance))
+                }
+            }
             let heading = locationManager.currentHeading?.trueHeading
-            let nearest = deduped.map { item in
-                let itemLoc = item.location; let dist = location.distance(from: itemLoc)
+            let nearest = candidates.map { candidate in
                 let isAhead: Bool
-                if let heading { let diff = abs(angleDeltaDegrees(heading, location.coordinate.bearing(to: itemLoc.coordinate))); isAhead = diff <= 70 }
+                if let heading = heading { let diff = abs(angleDeltaDegrees(heading, location.coordinate.bearing(to: candidate.coordinate))); isAhead = diff <= 70 }
                 else { isAhead = true }
-                return (item, dist, isAhead)
+                return (candidate, candidate.distance, isAhead)
             }.filter { $0.2 }.filter { $0.1 < 24_140 }.sorted { $0.1 < $1.1 }.first
-            guard let (nearestItem, distMeters, _) = nearest else {
+            guard let (nearestCandidate, distMeters, _) = nearest else {
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
                 }
@@ -2116,10 +2149,10 @@ struct HorizonView: View {
                 }
                 return
             }
-            let distMiles = distMeters / 1609.34; let stationName = nearestItem.name ?? "Weigh Station"
+            let distMiles = distMeters / 1609.34; let stationName = nearestCandidate.name
             let weighService = WeighStationStatusService.shared
             await weighService.fetchRemoteReports()
-            let liveStatus = weighService.latestStatus(for: stationName, near: nearestItem.location.coordinate)
+            let liveStatus = weighService.latestStatus(for: stationName, near: nearestCandidate.coordinate)
             await MainActor.run {
                 scaleAlertName = stationName; scaleAlertDistanceMiles = distMiles
                 switch liveStatus {

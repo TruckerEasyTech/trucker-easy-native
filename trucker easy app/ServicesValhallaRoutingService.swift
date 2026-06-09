@@ -45,11 +45,24 @@ final class ValhallaRoutingService {
     // Read the self-hosted Valhalla server URL from Info.plist.
     // Add key "ValhallaServerURL" with your server's base URL.
     var serverURL: String {
-        Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURL") as? String ?? ""
+        let value = (Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURL") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !value.hasPrefix("$(") else { return "" }
+        return value
     }
 
     var isAvailable: Bool {
-        !serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        routeURL != nil
+    }
+
+    var isDemoServer: Bool {
+        serverURL.contains("valhalla1.openstreetmap.de")
+    }
+
+    private var routeURL: URL? {
+        guard !serverURL.isEmpty else { return nil }
+        let normalized = serverURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(normalized)/route")
     }
 
     // MARK: - Calculate Truck Route
@@ -63,11 +76,10 @@ final class ValhallaRoutingService {
         profile: TruckProfile,
         avoidTolls: Bool = false
     ) async throws -> TruckRoute {
-        guard isAvailable else {
+        guard let url = routeURL else {
             throw ValhallaError.serverNotConfigured
         }
 
-        let url = URL(string: "\(serverURL)/route")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -78,6 +90,9 @@ final class ValhallaRoutingService {
             avoidTolls: avoidTolls
         )
 
+        if isDemoServer {
+            print("[Valhalla] ⚠️ Using public demo server; production should use a self-hosted Valhalla instance")
+        }
         print("[Valhalla] Requesting truck route to \(destinationName)...")
 
         let (data, response) = try await session.data(for: request)
@@ -110,8 +125,11 @@ final class ValhallaRoutingService {
             "height": profile.heightMeters,             // meters
             "width":  2.59,                             // standard semi width 8.5ft (TruckProfile has no width field)
             "length": profile.lengthMeters,             // meters
-            "weight": profile.weightTonnes * 0.907185,  // short tons → metric tonnes
-            "axle_load": profile.axleWeightTonnes * 0.907185  // short tons → metric tonnes per axle
+            "weight": profile.weightTonnes,             // metric tonnes
+            "axle_load": profile.axleWeightTonnes,      // metric tonnes per axle
+            "axle_count": 5,
+            "hgv_no_access_penalty": 43200,
+            "use_truck_route": 0.9
         ]
 
         if avoidTolls {

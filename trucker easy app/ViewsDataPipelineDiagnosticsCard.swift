@@ -40,14 +40,18 @@ struct DataPipelineDiagnosticsCard: View {
     }
 
     // Mapbox routing/renderer token configured in Info.plist
+    private func configuredInfoValue(_ key: String) -> String {
+        let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.hasPrefix("$(") ? "" : value
+    }
+
     private var mapboxRoutingConfigured: Bool {
-        let key = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? ""
-        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !configuredInfoValue("MBXAccessToken").isEmpty
     }
 
     private var tomTomRoutingConfigured: Bool {
-        let key = Bundle.main.object(forInfoDictionaryKey: "TomTomAPIKey") as? String ?? ""
-        return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !configuredInfoValue("TomTomAPIKey").isEmpty
     }
 
     private var mapboxConfigured: Bool {
@@ -59,15 +63,18 @@ struct DataPipelineDiagnosticsCard: View {
     }
 
     private var routingHealthy: Bool {
-        mapboxConfigured || tomTomRoutingConfigured || tomTomSDKReady
+        ValhallaRoutingService.shared.isAvailable || mapboxConfigured || tomTomRoutingConfigured || tomTomSDKReady
     }
 
     private var routingDetails: String {
+        let valhalla = ValhallaRoutingService.shared.isAvailable
+            ? (ValhallaRoutingService.shared.isDemoServer ? "Valhalla: demo" : "Valhalla: ok")
+            : "Valhalla: missing"
         let mapboxApi = mapboxRoutingConfigured ? "Mapbox: ok" : "Mapbox: missing"
         let tomTomSDK = tomTomSDKReady ? "TomTom SDK: ok" : "TomTom SDK: off"
         let tomTomApi = tomTomRoutingConfigured ? "TomTom API: ok" : "TomTom API: missing"
         let provider = RoutingService.shared.lastProvider.rawValue
-        return "\(provider) · \(tomTomSDK) · \(mapboxApi) · \(tomTomApi)"
+        return "\(provider) · \(valhalla) · \(tomTomSDK) · \(mapboxApi) · \(tomTomApi)"
     }
 
     var body: some View {

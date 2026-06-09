@@ -17,6 +17,8 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     var currentHeading: CLHeading?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
     var lastLocationError: String?
+    private(set) var isTracking = false
+    private var lastTrackingStartAt: Date?
     var isAuthorized: Bool {
         authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways
     }
@@ -87,6 +89,8 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         switch authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
             lastLocationError = nil
+            lastTrackingStartAt = Date()
+            isTracking = true
             manager.startUpdatingLocation()
             if CLLocationManager.headingAvailable() {
                 manager.startUpdatingHeading()
@@ -104,6 +108,32 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     func stopTracking() {
         manager.stopUpdatingLocation()
         manager.stopUpdatingHeading()
+        isTracking = false
+    }
+
+    func ensureTracking(reason: String, staleAfter seconds: TimeInterval = 15) {
+        authorizationStatus = manager.authorizationStatus
+        guard isAuthorized else {
+            requestPermission()
+            return
+        }
+
+        let hasStaleFix: Bool
+        if let currentLocation = currentLocation {
+            hasStaleFix = abs(currentLocation.timestamp.timeIntervalSinceNow) > seconds
+        } else {
+            let startAge = lastTrackingStartAt.map { Date().timeIntervalSince($0) } ?? seconds
+            hasStaleFix = startAge >= seconds
+        }
+
+        if !isTracking || hasStaleFix {
+            if hasStaleFix {
+                lastLocationError = "GPS stale — restarting location updates"
+            }
+            print("[LocationManager] watchdog restart reason=\(reason) stale=\(hasStaleFix)")
+            stopTracking()
+            startTracking()
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
