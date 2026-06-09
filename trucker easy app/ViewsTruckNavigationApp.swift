@@ -842,11 +842,9 @@ class NavigationLocationManager: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
             guard let location = locations.last, location.horizontalAccuracy >= 0 else { return }
-            #if !DEBUG
             if #available(iOS 15.0, *), let source = location.sourceInformation, source.isSimulatedBySoftware {
                 return
             }
-            #endif
             lastLocation = location
         }
     }

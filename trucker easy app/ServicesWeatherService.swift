@@ -50,7 +50,7 @@ struct OWMCurrentResponse: Decodable {
 
 import SwiftUI
 
-// MARK: - Real Weather Service (replaces stub)
+// MARK: - Real Weather Service
 
 @Observable
 final class RealWeatherService {

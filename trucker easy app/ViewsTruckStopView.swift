@@ -296,25 +296,29 @@ private extension CrowdsourceReport.ReportType {
 // MARK: - HOS State (Hours of Service)
 
 struct HOSState {
+    var isDataAvailable: Bool
     var driveTimeRemainingHours: Double  // Hours driver can still legally drive
     var dutyTimeRemainingHours: Double   // Total on-duty hours remaining
     var isInBreak: Bool
     var breakEndsAt: Date?
 
-    static let mock = HOSState(
-        driveTimeRemainingHours: 4.5,
-        dutyTimeRemainingHours: 7.0,
+    static let unavailable = HOSState(
+        isDataAvailable: false,
+        driveTimeRemainingHours: 0,
+        dutyTimeRemainingHours: 0,
         isInBreak: false,
         breakEndsAt: nil
     )
 
     var driveTimeText: String {
+        guard isDataAvailable else { return "Not connected" }
         let h = Int(driveTimeRemainingHours)
         let m = Int((driveTimeRemainingHours - Double(h)) * 60)
         return "\(h)h \(m)m"
     }
 
     var urgencyColor: Color {
+        guard isDataAvailable else { return AppTheme.Colors.textSecondary }
         if driveTimeRemainingHours < 1 { return AppTheme.Colors.danger }
         if driveTimeRemainingHours < 2 { return AppTheme.Colors.warning }
         return AppTheme.Colors.success
@@ -322,6 +326,7 @@ struct HOSState {
 
     /// Max distance (miles) driveable at avg speed
     func reachableMiles(avgSpeedMph: Double = 55) -> Double {
+        guard isDataAvailable else { return .infinity }
         driveTimeRemainingHours * avgSpeedMph
     }
 }
@@ -335,7 +340,7 @@ final class TruckStopService {
 
     var nearbyStops: [TruckStopItem] = []
     var isLoading = false
-    var hos = HOSState.mock
+    var hos = HOSState.unavailable
 
     private init() {}
 
@@ -414,6 +419,7 @@ final class TruckStopService {
 
     /// Stops reachable given current HOS
     var reachableStops: [TruckStopItem] {
+        guard hos.isDataAvailable else { return nearbyStops }
         nearbyStops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours) }
     }
 
@@ -515,7 +521,7 @@ struct HOSTrackerBar: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(AppTheme.Colors.textSecondary)
                         .kerning(0.8)
-                    Text(hos.isInBreak ? "Rest required" : hos.driveTimeText)
+                    Text(!hos.isDataAvailable ? "HOS not connected" : (hos.isInBreak ? "Rest required" : hos.driveTimeText))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(hos.urgencyColor)
                 }
@@ -523,7 +529,7 @@ struct HOSTrackerBar: View {
                 Spacer()
 
                 // Progress arc
-                HoursArc(fraction: hos.driveTimeRemainingHours / 11.0, color: hos.urgencyColor)
+                HoursArc(fraction: hos.isDataAvailable ? hos.driveTimeRemainingHours / 11.0 : 0, color: hos.urgencyColor)
                     .frame(width: 36, height: 36)
 
                 Image(systemName: "chevron.right")
@@ -579,7 +585,7 @@ struct HOSAlertBanner: View {
                         .font(.system(size: 12, weight: .black))
                         .foregroundColor(AppTheme.Colors.danger)
                         .kerning(0.8)
-                    Text("\(hos.driveTimeText) remaining — plan your rest stop now")
+                    Text(hos.isDataAvailable ? "\(hos.driveTimeText) remaining — plan your rest stop now" : "Connect HOS to plan legally reachable rest stops")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white.opacity(0.85))
                 }
@@ -621,7 +627,7 @@ struct HOSTelemetryWidget: View {
                         .stroke(AppTheme.Colors.backgroundCard.opacity(0.6), lineWidth: 5)
                         .frame(width: 52, height: 52)
                     Circle()
-                        .trim(from: 0, to: min(hos.driveTimeRemainingHours / 11.0, 1))
+                        .trim(from: 0, to: hos.isDataAvailable ? min(hos.driveTimeRemainingHours / 11.0, 1) : 0)
                         .stroke(hos.urgencyColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .frame(width: 52, height: 52)
                         .rotationEffect(.degrees(-90))
@@ -629,7 +635,7 @@ struct HOSTelemetryWidget: View {
                         Image(systemName: hos.isInBreak ? "bed.double.fill" : "steeringwheel")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(hos.urgencyColor)
-                        Text(hos.isInBreak ? "REST" : hos.driveTimeText)
+                        Text(!hos.isDataAvailable ? "HOS" : (hos.isInBreak ? "REST" : hos.driveTimeText))
                             .font(.system(size: 9, weight: .black))
                             .foregroundColor(hos.urgencyColor)
                             .minimumScaleFactor(0.7)
@@ -678,7 +684,7 @@ struct TruckStopsPanel: View {
     @State private var showOnlyReachable = true
 
     var displayedStops: [TruckStopItem] {
-        if showOnlyReachable {
+        if hos.isDataAvailable && showOnlyReachable {
             let reachable = stops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours) }
             return reachable.isEmpty ? stops : reachable
         }
@@ -701,25 +707,26 @@ struct TruckStopsPanel: View {
                     Text("Truck Stops")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
-                    Text("\(displayedStops.count) within \(hos.driveTimeText) drive")
+                    Text(hos.isDataAvailable ? "\(displayedStops.count) within \(hos.driveTimeText) drive" : "\(displayedStops.count) stops · HOS not connected")
                         .font(.system(size: 10))
                         .foregroundColor(AppTheme.Colors.textSecondary)
                 }
                 Spacer()
 
-                // HOS filter toggle
-                Button(action: { withAnimation { showOnlyReachable.toggle() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: showOnlyReachable ? "clock.badge.checkmark" : "clock")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(showOnlyReachable ? "HOS" : "All")
-                            .font(.system(size: 11, weight: .bold))
+                if hos.isDataAvailable {
+                    Button(action: { withAnimation { showOnlyReachable.toggle() } }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: showOnlyReachable ? "clock.badge.checkmark" : "clock")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(showOnlyReachable ? "HOS" : "All")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(showOnlyReachable ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(showOnlyReachable ? AppTheme.Colors.accent.opacity(0.15) : AppTheme.Colors.backgroundCard)
+                        .cornerRadius(AppTheme.Radius.pill)
                     }
-                    .foregroundColor(showOnlyReachable ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(showOnlyReachable ? AppTheme.Colors.accent.opacity(0.15) : AppTheme.Colors.backgroundCard)
-                    .cornerRadius(AppTheme.Radius.pill)
                 }
 
                 Button(action: onClose) {
@@ -782,6 +789,7 @@ struct TruckStopRow: View {
     let onSelect: () -> Void
 
     private var isReachable: Bool {
+        guard hos.isDataAvailable else { return true }
         stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours)
     }
 
@@ -1116,6 +1124,29 @@ struct TruckStopDetailSheet: View {
     // MARK: - HOS Banner
 
     private var hosBanner: some View {
+        guard hos.isDataAvailable else {
+            return HStack(spacing: 10) {
+                Image(systemName: "clock.badge.questionmark.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("HOS not connected")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                    Text("Connect ELD/HOS data to calculate legal reachability.")
+                        .font(.system(size: 11))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(AppTheme.Colors.textSecondary.opacity(0.08))
+            .cornerRadius(AppTheme.Radius.md)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                    .stroke(AppTheme.Colors.textSecondary.opacity(0.25), lineWidth: 1)
+            )
+        }
         let reachable = stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours)
         return HStack(spacing: 10) {
             Image(systemName: reachable ? "clock.badge.checkmark.fill" : "clock.badge.exclamationmark.fill")
@@ -1750,7 +1781,9 @@ struct HOSSettingsSheet: View {
                                     .font(.system(size: 14, weight: .bold))
                                     .foregroundColor(hos.urgencyColor)
                             }
-                            Slider(value: $hos.driveTimeRemainingHours, in: 0...11, step: 0.5)
+                            Slider(value: $hos.driveTimeRemainingHours, in: 0...11, step: 0.5) { editing in
+                                if !editing { hos.isDataAvailable = true }
+                            }
                                 .accentColor(hos.urgencyColor)
                             HStack {
                                 Text("0h").font(.system(size: 11)).foregroundColor(AppTheme.Colors.textSecondary)
@@ -1774,6 +1807,7 @@ struct HOSSettingsSheet: View {
                             Spacer()
                             Toggle("", isOn: $hos.isInBreak)
                                 .toggleStyle(SwitchToggleStyle(tint: AppTheme.Colors.success))
+                                .onChange(of: hos.isInBreak) { _, _ in hos.isDataAvailable = true }
                         }
 
                         Divider().background(AppTheme.Colors.backgroundCard)
@@ -1783,7 +1817,7 @@ struct HOSSettingsSheet: View {
                             Image(systemName: "info.circle.fill")
                                 .foregroundColor(AppTheme.Colors.accentSoft)
                                 .font(.system(size: 16))
-                            Text("FMCSA rules: 11h driving max, 14h on-duty window, 30-min break after 8h driving, 10h off-duty reset.")
+                            Text("Only verified ELD/HOS data or values entered by the driver are shown. Trucker Easy does not invent HOS availability.")
                                 .font(.system(size: 12))
                                 .foregroundColor(AppTheme.Colors.textSecondary)
                                 .lineLimit(4)
@@ -2653,35 +2687,4 @@ struct StopReview {
     let restaurants: String
     let notes: String
     let submittedAt: Date = Date()
-}
-
-// MARK: - Preview
-
-#Preview {
-    let sampleStop = TruckStopItem(
-        name: "Pilot Travel Center",
-        address: "1234 Interstate Dr, Nashville, TN 37201",
-        coordinate: CLLocationCoordinate2D(latitude: 36.1627, longitude: -86.7816),
-        distanceMeters: 24140,
-        phone: "(615) 555-0182",
-        network: .pilotFlyingJ,
-        amenities: TruckStopAmenities(
-            rating: 4.2, reviewCount: 318,
-            parkingSlots: 120, parkingAvailable: 34, hasReservableParking: true,
-            parkingUpdatedAt: Date(timeIntervalSinceNow: -900),
-            showerCount: 20, showerWaitMinutes: 8, hasLaundry: true, hasLounge: true, hasWifi: true,
-            foodType: .fastFood, hasHealthyOptions: false,
-            restaurantNames: ["Arby's", "Subway", "Cinnabon"],
-            hasCATScale: true, hasTireService: false, hasMechanic: false,
-            hasDEF: true, defPrice: 2.499, defUpdatedAt: Date(timeIntervalSinceNow: -3600),
-            dieselPrice: 3.789, dieselUpdatedAt: Date(timeIntervalSinceNow: -1800),
-            acceptsTruckCard: true
-        )
-    )
-
-    TruckStopDetailSheet(
-        stop: sampleStop,
-        hos: HOSState.mock,
-        onNavigate: { _ in }
-    )
 }

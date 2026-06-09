@@ -638,7 +638,7 @@ private struct WeighStationReportRow: View {
     }
 }
 
-// MARK: - Weather Service (stub – ready for WeatherKit)
+// MARK: - Weather Models
 
 struct TruckWeather {
     let condition: String      // e.g. "Partly Cloudy"
@@ -1191,7 +1191,6 @@ struct LogisticsNewsItem: Identifiable {
 
 /// Detects the driver's country from GPS coordinates (geofence) and returns
 /// relevant logistics/trucking news for that country.
-/// When real RSS/API feeds are added, replace `loadStubNews(for:)` body only.
 @Observable
 final class LogisticsNewsService {
     static let shared = LogisticsNewsService()
@@ -1201,8 +1200,8 @@ final class LogisticsNewsService {
     private(set) var isLoading = false
     private var lastRefreshCoordinate: CLLocationCoordinate2D?
 
-    /// Load default news immediately when no location is available yet.
-    /// Uses language to pick the most relevant country stub.
+    /// Load verified news immediately when no location is available yet.
+    /// Uses language only to select a likely country feed.
     func loadDefaultIfEmpty(language: AppLanguage = .english) async {
         guard items.isEmpty && !isLoading else { return }
         isLoading = true
@@ -1255,7 +1254,7 @@ final class LogisticsNewsService {
         // Resolve country from coordinates (geofence, not language)
         let country = await resolveCountry(for: coordinate)
 
-        // Load news via official RSS feeds — falls back to curated content
+        // Load news via official RSS feeds only.
         let news = await loadRealNews(for: country)
 
         await MainActor.run {
@@ -1283,10 +1282,10 @@ final class LogisticsNewsService {
         }
     }
 
-    // MARK: - News: real RSS feeds + curated fallback
+    // MARK: - News: real RSS feeds
 
     /// Primary: fetch from official government/trucking RSS feeds.
-    /// Falls back to curated content when RSS is unavailable.
+    /// Returns an empty list when verified sources are unavailable.
     private func loadRealNews(for country: String, language: AppLanguage? = nil) async -> [LogisticsNewsItem] {
         let effectiveCountry: String
         if let lang = language {
@@ -1325,8 +1324,7 @@ final class LogisticsNewsService {
             }
         }
 
-        // Curated fallback — always available, never empty
-        return curatedFallbackNews(for: effectiveCountry)
+        return []
     }
 
     /// Downloads and parses an RSS 2.0 / Atom feed, returns nil on any failure.
@@ -1367,97 +1365,6 @@ final class LogisticsNewsService {
         return .industry
     }
 
-    // MARK: - Curated fallback content (used when RSS feeds are unavailable)
-
-    private func curatedFallbackNews(for country: String, language: AppLanguage? = nil) -> [LogisticsNewsItem] {
-        let effectiveCountry: String
-        if let lang = language {
-            switch lang {
-            case .portuguese:   effectiveCountry = "BR"
-            case .spanishLatam: effectiveCountry = "MX"
-            case .spanish:      effectiveCountry = "MX"
-            default:            effectiveCountry = country
-            }
-        } else {
-            effectiveCountry = country
-        }
-
-        let now = Date()
-        func ago(_ minutes: Double) -> Date { now.addingTimeInterval(-minutes * 60) }
-
-        switch effectiveCountry {
-        case "US":
-            return [
-                LogisticsNewsItem(headline: "FMCSA Proposes New HOS Electronic Logging Exemptions",
-                                  summary: "The Federal Motor Carrier Safety Administration is seeking comments on proposed exemptions for ELD mandate compliance for short-haul operators.",
-                                  source: "FreightWaves", publishedAt: ago(40), country: effectiveCountry, category: .regulations, url: nil),
-                LogisticsNewsItem(headline: "Diesel Prices Drop 3¢ Nationally – Highest in CA",
-                                  summary: "National average diesel fell to $3.89/gal this week. California remains highest at $4.82/gal due to refinery maintenance.",
-                                  source: "DOE EIA", publishedAt: ago(120), country: effectiveCountry, category: .fuel, url: nil),
-                LogisticsNewsItem(headline: "I-70 Eastbound Closed at Vail Pass – Chain Law in Effect",
-                                  summary: "CDOT has closed I-70 EB at Vail Pass due to whiteout conditions. Chain law is in effect for commercial vehicles on the entire corridor.",
-                                  source: "CDOT", publishedAt: ago(15), country: effectiveCountry, category: .weather, url: nil),
-                LogisticsNewsItem(headline: "Port of Los Angeles Dockworkers Vote on New Contract",
-                                  summary: "ILWU members at the Port of LA and Long Beach are voting on a tentative agreement that would end work-to-rule actions affecting container flow.",
-                                  source: "JOC", publishedAt: ago(200), country: effectiveCountry, category: .strike, url: nil),
-                LogisticsNewsItem(headline: "Texas Oversize Load Permit Fees Increase March 15",
-                                  summary: "TxDMV updates blanket permit fees for single-trip and annual oversize/overweight permits effective March 15.",
-                                  source: "TxDMV", publishedAt: ago(300), country: effectiveCountry, category: .regulations, url: nil),
-            ]
-
-        case "BR":
-            return [
-                LogisticsNewsItem(headline: "ANTT Lança Nova Plataforma de Controle de Jornada",
-                                  summary: "A Agência Nacional de Transportes Terrestres liberou acesso ao novo portal de monitoramento de jornada dos motoristas profissionais.",
-                                  source: "ANTT", publishedAt: ago(90), country: effectiveCountry, category: .regulations, url: nil),
-                LogisticsNewsItem(headline: "Greve de Caminhoneiros: Bloqueios na BR-116",
-                                  summary: "Caminhoneiros autônomos realizaram bloqueios parciais na BR-116 em protesto ao preço do diesel. PRF acompanha situação.",
-                                  source: "CNT", publishedAt: ago(30), country: effectiveCountry, category: .strike, url: nil),
-                LogisticsNewsItem(headline: "Diesel S-10 Sobe R$0,12 nas Bombas da Região Sul",
-                                  summary: "O preço médio do diesel S-10 registrou alta de R$0,12 por litro na Região Sul nas últimas 48 horas, segundo levantamento da ANP.",
-                                  source: "ANP", publishedAt: ago(180), country: effectiveCountry, category: .fuel, url: nil),
-                LogisticsNewsItem(headline: "Operação Especial DNIT: Pesagem em Foco na BR-101",
-                                  summary: "DNIT intensifica fiscalização de excesso de peso na BR-101 trecho RJ-ES com postos de pesagem móveis.",
-                                  source: "DNIT", publishedAt: ago(240), country: effectiveCountry, category: .regulations, url: nil),
-            ]
-
-        case "MX":
-            return [
-                LogisticsNewsItem(headline: "SCT Actualiza Límites de Peso en Carreteras Federales",
-                                  summary: "La Secretaría de Infraestructura actualiza los límites de peso permitido para vehículos de carga en carreteras federales de cuota.",
-                                  source: "SCT México", publishedAt: ago(60), country: effectiveCountry, category: .regulations, url: nil),
-                LogisticsNewsItem(headline: "Precio del Diésel Sube 2% en la Frontera Norte",
-                                  summary: "El precio del diésel en la región fronteriza norte registró un incremento del 2% esta semana según la CRE.",
-                                  source: "CRE", publishedAt: ago(150), country: effectiveCountry, category: .fuel, url: nil),
-                LogisticsNewsItem(headline: "Operativo en Autopista México-Puebla: Retención de Unidades",
-                                  summary: "La Guardia Nacional realiza operativo de verificación de documentación en la autopista México-Puebla. Se prevén demoras de 45 minutos.",
-                                  source: "Guardia Nacional", publishedAt: ago(20), country: effectiveCountry, category: .roads, url: nil),
-            ]
-
-        case "CA":
-            return [
-                LogisticsNewsItem(headline: "Transport Canada Proposes Mandatory Speed Limiters at 105 km/h",
-                                  summary: "Transport Canada has published proposed amendments requiring all new heavy trucks to have speed limiters set to 105 km/h.",
-                                  source: "Transport Canada", publishedAt: ago(100), country: effectiveCountry, category: .regulations, url: nil),
-                LogisticsNewsItem(headline: "Diesel Average $1.74/L Nationally – BC Highest at $1.98",
-                                  summary: "Diesel averages $1.74 per litre nationally this week. British Columbia remains highest driven by carbon levy.",
-                                  source: "NRCan", publishedAt: ago(220), country: effectiveCountry, category: .fuel, url: nil),
-                LogisticsNewsItem(headline: "Hwy 1 Rogers Pass Restricted to Commercial Traffic",
-                                  summary: "BC Ministry of Transportation has restricted commercial traffic on Hwy 1 at Rogers Pass to chains-required between 06:00–18:00.",
-                                  source: "DriveBC", publishedAt: ago(50), country: effectiveCountry, category: .weather, url: nil),
-            ]
-
-        default:
-            return [
-                LogisticsNewsItem(headline: "Global Freight Rates Rise for Third Consecutive Week",
-                                  summary: "Container shipping rates on major trade lanes continued their upward trend for the third consecutive week amid Red Sea diversions.",
-                                  source: "Drewry", publishedAt: ago(80), country: effectiveCountry, category: .industry, url: nil),
-                LogisticsNewsItem(headline: "IEA: Diesel Demand Forecast Revised Upward for Q2",
-                                  summary: "The International Energy Agency revised its Q2 diesel demand forecast upward by 1.2%, citing stronger-than-expected road freight growth.",
-                                  source: "IEA", publishedAt: ago(300), country: effectiveCountry, category: .fuel, url: nil),
-            ]
-        }
-    }
 }
 
 // MARK: - Simple RSS / Atom XML Parser

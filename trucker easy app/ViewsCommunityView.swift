@@ -124,57 +124,6 @@ struct CommunityView: View {
     }
 }
 
-private enum CommunityFallbackData {
-    static func samplePosts(category: PostCategory?) -> [CommunityPost] {
-        let seeded: [CommunityPost] = [
-            makePost(
-                title: "I-40 East truck parking available",
-                content: "Loves Travel Stop near exit 126 has around 20 open spots right now.",
-                author: "Lucas T.",
-                category: .routes,
-                location: "I-40 Exit 126"
-            ),
-            makePost(
-                title: "Scale open in Oklahoma",
-                content: "Weigh station mile marker 221 is open. Keep paperwork ready.",
-                author: "Mia R.",
-                category: .regulations,
-                location: "I-35 MM 221"
-            ),
-            makePost(
-                title: "Strong crosswind warning",
-                content: "Crosswind hits hard on bridge section after mile 90. Reduce speed.",
-                author: "David K.",
-                category: .safety,
-                location: "US-54"
-            )
-        ]
-
-        guard let category else { return seeded }
-        return seeded.filter { $0.category == category }
-    }
-
-    private static func makePost(
-        title: String,
-        content: String,
-        author: String,
-        category: PostCategory,
-        location: String
-    ) -> CommunityPost {
-        let post = CommunityPost(
-            title: title,
-            content: content,
-            authorId: "offline-\(author)",
-            authorName: author,
-            category: category,
-            location: location
-        )
-        post.likeCount = Int.random(in: 3...19)
-        post.commentCount = Int.random(in: 0...8)
-        return post
-    }
-}
-
 // MARK: - Community Chip
 struct CommunityChip: View {
     let title: String

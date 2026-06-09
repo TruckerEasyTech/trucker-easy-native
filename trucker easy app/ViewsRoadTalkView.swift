@@ -242,11 +242,6 @@ struct RoadReportPanel: View {
     }
 
     let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-    private let mockReports: [MockRoadReport] = [
-        MockRoadReport(type: .scaleOpen, location: "I-80 MM 342", minutesAgo: 12, votes: 5),
-        MockRoadReport(type: .parkingFull, location: "TA Truckstop Exit 44", minutesAgo: 28, votes: 3),
-        MockRoadReport(type: .hazard, location: "I-40 WB", minutesAgo: 60, votes: 7)
-    ]
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -314,9 +309,11 @@ struct RoadReportPanel: View {
                                 .tint(AppTheme.Colors.accent)
                                 .padding(.vertical, AppTheme.Spacing.md)
                         } else if recentReports.isEmpty {
-                            ForEach(mockReports) { report in
-                                MockReportRow(report: report, lang: lang)
-                            }
+                            Text("No verified driver reports available nearby.")
+                                .font(AppTheme.Typography.caption())
+                                .foregroundColor(AppTheme.Colors.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, AppTheme.Spacing.sm)
                         } else {
                             ForEach(recentReports) { report in
                                 RemoteReportRow(record: report, lang: lang)
@@ -444,53 +441,6 @@ struct ReportSectionHeader: View {
         }
         .padding(.horizontal, AppTheme.Spacing.md)
     }
-}
-
-// MARK: - Mock Report Row (placeholder for real feed)
-
-struct MockReportRow: View {
-    let report: MockRoadReport
-    let lang: AppLanguage
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(report.type.color.opacity(0.12)).frame(width: 36, height: 36)
-                Image(systemName: report.type.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(report.type.color)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(report.type.title(lang: lang)) — \(report.location)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(lang.relativeTimeLabel(minutesAgo: report.minutesAgo))
-                    .font(.system(size: 11))
-                    .foregroundColor(AppTheme.Colors.textSecondary)
-            }
-            Spacer()
-            HStack(spacing: 3) {
-                Image(systemName: "hand.thumbsup.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(AppTheme.Colors.accent)
-                Text("\(report.votes)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(AppTheme.Colors.accent)
-            }
-        }
-        .padding(10)
-        .background(AppTheme.Colors.backgroundCard)
-        .cornerRadius(AppTheme.Radius.sm)
-    }
-}
-
-struct MockRoadReport: Identifiable {
-    let id = UUID()
-    let type: RoadReportPanel.RoadReportType
-    let location: String
-    let minutesAgo: Int
-    let votes: Int
 }
 
 struct RemoteReportRow: View {
@@ -796,7 +746,8 @@ struct TruckingNewsView: View {
         guard !NewsAPIConfig.apiKey.isEmpty,
               NewsAPIConfig.apiKey != "YOUR_NEWSAPI_KEY" else {
             await MainActor.run {
-                loadMockNews()
+                articles = []
+                errorMessage = "No verified news source configured."
                 isLoading = false
             }
             return
@@ -804,7 +755,8 @@ struct TruckingNewsView: View {
 
         guard let url = URL(string: NewsAPIConfig.endpoint) else {
             await MainActor.run {
-                loadMockNews()
+                articles = []
+                errorMessage = "Invalid NewsAPI endpoint."
                 isLoading = false
             }
             return
@@ -821,17 +773,18 @@ struct TruckingNewsView: View {
                       (200...299).contains(http.statusCode),
                       let parsed = try? JSONDecoder().decode(NewsResponse.self, from: data)
                 else {
-                    // API error: show mock so the tab is never empty
                     if let apiError = data.flatMap({ try? JSONDecoder().decode(NewsAPIError.self, from: $0) }) {
                         errorMessage = apiError.message
                     } else {
                         errorMessage = error?.localizedDescription ?? "Failed to load news"
                     }
-                    loadMockNews()
+                    articles = []
                     return
                 }
                 articles = parsed.articles.filter { $0.title != "[Removed]" && !$0.title.isEmpty }
-                if articles.isEmpty { loadMockNews() }
+                if articles.isEmpty {
+                    errorMessage = "No verified articles returned."
+                }
             }
         }.resume()
     }
@@ -845,9 +798,9 @@ struct TruckingNewsView: View {
                     id: UUID(uuidString: record.id) ?? UUID(),
                     title: record.headline,
                     description: record.summary,
-                    url: record.url ?? "https://truckereasy.com",
+                    url: record.url ?? "",
                     urlToImage: nil,
-                    publishedAt: record.published_at ?? ISO8601DateFormatter().string(from: Date()),
+                    publishedAt: record.published_at ?? "",
                     source: .init(name: record.source ?? "TruckerEasy")
                 )
             }
@@ -879,26 +832,6 @@ struct TruckingNewsView: View {
         }
     }
 
-    private func loadMockNews() {
-        articles = [
-            NewsArticle(id: UUID(), title: "Trucking Industry Sees Record Freight Demand in 2026",
-                        description: "Carriers report increased load volumes across major corridors as supply chain stabilizes.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-03-01T10:00:00Z", source: .init(name: "FreightWaves")),
-            NewsArticle(id: UUID(), title: "New ELD Mandate Updates: What Drivers Need to Know",
-                        description: "FMCSA releases updated guidelines for electronic logging devices effective Q2 2026.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-28T08:00:00Z", source: .init(name: "FMCSA News")),
-            NewsArticle(id: UUID(), title: "Fuel Prices Drop Ahead of Spring Season",
-                        description: "Diesel prices fall 8 cents per gallon as refineries boost output.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-27T14:30:00Z", source: .init(name: "TruckingInfo")),
-            NewsArticle(id: UUID(), title: "Driver Shortage Eases as New CDL Graduates Hit the Road",
-                        description: "FMCSA reports 12% increase in new CDL licenses issued in Q1 2026.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-25T11:00:00Z", source: .init(name: "Commercial Carrier Journal")),
-        ]
-    }
 }
 
 struct NewsArticleRow: View {

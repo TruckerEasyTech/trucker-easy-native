@@ -139,14 +139,11 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last, loc.horizontalAccuracy >= 0 else { return }
 
-        // In Debug/Xcode, simulated device locations are how we test GPS flows.
-        // Keep rejecting simulated coordinates in release builds.
-        #if !DEBUG
+        // Safety-critical navigation must not consume software-simulated coordinates.
         if #available(iOS 15.0, *), let source = loc.sourceInformation, source.isSimulatedBySoftware {
             print("[LocationManager] ⚠️ Ignoring simulated location update")
             return
         }
-        #endif
 
         // Accept a coarse first fix so the map can leave "GPS searching" quickly,
         // then require better accuracy for subsequent live-navigation updates.

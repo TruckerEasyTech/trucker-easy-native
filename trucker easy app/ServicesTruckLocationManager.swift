@@ -139,12 +139,10 @@ extension TruckLocationManager: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
             guard let location = locations.last, location.horizontalAccuracy >= 0 else { return }
-            #if !DEBUG
             if #available(iOS 15.0, *), let source = location.sourceInformation, source.isSimulatedBySoftware {
                 print("⚠️ [Location] Ignoring simulated location update")
                 return
             }
-            #endif
             
             currentLocation = location
             speed = max(location.speed, 0)  // Negative values mean invalid
@@ -194,93 +192,3 @@ extension TruckLocationManager: CLLocationManagerDelegate {
         }
     }
 }
-
-// MARK: - Location Simulation (for testing)
-
-extension TruckLocationManager {
-    
-    /// Simulate location updates along a route (for testing without GPS)
-    func simulateRoute(_ route: [CLLocationCoordinate2D], speed: Double = 25.0) {
-        var index = 0
-        
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            guard let self = self, index < route.count else {
-                timer.invalidate()
-                return
-            }
-            
-            let coord = route[index]
-            let location = CLLocation(
-                coordinate: coord,
-                altitude: 0,
-                horizontalAccuracy: 5,
-                verticalAccuracy: 5,
-                course: index < route.count - 1 ? coord.bearing(to: route[index + 1]) : 0,
-                speed: speed,  // m/s
-                timestamp: Date()
-            )
-            
-            Task { @MainActor in
-                self.currentLocation = location
-                self.speed = speed
-                self.updateMovingStatus()
-                self.locationPublisher.send(location)
-                
-                print("🎮 [Simulation] Location: \(coord.latitude), \(coord.longitude)")
-            }
-            
-            index += 1
-        }
-        
-        print("🎮 [Simulation] Started route simulation")
-    }
-}
-
-// MARK: - Example Usage
-
-/*
- 
- // Initialize
- let locationManager = TruckLocationManager()
- 
- // Request authorization and start
- locationManager.startUpdating()
- 
- // Get current location
- if let location = locationManager.currentLocation {
-     print("Current location: \(location.coordinate)")
- }
- 
- // Get speed
- print("Speed: \(locationManager.speedMPH) mph")
- 
- // Check if moving
- if locationManager.isMoving {
-     print("Truck is moving")
- }
- 
- // Distance to destination
- let destination = CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
- if let distance = locationManager.distance(to: destination) {
-     print("Distance to destination: \(distance / 1609.34) miles")
- }
- 
- // Bearing to destination
- if let bearing = locationManager.bearing(to: destination) {
-     print("Bearing: \(Int(bearing))°")
- }
- 
- // Subscribe to location updates
- locationManager.locationPublisher.sink { location in
-     print("New location: \(location.coordinate)")
- }
- 
- // Simulate route (for testing)
- let testRoute = [
-     CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
-     CLLocationCoordinate2D(latitude: 37.7849, longitude: -122.4094),
-     // ... more coordinates
- ]
- locationManager.simulateRoute(testRoute, speed: 25.0)  // 25 m/s ≈ 55 mph
- 
- */
