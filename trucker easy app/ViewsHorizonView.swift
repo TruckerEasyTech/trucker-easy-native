@@ -222,9 +222,14 @@ struct HorizonView: View {
     }
 
     private var gpsStatusText: String {
-        guard let loc = locationManager.currentLocation else { return "GPS searching" }
+        guard let loc = locationManager.currentLocation else {
+            return locationManager.lastLocationError ?? "GPS searching"
+        }
         let age = Int(abs(loc.timestamp.timeIntervalSinceNow))
         if gpsIsLive { return "GPS live · ±\(Int(loc.horizontalAccuracy))m" }
+        if age <= 8, loc.horizontalAccuracy >= 0 {
+            return "GPS weak · ±\(Int(loc.horizontalAccuracy))m"
+        }
         return "GPS stale · \(age)s"
     }
     @State private var lastOpsRefreshAt: Date = .distantPast

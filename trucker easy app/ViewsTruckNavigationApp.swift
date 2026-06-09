@@ -811,16 +811,21 @@ class NavigationLocationManager: NSObject, CLLocationManagerDelegate {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 10 // Update every 10 meters
+        authorizationStatus = manager.authorizationStatus
     }
     
     func requestLocation() async {
-        guard authorizationStatus != .authorizedWhenInUse &&
-              authorizationStatus != .authorizedAlways else {
+        authorizationStatus = manager.authorizationStatus
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
             manager.startUpdatingLocation()
-            return
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .restricted, .denied:
+            print("Location permission denied or restricted")
+        @unknown default:
+            break
         }
-        
-        manager.requestWhenInUseAuthorization()
     }
     
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -836,7 +841,13 @@ class NavigationLocationManager: NSObject, CLLocationManagerDelegate {
     
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
-            lastLocation = locations.last
+            guard let location = locations.last, location.horizontalAccuracy >= 0 else { return }
+            #if !DEBUG
+            if #available(iOS 15.0, *), let source = location.sourceInformation, source.isSimulatedBySoftware {
+                return
+            }
+            #endif
+            lastLocation = location
         }
     }
     

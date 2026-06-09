@@ -4,6 +4,8 @@
 <dict>
 	<key>AgoraAppID</key>
 	<string>$(AgoraAppID)</string>
+	<key>ValhallaServerURL</key>
+	<string>https://valhalla1.openstreetmap.de</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
@@ -36,6 +38,12 @@
 	<string>$(JurisdictionPolicyAPIKey)</string>
 	<key>MBXAccessToken</key>
 	<string>$(MBXAccessToken)</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Trucker Easy needs background location to track trips, monitor HOS, and issue route safety alerts while driving.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Trucker Easy needs location access to keep truck trip and compliance tracking active.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Trucker Easy needs your location to show your position on the map, calculate truck routes with restrictions, and guide navigation safely.</string>
 	<key>OBD2BLEDeviceName</key>
 	<string>$(OBD2BLEDeviceName)</string>
 	<key>OpenRouterAPIKey</key>

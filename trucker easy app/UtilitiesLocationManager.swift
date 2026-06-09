@@ -16,6 +16,7 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     var currentLocation: CLLocation?
     var currentHeading: CLHeading?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    var lastLocationError: String?
     var isAuthorized: Bool {
         authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways
     }
@@ -49,6 +50,10 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     /// - Idle/background ops: reduced GPS churn to save battery
     func setNavigationMode(_ isNavigating: Bool) {
         if isNavigating {
+            authorizationStatus = manager.authorizationStatus
+            if authorizationStatus == .authorizedWhenInUse {
+                manager.requestAlwaysAuthorization()
+            }
             manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
             manager.distanceFilter = kCLDistanceFilterNone
             manager.activityType = .automotiveNavigation
@@ -61,14 +66,16 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func requestPermission() {
+        authorizationStatus = manager.authorizationStatus
         switch manager.authorizationStatus {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse:
-            manager.requestAlwaysAuthorization()
+            break
         case .authorizedAlways:
             break
         case .denied, .restricted:
+            lastLocationError = "Location permission denied or restricted"
             break
         @unknown default:
             break
@@ -76,13 +83,21 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func startTracking() {
-        guard isAuthorized else {
+        authorizationStatus = manager.authorizationStatus
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            lastLocationError = nil
+            manager.startUpdatingLocation()
+            if CLLocationManager.headingAvailable() {
+                manager.startUpdatingHeading()
+            }
+        case .notDetermined:
             requestPermission()
-            return
-        }
-        manager.startUpdatingLocation()
-        if CLLocationManager.headingAvailable() {
-            manager.startUpdatingHeading()
+        case .denied, .restricted:
+            lastLocationError = "Location permission denied or restricted"
+            print("[LocationManager] ⚠️ \(lastLocationError ?? "Location unavailable")")
+        @unknown default:
+            break
         }
     }
 
@@ -92,12 +107,26 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        // Accept only accurate fixes — discard stale or low-accuracy updates
-        guard let loc = locations.last, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 else { return }
+        guard let loc = locations.last, loc.horizontalAccuracy >= 0 else { return }
+
+        // In Debug/Xcode, simulated device locations are how we test GPS flows.
+        // Keep rejecting simulated coordinates in release builds.
+        #if !DEBUG
         if #available(iOS 15.0, *), let source = loc.sourceInformation, source.isSimulatedBySoftware {
             print("[LocationManager] ⚠️ Ignoring simulated location update")
             return
         }
+        #endif
+
+        // Accept a coarse first fix so the map can leave "GPS searching" quickly,
+        // then require better accuracy for subsequent live-navigation updates.
+        let maxAllowedAccuracy: CLLocationAccuracy = currentLocation == nil ? 1000 : 300
+        guard loc.horizontalAccuracy <= maxAllowedAccuracy else {
+            lastLocationError = "Waiting for better GPS accuracy (±\(Int(loc.horizontalAccuracy))m)"
+            return
+        }
+
+        lastLocationError = nil
         currentLocation = loc
     }
 
@@ -114,16 +143,23 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         if clError?.code == .denied {
             stopTracking()
         }
+        lastLocationError = error.localizedDescription
         print("[LocationManager] ❌ \(error.localizedDescription)")
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
-        if manager.authorizationStatus == .authorizedWhenInUse {
-            manager.requestAlwaysAuthorization()
-        }
-        if isAuthorized {
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            lastLocationError = nil
             startTracking()
+        case .denied, .restricted:
+            lastLocationError = "Location permission denied or restricted"
+            stopTracking()
+        case .notDetermined:
+            break
+        @unknown default:
+            break
         }
     }
 

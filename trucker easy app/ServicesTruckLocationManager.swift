@@ -80,10 +80,21 @@ class TruckLocationManager: NSObject {
     // MARK: - Start/Stop Updates
     
     func startUpdating() {
-        requestAuthorization()
-        manager.startUpdatingLocation()
-        manager.startUpdatingHeading()
-        print("✅ [Location] Started updating location and heading")
+        authorizationStatus = manager.authorizationStatus
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.startUpdatingLocation()
+            if CLLocationManager.headingAvailable() {
+                manager.startUpdatingHeading()
+            }
+            print("✅ [Location] Started updating location and heading")
+        case .notDetermined:
+            requestAuthorization()
+        case .restricted, .denied:
+            print("⚠️ [Location] Cannot start updates: access denied or restricted")
+        @unknown default:
+            break
+        }
     }
     
     func stopUpdating() {
@@ -127,7 +138,13 @@ extension TruckLocationManager: CLLocationManagerDelegate {
     
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
-            guard let location = locations.last else { return }
+            guard let location = locations.last, location.horizontalAccuracy >= 0 else { return }
+            #if !DEBUG
+            if #available(iOS 15.0, *), let source = location.sourceInformation, source.isSimulatedBySoftware {
+                print("⚠️ [Location] Ignoring simulated location update")
+                return
+            }
+            #endif
             
             currentLocation = location
             speed = max(location.speed, 0)  // Negative values mean invalid
