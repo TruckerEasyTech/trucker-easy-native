@@ -126,11 +126,6 @@ struct HorizonView: View {
     @State private var showingRouteError = false
     @State private var routingNotice: String?
     @State private var showingRoutingNotice = false
-    @AppStorage("truckSafeOnlyMode") private var truckSafeOnlyMode = false
-    @State private var pendingFallbackRoute: TruckRoute?
-    @State private var pendingFallbackProvider: RoutingService.RoutingProvider = .unknown
-    @State private var showingFallbackConfirmation = false
-    @State private var hasAcceptedFallbackThisSession = false
 
     @State private var bottomSheetExpanded = false
     @State private var launchSafeScreenHeight: CGFloat = UIScreen.main.bounds.height
@@ -301,7 +296,7 @@ struct HorizonView: View {
                 )
                 // #endregion
                 // Clear ALL old route caches to prevent stale data from causing issues
-                for key in ["offlineRouteCache_v1", "offlineRouteCache_v2"] {
+                for key in ["offlineRouteCache_v1", "offlineRouteCache_v2", "offlineRouteCache_v3", "lastOfflineRoute"] {
                     UserDefaults.standard.removeObject(forKey: key)
                 }
                 locationManager.requestPermission()
@@ -353,8 +348,11 @@ struct HorizonView: View {
                                        breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
             }
             .onDisappear {
-                locationManager.stopTracking(); speedMonitorTimer?.invalidate(); speedMonitorTimer = nil
-                gpsWatchdogTimer?.invalidate(); gpsWatchdogTimer = nil
+                if !isNavigating {
+                    locationManager.stopTracking()
+                    gpsWatchdogTimer?.invalidate(); gpsWatchdogTimer = nil
+                }
+                speedMonitorTimer?.invalidate(); speedMonitorTimer = nil
                 UIApplication.shared.isIdleTimerDisabled = false
                 mapAlerts.removeAll(); dismissedRestrictionIds.removeAll(); truckWarnings = []
                 URLCache.shared.removeAllCachedResponses()
@@ -495,12 +493,6 @@ struct HorizonView: View {
                 message: { Text(routeError ?? "Could not calculate route") }
             .alert("Routing Notice", isPresented: $showingRoutingNotice) { Button("OK") {} }
                 message: { Text(routingNotice ?? "Route provider changed.") }
-            .confirmationDialog("Truck-safe route unavailable", isPresented: $showingFallbackConfirmation, titleVisibility: .visible) {
-                Button("Continue with fallback GPS") { applyPendingFallbackRoute() }
-                Button("Cancel", role: .cancel) { pendingFallbackRoute = nil; pendingFallbackProvider = .unknown; bottomSheetExpanded = false }
-            } message: {
-                Text("No truck-safe provider responded. Continue with \(pendingFallbackProvider.rawValue) for basic navigation while restrictions may be limited.")
-            }
     }
 
     // MARK: - Main Map ZStack
@@ -1627,15 +1619,6 @@ struct HorizonView: View {
                 let routing = RoutingService.shared
                 let result = try await routing.calculateTruckRoute(from: origin, to: coordinate, destinationName: address, profile: truckProfile)
                 await MainActor.run {
-                    if truckSafeOnlyMode && !routing.lastProvider.isTruckAware {
-                        if isReroute {
-                            print("[Route] Reroute: truck-safe unavailable, keeping current route")
-                            return // Don't disrupt active navigation
-                        }
-                        prepareFallbackRoute(result, provider: routing.lastProvider)
-                        return
-                    }
-                    if !routing.lastProvider.isTruckAware && !isReroute { prepareFallbackRoute(result, provider: routing.lastProvider); return }
                     applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
                 }
             } catch {
@@ -1649,7 +1632,7 @@ struct HorizonView: View {
                         }
                     } else {
                         bottomSheetExpanded = false
-                        routeError = "Unable to calculate a safe route right now. Check signal and try again."
+                        routeError = "Truck-safe route unavailable. GPS/map stays active, but turn-by-turn truck navigation requires Valhalla."
                         showingRouteError = true
                     }
                 }
@@ -1733,15 +1716,6 @@ struct HorizonView: View {
                     profile: truckProfile
                 )
                 await MainActor.run {
-                    if truckSafeOnlyMode && !routing.lastProvider.isTruckAware {
-                        if isReroute {
-                            print("[Route] Reroute: truck-safe unavailable, keeping current route")
-                            return
-                        }
-                        prepareFallbackRoute(result, provider: routing.lastProvider)
-                        return
-                    }
-                    if !routing.lastProvider.isTruckAware && !isReroute { prepareFallbackRoute(result, provider: routing.lastProvider); return }
                     applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: first.location.coordinate)
                 }
             } catch {
@@ -1755,7 +1729,7 @@ struct HorizonView: View {
                     } else {
                         bottomSheetExpanded = false
                         if let parsed = parseCoordinateAddress(address) {
-                            routeError = "Address resolved to coordinates, but safe route is unavailable. Try again."
+                            routeError = "Address resolved to coordinates, but truck-safe Valhalla routing is unavailable. GPS/map stays active."
                             showingRouteError = true
                             print("[Route] Parsed coordinate route blocked for safety: \(parsed.latitude),\(parsed.longitude)")
                         } else {
@@ -1907,9 +1881,6 @@ struct HorizonView: View {
             routeSteps = steps; currentStepIndex = 0
         }
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
-        showingFallbackConfirmation = false
-        pendingFallbackRoute = nil
-        pendingFallbackProvider = .unknown
 
         let provider = RoutingService.shared.lastProvider
         lastRoutingProvider = provider; dockCheckDone = false
@@ -1983,26 +1954,6 @@ struct HorizonView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { withAnimation { showingArrival = false } }
         }
         if !result.truckNotices.isEmpty { withAnimation { showingTruckWarnings = true } }
-    }
-
-    @MainActor
-    private func prepareFallbackRoute(_ route: TruckRoute, provider: RoutingService.RoutingProvider) {
-        bottomSheetExpanded = false
-        let isFirstFallback = !hasAcceptedFallbackThisSession
-        hasAcceptedFallbackThisSession = true
-        if isFirstFallback {
-            routingNotice = "Route via \(provider.rawValue) — truck restrictions may be limited."
-            showingRoutingNotice = true
-        }
-        applyRoute(route)
-    }
-
-    @MainActor
-    private func applyPendingFallbackRoute() {
-        guard let pending = pendingFallbackRoute else { return }
-        pendingFallbackRoute = nil; pendingFallbackProvider = .unknown
-        hasAcceptedFallbackThisSession = true
-        applyRoute(pending)
     }
 
     private func parseCoordinateAddress(_ input: String) -> CLLocationCoordinate2D? {

@@ -63,7 +63,7 @@ struct DataPipelineDiagnosticsCard: View {
     }
 
     private var routingHealthy: Bool {
-        ValhallaRoutingService.shared.isAvailable || mapboxConfigured || tomTomRoutingConfigured || tomTomSDKReady
+        ValhallaRoutingService.shared.isAvailable
     }
 
     private var routingDetails: String {
@@ -74,7 +74,7 @@ struct DataPipelineDiagnosticsCard: View {
         let tomTomSDK = tomTomSDKReady ? "TomTom SDK: ok" : "TomTom SDK: off"
         let tomTomApi = tomTomRoutingConfigured ? "TomTom API: ok" : "TomTom API: missing"
         let provider = RoutingService.shared.lastProvider.rawValue
-        return "\(provider) · \(valhalla) · \(tomTomSDK) · \(mapboxApi) · \(tomTomApi)"
+        return "\(provider) · \(valhalla) · display: \(mapboxApi) · \(tomTomSDK) · \(tomTomApi)"
     }
 
     var body: some View {
@@ -93,7 +93,7 @@ struct DataPipelineDiagnosticsCard: View {
 
             statusRow(name: "GPS",     isHealthy: gpsIsLive,           details: gpsDetails)
             statusRow(name: "Policy",  isHealthy: policyIsHealthy,     details: policyDetails)
-            statusRow(name: "Routing", isHealthy: routingHealthy,      details: routingDetails)
+            statusRow(name: "Truck Routing", isHealthy: routingHealthy, details: routingDetails)
         }
         .padding(12)
         .background(AppTheme.Colors.backgroundCard.opacity(0.95))

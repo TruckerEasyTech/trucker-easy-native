@@ -42,7 +42,7 @@ struct trucker_easy_appApp: App {
     // #endregion
 
     private func initializeRoutingRuntime() {
-        print("[Routing] ℹ️ Truck routing: Valhalla (truck-aware) + MapKit/OSRM (fallback)")
+        print("[Routing] ℹ️ Truck routing requires Valhalla truck-aware provider; GPS/map remain available without route")
     }
 
     nonisolated private static func appSchema() -> Schema {

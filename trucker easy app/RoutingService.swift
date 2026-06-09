@@ -1,8 +1,8 @@
 // RoutingService.swift
 // trucker easy app
 //
-// Clean routing service — Valhalla (truck costing, if configured) → MapKit → OSRM → offline cache.
-// Provider stack is Mapbox visualization + Valhalla/MapKit/OSRM routing.
+// Clean routing service — Valhalla truck costing only for safety-critical truck navigation.
+// Map rendering is separate; passenger-car route providers must not drive truck navigation.
 
 import Foundation
 import MapKit
@@ -73,8 +73,9 @@ final class RoutingService {
 
     // MARK: - Truck Route Request
     //
-    // Returns a TruckRoute which HorizonView renders via MKPolyline.
-    // Chain: Valhalla (if ValhallaServerURL) → MapKit → OSRM → Cached offline.
+    // Returns only a Valhalla truck-aware route for safety-critical truck navigation.
+    // GPS/map display may continue without a route, but turn-by-turn truck navigation
+    // must not fall back to passenger-car routing.
 
     func calculateTruckRoute(
         from origin: CLLocation,
@@ -92,7 +93,7 @@ final class RoutingService {
 
         print("[Routing] Starting route: \(origin.coordinate.latitude),\(origin.coordinate.longitude) → \(destination.latitude),\(destination.longitude)")
 
-        // === Provider 2: Valhalla (truck costing: height/weight/length/axle; self-hosted or demo URL) ===
+        // === Valhalla: truck costing with height/weight/length/axle restrictions ===
         if ValhallaRoutingService.shared.isAvailable {
             do {
                 let valRoute = try await ValhallaRoutingService.shared.calculateTruckRoute(
@@ -122,105 +123,27 @@ final class RoutingService {
                 print("[Routing] ✅ Valhalla OK (truck costing)")
                 recordEvent(
                     provider: .valhalla,
-                    stage: .fallbackUsed,
+                    stage: .success,
                     destinationName: destinationName,
                     startedAt: startedAt,
-                    detail: "truck-aware fallback after primary provider unavailable"
+                    detail: "truck-aware route"
                 )
                 return valRoute
             } catch {
                 failureReasons.append("Valhalla: \(error.localizedDescription)")
                 print("[Routing] Valhalla failed: \(error.localizedDescription)")
             }
+        } else {
+            failureReasons.append("Valhalla: server URL not configured")
         }
 
-        // === Provider 3: MapKit (car-only, most reliable in US) ===
-        do {
-            let mkRoute = try await fallbackMKDirections(
-                from: origin, to: destination, destinationName: destinationName
-            )
-            guard Self.isRoutePlausible(origin: origin, destination: destination, route: mkRoute) else {
-                failureReasons.append("MapKit: implausible route rejected")
-                agentLogRouting(
-                    runId: "baseline",
-                    hypothesisId: "H8",
-                    location: "RoutingService.swift:calculateTruckRoute",
-                    message: "Rejected implausible MapKit route",
-                    data: [
-                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                        "routeMeters": Int(mkRoute.distanceMeters),
-                        "destinationName": destinationName
-                    ]
-                )
-                throw RoutingServiceError.noRoute
-            }
-            lastProvider = .mapKit
-            cacheRoute(mkRoute, from: origin.coordinate, to: destination)
-            print("[Routing] ✅ MapKit OK (car-only)")
-            return mkRoute
-        } catch {
-            failureReasons.append("MapKit: \(error.localizedDescription)")
-            print("[Routing] MapKit failed: \(error.localizedDescription)")
-        }
-
-        // === Provider 4: OSRM (public server, less reliable) ===
-        do {
-            let osrmRoute = try await requestRouteFromOSRM(
-                from: origin, to: destination, destinationName: destinationName
-            )
-            guard Self.isRoutePlausible(origin: origin, destination: destination, route: osrmRoute) else {
-                failureReasons.append("OSRM: implausible route rejected")
-                agentLogRouting(
-                    runId: "baseline",
-                    hypothesisId: "H8",
-                    location: "RoutingService.swift:calculateTruckRoute",
-                    message: "Rejected implausible OSRM route",
-                    data: [
-                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                        "routeMeters": Int(osrmRoute.distanceMeters),
-                        "destinationName": destinationName
-                    ]
-                )
-                throw RoutingServiceError.noRoute
-            }
-            lastProvider = .osrm
-            cacheRoute(osrmRoute, from: origin.coordinate, to: destination)
-            print("[Routing] ✅ OSRM OK")
-            recordEvent(
-                provider: .osrm,
-                stage: .fallbackUsed,
-                destinationName: destinationName,
-                startedAt: startedAt,
-                detail: "fallback after MapKit failed"
-            )
-            return osrmRoute
-        } catch {
-            failureReasons.append("OSRM: \(error.localizedDescription)")
-            print("[Routing] OSRM failed: \(error.localizedDescription)")
-        }
-
-        // === Fallback 5: Cached route ===
-        if let cached = loadCachedRoute(origin: origin.coordinate, destination: destination) {
-            print("[Routing] ✅ Using cached offline route")
-            lastProvider = .cached
-            recordEvent(
-                provider: .cached,
-                stage: .cacheHit,
-                destinationName: destinationName,
-                startedAt: startedAt,
-                detail: "loaded offline cached route"
-            )
-            return cached
-        }
-
-        // === Hard fail in production nav: never auto-apply straight-line emergency route ===
-        print("[Routing] ❌ ALL providers failed — refusing unsafe direct-line navigation")
+        print("[Routing] ❌ Valhalla truck-safe route unavailable — refusing passenger-car fallback")
         let detail = failureReasons.joined(separator: " | ")
         lastProvider = .unknown
         lastError = detail
         recordEvent(
             provider: .unknown,
-            stage: .emergencyDirect,
+            stage: .routeRejected,
             destinationName: destinationName,
             startedAt: startedAt,
             detail: detail
@@ -563,6 +486,7 @@ final class RoutingService {
         case fallbackUsed
         case cacheHit
         case emergencyDirect
+        case routeRejected
         case invalidInput
     }
 }
