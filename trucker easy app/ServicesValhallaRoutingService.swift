@@ -13,6 +13,10 @@
 //      docker run -v /data:/data valhalla/valhalla:run-latest \
 //        valhalla_build_tiles -c valhalla.json /data/us-latest.osm.pbf
 //   5. Run: docker run -d -p 8002:8002 -v /data:/data valhalla/valhalla:run-latest
+//   DEV (Mac + iPhone, Europa): docker run -d -p 8002:8002 --name valhalla-europe \
+//        -e tile_urls=https://download.geofabrik.de/europe-latest.osm.pbf \
+//        ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+//        (middleware Python :8003 — ver README em backend/quantum-routing)
 //   6. Set Info.plist key "ValhallaServerURL" = "https://your-server.com"
 //
 // COST COMPARISON:
@@ -32,32 +36,75 @@ import MapKit
 final class ValhallaRoutingService {
     static let shared = ValhallaRoutingService()
 
+    /// LAN Valhalla: bounded retries + backoff (below); timeouts tolerate cold Docker / slow LAN.
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 22
+        config.timeoutIntervalForResource = 48
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
 
     private init() {}
 
-    // Read the self-hosted Valhalla server URL from Info.plist.
-    // Add key "ValhallaServerURL" with your server's base URL.
+    /// Primary Valhalla base URL from Info.plist (`ValhallaServerURL`).
     var serverURL: String {
         let raw = Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURL") as? String ?? ""
         return raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "||", with: "//")
     }
 
-    /// Same source as the merged app Info.plist — fails closed if xcconfig did not substitute `$(VALHALLA_SERVER_URL)`.
-    var isAvailable: Bool {
-        guard let url = Bundle.main.infoDictionary?["ValhallaServerURL"] as? String,
-              !url.isEmpty,
-              !url.contains("$(") else {
-            return false
+    /// Optional list from `ValhallaServerURLs` (comma-separated). Same `||` rule as other xcconfig URLs.
+    /// When non-empty, each entry is tried in order until one returns HTTP 200 for `/route`.
+    /// When empty, `serverURL` alone is used.
+    /// Production fallback when xcconfig secrets are missing on device builds.
+    private static let productionFallbackBaseURL = "https://valhalla.truckereasy.com"
+
+    var serverBaseURLs: [String] {
+        let listRaw = Bundle.main.object(forInfoDictionaryKey: "ValhallaServerURLs") as? String ?? ""
+        let parts = listRaw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "||", with: "//") }
+            .filter { !$0.isEmpty && !$0.contains("$(") }
+        if !parts.isEmpty { return parts }
+        let single = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !single.isEmpty, !single.contains("$(") { return [single] }
+        return [Self.productionFallbackBaseURL]
+    }
+
+    /// Same URLs as `serverBaseURLs`, but **HTTPS bases are tried before HTTP** when multiple entries exist.
+    /// Use `VALHALLA_SERVER_URLS = https:||prod.example.com,http:||192.168.x.x:8002` so fleet/global routing wins over LAN dev.
+    var prioritizedServerBaseURLs: [String] {
+        Self.prioritizeValhallaBaseURLsByScheme(serverBaseURLs)
+    }
+
+    /// Stable ordering: HTTPS (tier 0) before HTTP (tier 1); original xcconfig order preserved within each tier.
+    private static func prioritizeValhallaBaseURLsByScheme(_ urls: [String]) -> [String] {
+        guard urls.count > 1 else { return urls }
+        return urls.enumerated()
+            .sorted { lhs, rhs in
+                let tl = schemeTier(lhs.element)
+                let tr = schemeTier(rhs.element)
+                if tl != tr { return tl < tr }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    private static func schemeTier(_ raw: String) -> Int {
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "||", with: "//")
+        guard let scheme = URL(string: normalized)?.scheme?.lowercased() else { return 10 }
+        switch scheme {
+        case "https": return 0
+        case "http": return 1
+        default: return 5
         }
-        return true
+    }
+
+    /// Same source as the merged app Info.plist — fails closed if xcconfig did not substitute URLs.
+    var isAvailable: Bool {
+        !serverBaseURLs.isEmpty
     }
 
     // MARK: - Calculate Truck Route
@@ -71,11 +118,37 @@ final class ValhallaRoutingService {
         profile: TruckProfile,
         avoidTolls: Bool = false
     ) async throws -> TruckRoute {
-        guard isAvailable else {
+        guard let first = prioritizedServerBaseURLs.first else {
+            throw ValhallaError.serverNotConfigured
+        }
+        return try await calculateTruckRoute(
+            from: origin,
+            to: destination,
+            destinationName: destinationName,
+            profile: profile,
+            avoidTolls: avoidTolls,
+            serverBaseURL: first
+        )
+    }
+
+    /// Same as `calculateTruckRoute` but targets one specific Valhalla base (used when cycling multiple servers).
+    func calculateTruckRoute(
+        from origin: CLLocation,
+        to destination: CLLocationCoordinate2D,
+        destinationName: String,
+        profile: TruckProfile,
+        avoidTolls: Bool,
+        serverBaseURL: String
+    ) async throws -> TruckRoute {
+        let base = serverBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else {
             throw ValhallaError.serverNotConfigured
         }
 
-        let url = URL(string: "\(serverURL)/route")!
+        let normalizedBase = Self.normalizeValhallaBaseURL(base)
+        guard let url = URL(string: "\(normalizedBase)/route") else {
+            throw ValhallaError.serverNotConfigured
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -86,24 +159,127 @@ final class ValhallaRoutingService {
             avoidTolls: avoidTolls
         )
 
-        print("[Valhalla] Requesting truck route to \(destinationName)...")
+        let hostLabel: String
+        if let h = url.host { hostLabel = h } else { hostLabel = normalizedBase.prefix(24).description }
+        #if DEBUG
+        print("[Valhalla] Requesting truck route to \(destinationName) via \(hostLabel)...")
+        #endif
 
-        let (data, response) = try await session.data(for: request)
+        let maxAttempts = 3
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            do {
+                let (data, response) = try await session.data(for: request)
 
-        guard let http = response as? HTTPURLResponse else {
-            throw ValhallaError.invalidResponse
+                guard let http = response as? HTTPURLResponse else {
+                    throw ValhallaError.invalidResponse
+                }
+                guard http.statusCode == 200 else {
+                    let body = String(data: data, encoding: .utf8) ?? "empty"
+                    #if DEBUG
+                    print("[Valhalla] HTTP \(http.statusCode): \(body.prefix(500))")
+                    #endif
+                    throw ValhallaError.serverError(http.statusCode)
+                }
+
+                let valhalla: ValhallaRouteResponse
+                do {
+                    valhalla = try JSONDecoder().decode(ValhallaRouteResponse.self, from: data)
+                } catch {
+                    #if DEBUG
+                    let snippet = String(data: data.prefix(400), encoding: .utf8) ?? "binary"
+                    print("[Valhalla] JSON decode failed: \(error.localizedDescription) body=\(snippet)")
+                    #endif
+                    throw error
+                }
+                let route = try parseRoute(valhalla, destinationName: destinationName)
+                #if DEBUG
+                print("[Valhalla] ✅ Route: \(String(format: "%.1f", route.distanceMiles)) mi, \(Int(route.durationSeconds / 60)) min, \(route.steps.count) steps · \(hostLabel)")
+                #endif
+                return route
+            } catch {
+                lastError = error
+                let retry = attempt < maxAttempts && Self.shouldRetryValhallaTransport(error)
+                #if DEBUG
+                if retry {
+                    print("[Valhalla] attempt \(attempt)/\(maxAttempts) failed (\(error.localizedDescription)) — retrying…")
+                } else {
+                    Self.logValhallaConnectionHint(baseURL: normalizedBase, error: error)
+                }
+                #endif
+                if retry {
+                    try await Task.sleep(nanoseconds: Self.retryBackoffNanoseconds(attempt: attempt))
+                    continue
+                }
+                throw error
+            }
         }
-        guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? "empty"
-            print("[Valhalla] HTTP \(http.statusCode): \(body)")
-            throw ValhallaError.serverError(http.statusCode)
-        }
-
-        let valhalla = try JSONDecoder().decode(ValhallaRouteResponse.self, from: data)
-        let route = try parseRoute(valhalla, destinationName: destinationName)
-        print("[Valhalla] Route: \(String(format: "%.1f", route.distanceMiles)) mi, \(Int(route.durationSeconds / 60)) min, \(route.steps.count) steps")
-        return route
+        throw lastError ?? ValhallaError.invalidResponse
     }
+
+    /// Removes trailing slashes so `/route` is never `//route`.
+    private static func normalizeValhallaBaseURL(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Retry transport errors where a short backoff often helps (Wi‑Fi, Docker restart, ARP, transient refused).
+    /// Does not retry HTTP 4xx/5xx from Valhalla (handled separately — no infinite loop on bad tiles).
+    private static func shouldRetryValhallaTransport(_ error: Error) -> Bool {
+        let ns = error as NSError
+
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorTimedOut,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorNotConnectedToInternet,
+                 NSURLErrorDNSLookupFailed,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorCannotLoadFromNetwork,
+                 NSURLErrorDataNotAllowed:
+                return true
+            default:
+                break
+            }
+        }
+
+        var chain: NSError? = ns
+        while let cur = chain {
+            if cur.domain == NSPOSIXErrorDomain, cur.code == 61 { return true } // ECONNREFUSED
+            chain = cur.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
+    /// 0.45s → ~2.9s capped — spreads attempts across Docker / TCP settle without endless waits.
+    private static func retryBackoffNanoseconds(attempt: Int) -> UInt64 {
+        let baseMs: UInt64 = 450
+        let factor = UInt64(min(attempt * attempt, 42))
+        let ms = min(baseMs * factor, 2900)
+        return ms * 1_000_000
+    }
+
+    #if DEBUG
+    private static func logValhallaConnectionHint(baseURL: String, error: Error) {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return }
+        let host = URL(string: baseURL)?.host ?? baseURL
+        switch ns.code {
+        case NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost:
+            print("""
+            [Valhalla] ⚠️ Cannot reach \(host). Checklist:
+              • Valhalla running: `docker ps` (port 8002) or process listening on 8002
+              • Bind all interfaces: container `-p 8002:8002`, not only 127.0.0.1 on the phone's network path
+              • Same Wi‑Fi as iPhone; Mac LAN IP still matches xcconfig (run: ipconfig getifaddr en0)
+              • macOS Firewall: allow incoming on port 8002 for dev
+              • Production: use HTTPS URL in VALHALLA_SERVER_URL (see backend/valhalla-production/README.md)
+            """)
+        default:
+            break
+        }
+    }
+    #endif
 
     // MARK: - Build Request Body
 
@@ -140,12 +316,25 @@ final class ValhallaRoutingService {
             "costing_options": ["truck": costingOptions],
             "directions_options": [
                 "units": "miles",
-                "language": "en-US"
+                "language": Self.valhallaInstructionLanguageTag()
             ],
             "shape_match": "walk_or_snap"
         ]
 
         return try JSONSerialization.data(withJSONObject: body)
+    }
+
+    /// BCP 47 tag for Valhalla `directions_options.language` — follows driver language from app settings when possible.
+    private static func valhallaInstructionLanguageTag() -> String {
+        if let raw = UserDefaults.standard.string(forKey: "selectedLanguage"),
+           let lang = AppLanguage.allCases.first(where: { $0.rawValue == raw }) {
+            let c = lang.code
+            if c == "es-419" { return "es-MX" }
+            if c == "pt-BR" { return "pt-BR" }
+            if c == "es-ES" { return "es-ES" }
+            return c.replacingOccurrences(of: "_", with: "-")
+        }
+        return Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
     }
 
     // MARK: - Parse Valhalla Response → TruckRoute
@@ -171,7 +360,7 @@ final class ValhallaRoutingService {
                 allSteps.append(RouteStep(
                     instruction: instruction,
                     distanceMeters: maneuver.length * 1609.34,    // miles → meters
-                    durationSeconds: Double(maneuver.time),
+                    durationSeconds: maneuver.time,
                     maneuver: ValhallaManeuverType(rawValue: maneuver.type)?.instruction ?? instruction
                 ))
             }
@@ -180,35 +369,229 @@ final class ValhallaRoutingService {
         guard !allCoordinates.isEmpty else { throw ValhallaError.emptyPolyline }
 
         let totalDistanceMeters = Double(trip.summary.length) * 1609.34   // miles → meters
-        let totalDurationSeconds = Double(trip.summary.time)
+        let totalDurationSeconds = trip.summary.time
 
-        return TruckRoute(
+        var route = TruckRoute(
             coordinates: allCoordinates,
             steps: allSteps,
             distanceMeters: totalDistanceMeters,
             durationSeconds: totalDurationSeconds,
             destinationName: destinationName,
-            truckNotices: extractNotices(from: trip)
+            truckNotices: extractNotices(from: trip, legShapes: trip.legs.map(\.shape))
         )
+
+        let tollEstimate = estimateTolls(from: trip)
+        route.tollCostUSD = tollEstimate.totalCost
+        route.tollCurrency = tollEstimate.currency
+        route.tollPoints = tollEstimate.points
+
+        return route
+    }
+
+    // MARK: - Toll Estimation (from Valhalla toll_booth flags)
+
+    private struct TollEstimate {
+        let totalCost: Double
+        let currency: String
+        let points: [TollPoint]
+    }
+
+    /// Estimates toll costs from Valhalla maneuver data. Valhalla marks toll booth
+    /// maneuvers and summary-level `has_toll`. Costs are averaged per-booth by region.
+    /// This replaces the need for TollGuru or any paid toll API.
+    private func estimateTolls(from trip: ValhallaTrip) -> TollEstimate {
+        guard trip.summary.hasToll == true else {
+            return TollEstimate(totalCost: 0, currency: "USD", points: [])
+        }
+
+        var tollBooths: [TollPoint] = []
+        for leg in trip.legs {
+            for maneuver in leg.maneuvers where maneuver.tollBooth == true {
+                let name = maneuver.instruction.isEmpty ? "Toll Plaza" : maneuver.instruction
+                tollBooths.append(TollPoint(name: name, cost: 0, coordinate: nil))
+            }
+        }
+
+        let boothCount = max(tollBooths.count, 1)
+        let distanceMiles = trip.summary.length
+
+        let region = UserDefaults.standard.string(forKey: "selectedRegion") ?? "us"
+        let (costPerBooth, currency) = Self.regionalTollRate(region: region, distanceMiles: distanceMiles, boothCount: boothCount)
+
+        var points: [TollPoint] = []
+        for booth in tollBooths {
+            points.append(TollPoint(name: booth.name, cost: costPerBooth, coordinate: booth.coordinate))
+        }
+
+        if points.isEmpty && trip.summary.hasToll == true {
+            let estimatedCost = Self.distanceBasedTollEstimate(distanceMiles: distanceMiles, region: region)
+            points.append(TollPoint(name: "Toll Road", cost: estimatedCost, coordinate: nil))
+            return TollEstimate(totalCost: estimatedCost, currency: currency, points: points)
+        }
+
+        let total = points.reduce(0) { $0 + $1.cost }
+        return TollEstimate(totalCost: total, currency: currency, points: points)
+    }
+
+    /// Average toll booth cost by region for Class 8 trucks (5+ axles).
+    private static func regionalTollRate(region: String, distanceMiles: Double, boothCount: Int) -> (Double, String) {
+        switch region.lowercased() {
+        case "us", "northamerica":
+            return (5.50, "USD")
+        case "ca", "canada":
+            return (7.00, "CAD")
+        case "br", "brazil":
+            return (15.00, "BRL")
+        case "eu", "europe":
+            return (8.00, "EUR")
+        case "mx", "mexico":
+            return (120.00, "MXN")
+        default:
+            return (5.50, "USD")
+        }
+    }
+
+    /// Fallback: when Valhalla marks `has_toll` but no individual booth maneuvers,
+    /// estimate based on distance (typical US interstate toll rate for trucks).
+    private static func distanceBasedTollEstimate(distanceMiles: Double, region: String) -> Double {
+        let ratePerMile: Double
+        switch region.lowercased() {
+        case "us", "northamerica": ratePerMile = 0.25
+        case "ca", "canada":      ratePerMile = 0.30
+        case "br", "brazil":      ratePerMile = 0.80
+        case "eu", "europe":      ratePerMile = 0.35
+        case "mx", "mexico":      ratePerMile = 4.00
+        default:                   ratePerMile = 0.25
+        }
+        return (distanceMiles * ratePerMile).rounded(.up)
     }
 
     // MARK: - Extract Truck Restriction Notices
 
-    private func extractNotices(from trip: ValhallaTrip) -> [TruckRouteNotice] {
+    private func extractNotices(from trip: ValhallaTrip, legShapes: [String]) -> [TruckRouteNotice] {
         var notices: [TruckRouteNotice] = []
-        for leg in trip.legs {
-            for maneuver in leg.maneuvers {
-                // Valhalla flags restricted maneuvers with has_time_restrictions or similar
-                if maneuver.hasTimeRestrictions == true {
-                    notices.append(TruckRouteNotice(
-                        code: "time_restriction",
-                        title: "Time-restricted road segment ahead",
-                        details: maneuver.instruction
-                    ))
+        var seenKeys = Set<String>()
+
+        for (legIndex, leg) in trip.legs.enumerated() {
+            let shape = legIndex < legShapes.count ? legShapes[legIndex] : leg.shape
+            let legCoordinates = StandardPolylineDecoder.decode(shape, precision: 6)
+
+            for (maneuverIndex, maneuver) in leg.maneuvers.enumerated() {
+                guard let notice = noticeFromManeuver(
+                    maneuver,
+                    maneuverIndex: maneuverIndex,
+                    allManeuvers: leg.maneuvers,
+                    legCoordinates: legCoordinates
+                ) else {
+                    continue
                 }
+                let lat = notice.coordinate?.latitude ?? 0
+                let lon = notice.coordinate?.longitude ?? 0
+                let key = "\(notice.code)|\(String(format: "%.5f", lat))|\(String(format: "%.5f", lon))"
+                guard seenKeys.insert(key).inserted else { continue }
+                notices.append(notice)
             }
         }
+
+        if let warnings = trip.warnings {
+            for warning in warnings {
+                let text = (warning.text ?? warning.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                let code = warning.code.map(String.init) ?? "valhalla_warning"
+                let key = "trip|\(code)|\(text.prefix(80))"
+                guard seenKeys.insert(key).inserted else { continue }
+                notices.append(TruckRouteNotice(
+                    code: code,
+                    title: text,
+                    details: text,
+                    coordinate: trip.legs.first.flatMap { leg in
+                        let coords = StandardPolylineDecoder.decode(leg.shape, precision: 6)
+                        return coords.first
+                    }
+                ))
+            }
+        }
+
         return notices
+    }
+
+    private func noticeFromManeuver(
+        _ maneuver: ValhallaManeuver,
+        maneuverIndex: Int,
+        allManeuvers: [ValhallaManeuver],
+        legCoordinates: [CLLocationCoordinate2D]
+    ) -> TruckRouteNotice? {
+        let instruction = maneuver.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty else { return nil }
+
+        let parsed = Self.classifyRestriction(instruction: instruction, maneuver: maneuver)
+        guard let code = parsed?.code, let title = parsed?.title else { return nil }
+
+        return TruckRouteNotice(
+            code: code,
+            title: title,
+            details: instruction,
+            coordinate: coordinateForManeuver(
+                maneuver,
+                maneuverIndex: maneuverIndex,
+                allManeuvers: allManeuvers,
+                in: legCoordinates
+            )
+        )
+    }
+
+    private func coordinateForManeuver(
+        _ maneuver: ValhallaManeuver,
+        maneuverIndex: Int,
+        allManeuvers: [ValhallaManeuver],
+        in coordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        if let idx = maneuver.beginShapeIndex, idx >= 0, idx < coordinates.count {
+            return coordinates[idx]
+        }
+        if let endIdx = maneuver.endShapeIndex, endIdx >= 0, endIdx < coordinates.count {
+            return coordinates[endIdx]
+        }
+        guard !coordinates.isEmpty else { return nil }
+        let totalLength = allManeuvers.reduce(0.0) { $0 + max($1.length, 0) }
+        guard totalLength > 0.01 else { return coordinates.first }
+        let priorLength = allManeuvers.prefix(maneuverIndex).reduce(0.0) { $0 + max($1.length, 0) }
+        let ratio = min(1.0, max(0.0, priorLength / totalLength))
+        let estimatedIndex = min(coordinates.count - 1, Int(ratio * Double(coordinates.count - 1)))
+        return coordinates[estimatedIndex]
+    }
+
+    private static func classifyRestriction(
+        instruction: String,
+        maneuver: ValhallaManeuver
+    ) -> (code: String, title: String)? {
+        let lower = instruction.lowercased()
+
+        if maneuver.hasTimeRestrictions == true {
+            return ("time_restriction", "Time-restricted road segment")
+        }
+
+        if lower.contains("height") || lower.contains("clearance") || lower.contains("low bridge") ||
+            (lower.contains("bridge") && (lower.contains("limit") || lower.contains("maximum"))) {
+            return ("height_limit", "Height restriction ahead")
+        }
+        if lower.contains("weight") || lower.contains("gross") || lower.contains("axle") {
+            return ("weight_limit", "Weight restriction ahead")
+        }
+        if lower.contains("tunnel") {
+            return ("tunnel", "Tunnel restriction ahead")
+        }
+        if lower.contains("hazmat") || lower.contains("hazardous") {
+            return ("hazmat", "Hazmat restriction ahead")
+        }
+        if lower.contains("narrow") || lower.contains("width limit") {
+            return ("narrow_road", "Narrow road ahead")
+        }
+        if maneuver.rough == true {
+            return ("rough_road", "Rough pavement ahead")
+        }
+
+        return nil
     }
 }
 
@@ -224,7 +607,7 @@ enum ValhallaError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .serverNotConfigured:
-            return "Valhalla server URL not set in Info.plist (key: ValhallaServerURL)"
+            return "Valhalla server URL not set in Info.plist (keys: ValhallaServerURL or ValhallaServerURLs)"
         case .invalidResponse:
             return "Invalid response from Valhalla server"
         case .serverError(let code):
@@ -246,11 +629,24 @@ private struct ValhallaRouteResponse: Decodable {
 private struct ValhallaTrip: Decodable {
     let summary: ValhallaSummary
     let legs: [ValhallaLeg]
+    let warnings: [ValhallaTripWarning]?
+}
+
+private struct ValhallaTripWarning: Decodable {
+    let code: Int?
+    let text: String?
+    let message: String?
 }
 
 private struct ValhallaSummary: Decodable {
     let length: Double      // miles (we asked for "units": "miles")
-    let time: Int           // seconds
+    let time: Double        // seconds — Valhalla 3.5+ returns fractional seconds
+    let hasToll: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case length, time
+        case hasToll = "has_toll"
+    }
 }
 
 private struct ValhallaLeg: Decodable {
@@ -262,12 +658,19 @@ private struct ValhallaManeuver: Decodable {
     let type: Int
     let instruction: String
     let length: Double                  // miles
-    let time: Int                       // seconds
+    let time: Double                    // seconds — fractional from Valhalla
     let hasTimeRestrictions: Bool?
+    let tollBooth: Bool?
+    let rough: Bool?
+    let beginShapeIndex: Int?
+    let endShapeIndex: Int?
 
     enum CodingKeys: String, CodingKey {
-        case type, instruction, length, time
+        case type, instruction, length, time, rough
         case hasTimeRestrictions = "has_time_restrictions"
+        case tollBooth = "toll_booth"
+        case beginShapeIndex = "begin_shape_index"
+        case endShapeIndex = "end_shape_index"
     }
 }
 

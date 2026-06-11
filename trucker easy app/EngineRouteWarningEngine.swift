@@ -34,17 +34,18 @@ struct RouteWarningEngine {
         route: TruckRoute,
         userLocation: CLLocation,
         specs: TruckSpecifications,
-        regulations: RegulationProfile
+        regulations: RegulationProfile,
+        language: AppLanguage
     ) -> [TruckRestrictionWarning] {
         var warnings: [TruckRestrictionWarning] = []
-        
+
         // 1. Check compliance violations
-        let complianceResult = ComplianceChecker.check(specs: specs, against: regulations)
+        let complianceResult = ComplianceChecker.check(specs: specs, against: regulations, language: language)
         if !complianceResult.isCompliant {
             warnings.append(contentsOf: complianceWarnings(from: complianceResult, location: userLocation.coordinate))
         }
         
-        // 2. Extract truck-specific notices from HERE API response
+        // 2. Extract truck-specific notices from routing API responses
         warnings.append(contentsOf: extractNoticeWarnings(from: route, userLocation: userLocation))
         
         // 3. Filter by lookahead distance and bearing
@@ -78,16 +79,16 @@ struct RouteWarningEngine {
             switch violation.type {
             case .height:
                 type = .heightLimit
-                message = "⚠️ Height \(violation.current)cm exceeds legal limit \(violation.limit)cm"
+                message = "⚠️ \(violation.message)"
             case .weight:
                 type = .weightLimit
-                message = "⚠️ Weight \(violation.current)kg exceeds legal limit \(violation.limit)kg"
+                message = "⚠️ \(violation.message)"
             case .length:
                 type = .general
-                message = "⚠️ Length \(violation.current)cm exceeds legal limit \(violation.limit)cm"
+                message = "⚠️ \(violation.message)"
             case .width:
                 type = .narrowRoad
-                message = "⚠️ Width \(violation.current)cm exceeds legal limit \(violation.limit)cm"
+                message = "⚠️ \(violation.message)"
             }
             
             return TruckRestrictionWarning(
@@ -100,19 +101,17 @@ struct RouteWarningEngine {
     
     // MARK: - Notice Warnings
     
-    /// Extracts warnings from HERE route notices (truck restrictions detected by API)
+    /// Extracts warnings from route notices (truck restrictions detected by API)
     private static func extractNoticeWarnings(
         from route: TruckRoute,
         userLocation: CLLocation
     ) -> [TruckRestrictionWarning] {
         route.truckNotices.compactMap { notice in
-            // Map HERE notice codes to warning types
+            guard let coordinate = notice.coordinate else { return nil }
+
             let type = mapNoticeCodeToWarningType(notice.code)
-            let message = notice.title
-            
-            // Try to find coordinate for this notice (use route start as fallback)
-            let coordinate = route.coordinates.first ?? userLocation.coordinate
-            
+            let message = notice.details ?? notice.title
+
             return TruckRestrictionWarning(
                 type: type,
                 message: message,
@@ -121,13 +120,13 @@ struct RouteWarningEngine {
         }
     }
     
-    /// Maps HERE notice codes to TruckRestrictionWarning types
+    /// Maps provider notice codes to TruckRestrictionWarning types
     private static func mapNoticeCodeToWarningType(_ code: String) -> TruckRestrictionWarning.WarningType {
         let lowerCode = code.lowercased()
         
-        if lowerCode.contains("height") || lowerCode.contains("bridge") {
+        if lowerCode.contains("height") || lowerCode.contains("bridge") || lowerCode.contains("clearance") {
             return .lowBridge
-        } else if lowerCode.contains("weight") {
+        } else if lowerCode.contains("weight") || lowerCode.contains("gross") || lowerCode.contains("axle") {
             return .weightLimit
         } else if lowerCode.contains("tunnel") {
             return .tunnel
@@ -135,6 +134,10 @@ struct RouteWarningEngine {
             return .hazmat
         } else if lowerCode.contains("narrow") || lowerCode.contains("width") {
             return .narrowRoad
+        } else if lowerCode.contains("time") {
+            return .general
+        } else if lowerCode.contains("u_turn") || lowerCode.contains("uturn") {
+            return .general
         } else {
             return .general
         }

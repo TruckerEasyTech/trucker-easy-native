@@ -29,6 +29,8 @@ final class VoiceNavigationManager {
     private var lastSpokenStepIndex: Int = -1
     private var lastSpokenAlertId: UUID? = nil
     private var lastSpokenScaleName: String = ""
+    /// Diesel / truck-stop ETA prompts once per named stop per navigation session (stop model IDs are not stable across searches).
+    private var spokenTruckFuelStopNames: Set<String> = []
     private var lastSpeechTime: Date = .distantPast
     private let minIntervalSeconds: TimeInterval = 7
 
@@ -49,7 +51,9 @@ final class VoiceNavigationManager {
             try session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers])
             try session.setActive(true)
         } catch {
+            #if DEBUG
             print("[Voice] Audio session setup failed: \(error.localizedDescription)")
+            #endif
         }
     }
 
@@ -77,6 +81,26 @@ final class VoiceNavigationManager {
         speak(phrase, language: lang.speechLanguageCode)
     }
 
+    /// Same as `announceScaleAhead` but includes crowd‑reported open / closed when known (navigation awareness).
+    func announceScaleAheadWithStatus(stationName: String, distanceText: String, statusNote: String?, lang: AppLanguage) {
+        guard isEnabled else { return }
+        guard stationName != lastSpokenScaleName else { return }
+        lastSpokenScaleName = stationName
+        var phrase = String(format: lang.voiceScaleAheadPhrase, distanceText)
+        if let statusNote, !statusNote.isEmpty {
+            phrase += " \(statusNote)"
+        }
+        speak(phrase, language: lang.speechLanguageCode)
+    }
+
+    func announceTruckFuelEta(stopName: String, etaMinutes: Int, lang: AppLanguage) {
+        guard isEnabled else { return }
+        guard !spokenTruckFuelStopNames.contains(stopName) else { return }
+        spokenTruckFuelStopNames.insert(stopName)
+        let phrase = String(format: lang.voiceTruckFuelEtaPhrase, stopName, etaMinutes)
+        speak(naturalize(phrase, lang: lang), language: lang.speechLanguageCode)
+    }
+
     func announceRoadAlert(type: String, alertId: UUID, lang: AppLanguage) {
         guard isEnabled else { return }
         guard alertId != lastSpokenAlertId else { return }
@@ -89,6 +113,7 @@ final class VoiceNavigationManager {
         lastSpokenStepIndex = -1
         lastSpokenAlertId = nil
         lastSpokenScaleName = ""
+        spokenTruckFuelStopNames.removeAll()
         synthesizer.stopSpeaking(at: .word)
     }
 
@@ -167,12 +192,16 @@ final class VoiceNavigationManager {
             qualityRank(a.quality) > qualityRank(b.quality)
         }
 
-        let resolved = ranked.first
+        guard let resolved = ranked.first
             ?? AVSpeechSynthesisVoice(language: "en-US")
-            ?? AVSpeechSynthesisVoice.speechVoices().first!
+            ?? AVSpeechSynthesisVoice.speechVoices().first else {
+            return AVSpeechSynthesisVoice()
+        }
 
         voiceCache[languageCode] = resolved
+        #if DEBUG
         print("[Voice] Selected: \(resolved.name) [\(resolved.language)] quality:\(resolved.quality.rawValue)")
+        #endif
         return resolved
     }
 
@@ -211,6 +240,8 @@ final class VoiceNavigationManager {
         utterance.postUtteranceDelay = 0.12
 
         synthesizer.speak(utterance)
+        #if DEBUG
         print("[Voice] ▶︎ \"\(text)\"  voice:\(utterance.voice?.name ?? "?")")
+        #endif
     }
 }

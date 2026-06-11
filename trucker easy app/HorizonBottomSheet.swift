@@ -29,6 +29,8 @@ struct HorizonBottomSheet: View {
     @Binding var loadCargoOnBoard: Bool
     var isAnalyzingLoadRoute: Bool
     let onAnalyzeLoadRoute: () -> Void
+    /// Dentro do painel unificado (toolbar + sheet) — sem cantos/clip duplicados.
+    var unifiedChrome: Bool = false
 
     @State private var destination = ""
     @State private var weatherService = WeatherService.shared
@@ -86,9 +88,10 @@ struct HorizonBottomSheet: View {
                     .padding(.top, 4)
             }
 
+            if isExpanded {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    if !isNavigating {
+                    if !isNavigating && isExpanded && false {
                         loadPlanningSection
                             .padding(.horizontal, 14)
                             .padding(.top, 10)
@@ -122,14 +125,18 @@ struct HorizonBottomSheet: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            }
         }
         // ━━━ FIX: OPAQUE SOLID background ━━━
         // BEFORE (caused black screen overlay):
         //   .background(Color(hex: "#0d1117").opacity(0.18))
         //   .background(.ultraThinMaterial)
         // NOW: Solid opaque dark — no transparency, no material blur
-        .background(Color(hex: "#0d1117"))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(unifiedChrome ? Color.clear : GPSDesignSystem.Colors.chromeBackground)
+        .clipShape(RoundedRectangle(cornerRadius: unifiedChrome ? 0 : 20, style: .continuous))
+        .onChange(of: showSuggestions) { _, showing in
+            if showing && !isNavigating { isExpanded = true }
+        }
         .onChange(of: searchFocused) { _, focused in
             guard !isNavigating else { return }
             if focused {
@@ -138,13 +145,17 @@ struct HorizonBottomSheet: View {
                 isExpanded = false
             }
             // #region agent log
+            #if DEBUG
             print("[DBG][SEARCH][H-s1] searchFocused=\(focused) isExpanded=\(isExpanded)")
+            #endif
             // #endregion
         }
         .onChange(of: destination) { _, newValue in
             searchDebounceTask?.cancel()
             // #region agent log
+            #if DEBUG
             print("[DBG][SEARCH][H-s1] destinationChanged len=\(newValue.count) showSuggestions=\(showSuggestions)")
+            #endif
             // #endregion
             if newValue.count < 2 {
                 searchSuggestions = []
@@ -166,7 +177,9 @@ struct HorizonBottomSheet: View {
                 audioEngine = AVAudioEngine()
             }
             // #region agent log
+            #if DEBUG
             print("[DBG][BS][H-ui-5] HorizonBottomSheet onAppear ready speech/audio")
+            #endif
             // #endregion
         }
     }
@@ -239,45 +252,48 @@ struct HorizonBottomSheet: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(AppTheme.Colors.textSecondary)
-            TextField("Destination: address or place name", text: $destination)
-                .foregroundColor(.white)
-                .font(.system(size: 15))
+            TextField("Set destination for truck routes", text: $destination)
+                .foregroundColor(GPSDesignSystem.Colors.textPrimary)
+                .font(GPSDesignSystem.Typography.searchPlaceholder())
                 .submitLabel(.go)
                 .focused($searchFocused)
                 .onSubmit {
                     if !destination.isEmpty {
                         // #region agent log
+                        #if DEBUG
                         print("[DBG][SEARCH][H-s2] onSubmit destination='\(destination)'")
+                        #endif
                         // #endregion
                         submitDestination()
                     }
                 }
             if isCalculatingRoute {
-                ProgressView().tint(Color(hex: "#00d4c8"))
+                ProgressView().tint(GPSDesignSystem.Colors.primaryAction)
             } else if !destination.isEmpty {
                 Button(action: {
                     submitDestination()
                 }) {
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(Color(hex: "#00d4c8"))
+                        .foregroundColor(GPSDesignSystem.Colors.primaryAction)
                 }
             }
             Button(action: toggleSpeechRecognition) {
                 Image(systemName: isListening ? "mic.fill" : "mic")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(isListening ? Color(hex: "#ef4444") : Color(hex: "#00d4c8"))
+                    .foregroundColor(isListening ? GPSDesignSystem.Colors.alert : GPSDesignSystem.Colors.textSecondary)
                     .te_uniformScale(isListening ? 1.2 : 1.0)
                     .animation(.easeInOut(duration: 0.2), value: isListening)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background(Color.white.opacity(0.07))
-        .cornerRadius(12)
+        .frame(minHeight: GPSDesignSystem.Metrics.searchBarHeight)
+        .background(GPSDesignSystem.Colors.panelElevated)
+        .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isListening ? Color(hex: "#ef4444").opacity(0.6) : Color.clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous)
+                .stroke(isListening ? GPSDesignSystem.Colors.alert.opacity(0.6) : GPSDesignSystem.Colors.border, lineWidth: 1)
         )
     }
 
@@ -304,7 +320,7 @@ struct HorizonBottomSheet: View {
                         searchSuggestions = []
                         searchFocused = false
                         // ━━━ FIX: Use coordinate directly (avoids redundant geocoding) ━━━
-                        let coord = item.location.coordinate
+                        let coord = item.placemark.coordinate
                         if let directRoute = onCalculateRouteToCoordinate {
                             directRoute(coord, name)
                         } else {
@@ -321,8 +337,8 @@ struct HorizonBottomSheet: View {
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
                                     .lineLimit(1)
-                                if let addr = item.address?.shortAddress
-                                    ?? item.addressRepresentations?.cityWithContext {
+                                let addrParts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea].compactMap { $0 }
+                                if let addr = addrParts.isEmpty ? nil : addrParts.joined(separator: ", ") {
                                     Text(addr)
                                         .font(.system(size: 11))
                                         .foregroundColor(AppTheme.Colors.textSecondary)
@@ -331,7 +347,7 @@ struct HorizonBottomSheet: View {
                             }
                             Spacer()
                             if let loc = locationManager.currentLocation {
-                                let dist = loc.distance(from: item.location)
+                                let dist = loc.distance(from: CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude))
                                 Text(formatSuggestionDistance(dist))
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(AppTheme.Colors.accent)
@@ -393,7 +409,9 @@ struct HorizonBottomSheet: View {
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
             // #region agent log
+            #if DEBUG
             print("[DBG][AUD][H-audio-3] invalid input format channels=\(inputFormat.channelCount) rate=\(Int(inputFormat.sampleRate))")
+            #endif
             // #endregion
             return
         }
@@ -424,7 +442,9 @@ struct HorizonBottomSheet: View {
             let byteSize = buffer.audioBufferList.pointee.mBuffers.mDataByteSize
             guard byteSize > 0 else {
                 // #region agent log
+                #if DEBUG
                 print("[DBG][AUD][H-audio-1] skip empty AVAudioBuffer byteSize=0")
+                #endif
                 // #endregion
                 return
             }
@@ -432,7 +452,9 @@ struct HorizonBottomSheet: View {
         }
         isAudioTapInstalled = true
         // #region agent log
+        #if DEBUG
         print("[DBG][AUD][H-audio-3] tap installed sampleRate=\(Int(recordingFormat.sampleRate))")
+        #endif
         // #endregion
 
         audioEngine.prepare()
@@ -478,7 +500,7 @@ struct HorizonBottomSheet: View {
         let sorted: [MKMapItem]
         if let loc = locationManager.currentLocation {
             sorted = items.sorted { a, b in
-                return loc.distance(from: a.location) < loc.distance(from: b.location)
+                return loc.distance(from: CLLocation(latitude: a.placemark.coordinate.latitude, longitude: a.placemark.coordinate.longitude)) < loc.distance(from: CLLocation(latitude: b.placemark.coordinate.latitude, longitude: b.placemark.coordinate.longitude))
             }
         } else {
             sorted = items
@@ -500,7 +522,9 @@ struct HorizonBottomSheet: View {
         destination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destination.isEmpty else { return }
         // #region agent log
+        #if DEBUG
         print("[DBG][SEARCH][H-s2] submitDestination trimmed='\(destination)' suggestions=\(searchSuggestions.count)")
+        #endif
         // #endregion
 
         // Prefer coordinate-based routing from ranked suggestions
@@ -509,7 +533,7 @@ struct HorizonBottomSheet: View {
             let name = best.name ?? destination
             destination = name
             if let directRoute = onCalculateRouteToCoordinate {
-                directRoute(best.location.coordinate, name)
+                directRoute(best.placemark.coordinate, name)
                 return
             }
         }
@@ -560,25 +584,25 @@ struct HorizonBottomSheet: View {
         HStack(spacing: 10) {
             Button(action: { onClearRoute?(); destination = "" }) {
                 Text(lang.clearTripLabel)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
-                    .background(Color(hex: "#ef4444"))
-                    .cornerRadius(12)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(GPSDesignSystem.Colors.alert)
+                    .frame(width: GPSDesignSystem.Metrics.clearTripWidth)
+                    .frame(height: GPSDesignSystem.Metrics.actionButtonHeight)
+                    .background(GPSDesignSystem.Colors.alertDark)
+                    .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous))
             }
             Button(action: onCenterLocation) {
                 HStack(spacing: 6) {
                     Image(systemName: "location.fill")
                         .font(.system(size: 13, weight: .bold))
                     Text(lang.goLabel)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 16, weight: .bold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(GPSDesignSystem.Colors.chromeBackground)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(Color(hex: "#1d6ae5"))
-                .cornerRadius(12)
+                .frame(height: GPSDesignSystem.Metrics.actionButtonHeight)
+                .background(GPSDesignSystem.Colors.primaryAction)
+                .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous))
             }
         }
     }

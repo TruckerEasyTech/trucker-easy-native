@@ -63,11 +63,12 @@ struct HorizonView: View {
     @Environment(RegionalSettingsManager.self) private var regionalSettings
     @Environment(\.scenePhase) private var scenePhase
     @State private var dispatchService = DispatchService.shared
+    @State private var store = StoreKitManager.shared
     @Query private var trips: [Trip]
     @Query private var geofences: [GeofenceRegion]
 
     @State private var locationManager = LocationManager()
-    @State private var selectedMapStyle: MapStyleOption = .standard
+    @State private var selectedMapStyle: MapStyleOption = .globe
     @State private var mapAlerts: [MapAlert] = []
     @State private var route: MKRoute?
     @State private var truckRoute: TruckRoute?
@@ -105,12 +106,14 @@ struct HorizonView: View {
     @State private var showingHOSSettings = false
 
     @State private var currentTruckStop: TruckStopItem? = nil
+    @State private var truckStopArrivedAt: Date? = nil
     @State private var parkingPromptShownFor: String = ""
     @State private var showingParkingPrompt = false
-    @State private var lastTruckStopForReview: TruckStopItem? = nil
-    @State private var showingTruckStopReview = false
 
     @State private var locationHistory: [CLLocation] = []
+    /// Sub-sample fixes into `locationHistory` — grade/curve alerts only need sparse points; avoids work every GPS tick.
+    @State private var lastLocationHistorySampleAt: Date = .distantPast
+    @State private var lastLocationHistorySample: CLLocation?
     @State private var showingGradeAlert = false
     @State private var gradeAlertMessage = ""
     @State private var gradeIsDescending = false
@@ -118,6 +121,7 @@ struct HorizonView: View {
     @State private var showingWindAlert = false
     @State private var windAlertMph: Int = 0
     @State private var windAlertIsGust = false
+    @State private var lastNavFuelEtaVoiceAt: Date = .distantPast
     @State private var lastGradeCheckAt: Date = .distantPast
     @State private var lastCurveCheckAt: Date = .distantPast
     @State private var lastWindCheckAt: Date = .distantPast
@@ -127,7 +131,7 @@ struct HorizonView: View {
     @State private var dockCheckDone = false
 
     @State private var foodSuggestion: FoodSuggestion? = nil
-    @State private var showingFoodSuggestion = true
+    @State private var showingFoodSuggestion = false
     @State private var lastFoodSuggestionLocation: CLLocation? = nil
 
     @State private var showingLoadSheet = false
@@ -140,7 +144,7 @@ struct HorizonView: View {
     @State private var showingRouteError = false
     @State private var routingNotice: String?
     @State private var showingRoutingNotice = false
-    @AppStorage("truckSafeOnlyMode") private var truckSafeOnlyMode = false
+    @AppStorage("truckSafeOnlyMode") private var truckSafeOnlyMode = AppAccessPolicy.enforceTruckOnlyRouting
     @State private var pendingFallbackRoute: TruckRoute?
     @State private var pendingFallbackProvider: RoutingService.RoutingProvider = .unknown
     @State private var showingFallbackConfirmation = false
@@ -151,7 +155,87 @@ struct HorizonView: View {
     @State private var isIdleBottomSheetReady = false
 
     private var idleBottomSheetHeight: CGFloat {
-        bottomSheetExpanded ? launchSafeScreenHeight * 0.70 : 120
+        bottomSheetExpanded ? launchSafeScreenHeight * 0.62 : idleCollapsedChromeHeight
+    }
+
+    /// Dispatch UI hidden for driver beta — backend hooks remain for fleet portal later.
+    private var dispatchDriverUIEnabled: Bool { AppAccessPolicy.driverDispatchEnabled }
+
+    @State private var navigationPOIsHidden = false
+
+    /// POIs on map (always during navigation unless driver taps Hide).
+    private var mapTruckStopsForDisplay: [TruckStopItem] {
+        navigationPOIsHidden ? [] : truckStopService.nearbyStops
+    }
+
+    /// Upcoming truck stops + weigh ahead (Trucker Path–style corridor rail).
+    private var corridorRailItems: [HorizonCorridorRailItem] {
+        guard isNavigating, let loc = locationManager.currentLocation else { return [] }
+        let heading = locationManager.currentHeading?.trueHeading
+        var items: [HorizonCorridorRailItem] = []
+
+        if showingScaleAlert {
+            items.append(HorizonCorridorRailItem(
+                id: "scale-\(scaleAlertName)",
+                kind: .weighStation,
+                title: scaleAlertName,
+                distanceMiles: scaleAlertDistanceMiles,
+                status: scaleAlertStatus,
+                isOfficialStatus: scaleAlertProvenance.isOfficial
+            ))
+        }
+
+        for stop in truckStopService.nearbyStops {
+            let distMeters = stop.distanceMeters
+            guard distMeters <= 80_467 else { continue } // 50 mi
+            if let heading {
+                let coord = stop.coordinate
+                let diff = abs(angleDeltaDegrees(heading, loc.coordinate.bearing(to: coord)))
+                guard diff <= 75 else { continue }
+            }
+            let parkingStatus: ScaleAlertBanner.ScaleStatus? = {
+                if let avail = stop.amenities.parkingAvailable {
+                    return avail == 0 ? .closed : .open
+                }
+                switch stop.amenities.parkingStatus {
+                case .full: return .closed
+                case .available, .limited: return .open
+                case .unknown: return nil
+                }
+            }()
+            items.append(HorizonCorridorRailItem(
+                id: stop.id.uuidString,
+                kind: .truckStop,
+                title: stop.name,
+                distanceMiles: distMeters / 1609.34,
+                status: parkingStatus,
+                isOfficialStatus: stop.dataSource == .supabase && parkingStatus != nil
+            ))
+        }
+
+        return items
+            .sorted { $0.distanceMiles < $1.distanceMiles }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    /// Comfort dark chrome: always while navigating; when idle, local time 18:00–05:59 (driver timezone).
+    private var navigationPrefersDarkChrome: Bool {
+        if isNavigating { return true }
+        let h = Calendar.current.component(.hour, from: Date())
+        return h < 6 || h >= 18
+    }
+
+    private var idleCollapsedChromeHeight: CGFloat {
+        GPSDesignSystem.Metrics.toolbarHeight + 14 + 84
+    }
+
+    /// Espaço acima da tab bar nativa (Meu Horizonte, Check-up…).
+    private var mainTabBarClearance: CGFloat { 52 }
+
+    /// Para posicionar zoom/IA sem sobrepor o painel idle.
+    private var idleMapControlsBottomInset: CGFloat {
+        idleBottomSheetHeight + mainTabBarClearance + 12
     }
 
     private var navigationTopInset: CGFloat {
@@ -159,6 +243,30 @@ struct HorizonView: View {
             .compactMap { $0 as? UIWindowScene }
             .first?.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.top ?? 52
     }
+
+    /// Altura estimada do topo em navegação (barra compacta + faixas opcionais).
+    private var navigationTopChromeHeight: CGFloat {
+        guard isNavigating else { return 110 }
+        var height = navigationTopInset + 88
+        if !routeSteps.isEmpty,
+           currentStepIndex < routeSteps.count,
+           isHighwayStep(routeSteps[currentStepIndex].instructions) {
+            height += GPSDesignSystem.Metrics.laneGuidanceHeight + 4
+        }
+        return height
+    }
+
+    /// Margem direita — coluna de zoom/mute no chrome de navegação.
+    private var navigationRightRailWidth: CGFloat { 56 }
+
+    /// Largura reservada para o pill DOT (banner não invade este slot).
+    private var dotHosPillSlotWidth: CGFloat { 128 }
+
+    private var dotHosTopPadding: CGFloat {
+        isNavigating ? max(8, navigationTopInset - 2) : 56
+    }
+
+    private var dotHosReservedTrailing: CGFloat { dotHosPillSlotWidth + 14 }
 
     /// Keeps the leading tool column scrollable on short phones so it never runs into the bottom parking/control row.
     private var idleLeadingToolsScrollMaxHeight: CGFloat {
@@ -189,12 +297,20 @@ struct HorizonView: View {
     @State private var isAnalyzingLoadRoute = false
 
     @State private var showingWeighStation = false
-    @State private var nearbyWeighStationName = "Nearby Weigh Station"
 
     @State private var showingScaleAlert = false
-    @State private var scaleAlertName = "Weigh Station"
+    @State private var scaleAlertName = ""
     @State private var scaleAlertDistanceMiles: Double = 5.0
     @State private var scaleAlertStatus: ScaleAlertBanner.ScaleStatus = .unknown
+    @State private var scaleAlertCoordinate: CLLocationCoordinate2D?
+    @State private var scaleAlertPoiPlaceId: UUID?
+    @State private var scaleAlertGovStatus: String?
+    @State private var scaleAlertGovSource: String?
+    @State private var scaleAlertGovSiteOpen: Bool?
+    @State private var scaleAlertProvenance: WeighStationStatusProvenance = .locationOnly
+    @State private var scaleAlertCommunityHint: WeighStationStatus?
+    @State private var lastScaleVoiceKey: String?
+    @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
 
     @State private var showingCheapestDiesel = false
@@ -215,31 +331,59 @@ struct HorizonView: View {
     @State private var aiChatInput = ""
     @State private var aiIsStreaming = false
 
+    @State private var showingRouteEasyPicker = false
+    @State private var showingRouteEasyUpgrade = false
+    @State private var routeEasyUpsellKind: RouteEasyKind = .fewerTolls
+    @State private var routeEasyOptions: [RouteEasyOption] = []
+    @State private var routeEasyPendingCoordinate: CLLocationCoordinate2D?
+    @State private var routeEasyPendingAddress: String = ""
+    @State private var integrationHealthResults: [IntegrationHealthResult] = []
+    @State private var integrationHealthChecked = false
+
     @State private var logisticsNewsService = LogisticsNewsService.shared
 
     @State private var reviewTargetStop: TruckStopItem? = nil
     @State private var showingStopReview = false
 
+    private struct PendingFacilityVisit: Equatable {
+        let load: DispatchedLoad
+        let type: FacilityReviewType
+        let coordinate: CLLocationCoordinate2D
+        let arrivedAt: Date
+    }
+    @State private var pendingFacilityVisit: PendingFacilityVisit? = nil
+
+    private let stopReviewMinDwellSeconds: TimeInterval = 180
+    private let facilityReviewMinDwellSeconds: TimeInterval = 120
+    private let facilityDepartureRadiusMeters: Double = 500
+
     @State private var showingFacilityReview = false
     @State private var facilityReviewType: FacilityReviewType = .pickup
+    @State private var facilityReviewLoad: DispatchedLoad? = nil
+    @State private var facilityReviewCoordinate: CLLocationCoordinate2D? = nil
     @State private var loadPickedUp = false
-    @State private var pendingDeliveryAction: (() -> Void)? = nil
 
     @State private var showingArrival = false
     @State private var arrivalDestinationName = ""
     @State private var lastRerouteAt: Date = .distantPast
 
+    /// Idle-only: blocks duplicate route starts within a short window (same origin/destination), e.g. suggestion tap + stray submit.
+    @State private var lastIdleRouteDedupeKey: String = ""
+    @State private var lastIdleRouteDedupeAt: Date = .distantPast
+
     private var gpsIsLive: Bool {
         guard let loc = locationManager.currentLocation else { return false }
         let age = abs(loc.timestamp.timeIntervalSinceNow)
-        return age <= 8 && loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy <= 80
+        let maxAge: TimeInterval = isNavigating ? 30 : 60
+        let maxAccuracy: CLLocationDistance = isNavigating ? 150 : 120
+        return age <= maxAge && loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy <= maxAccuracy
     }
 
     private var gpsStatusText: String {
-        guard let loc = locationManager.currentLocation else { return "GPS searching" }
+        guard let loc = locationManager.currentLocation else { return lang.horizonGpsSearching }
         let age = Int(abs(loc.timestamp.timeIntervalSinceNow))
-        if gpsIsLive { return "GPS live · ±\(Int(loc.horizontalAccuracy))m" }
-        return "GPS stale · \(age)s"
+        if gpsIsLive { return lang.horizonGpsLive(accuracyMeters: Int(loc.horizontalAccuracy)) }
+        return lang.horizonGpsStale(seconds: age)
     }
     @State private var lastOpsRefreshAt: Date = .distantPast
     @State private var lastOpsRefreshLocation: CLLocation? = nil
@@ -259,7 +403,19 @@ struct HorizonView: View {
 
     var activeTrip: Trip? { trips.first(where: { $0.isActive }) }
     var lang: AppLanguage { regionalSettings.currentLanguage }
+    /// Purple route line when solver is Neal / Leap / Braket (geometry still from Valhalla/OSRM/MapKit).
+    private var routeQuantumMapLineAccent: Bool { truckRoute?.provenance?.usesQuantumAccentPolyline ?? false }
     private var isNavigating: Bool { truckRoute != nil || route != nil }
+    private var subscriptionPlan: TruckerEasyPlan { store.effectivePlan }
+    private var routingAccessMode: RoutingService.RoutingAccessMode {
+        if subscriptionPlan.hasTruckRoutes || AppAccessPolicy.unlockAllFeaturesForTesting {
+            return .truckAware
+        }
+        return .automobileOnly
+    }
+    private var routeEasyIncludesFuelSmart: Bool {
+        subscriptionPlan.hasRouteIntelligence
+    }
     private var activeDistanceMeters: Double { truckRoute?.distanceMeters ?? route?.distance ?? 0 }
     private var activeDurationSeconds: Double {
         if let here = truckRoute { return here.durationSeconds }
@@ -279,9 +435,11 @@ struct HorizonView: View {
                 mapAlerts: mapAlerts,
                 formatDistance: { regionalSettings.formatDistance($0) }
             ))
-            .toolbar(isNavigating ? .hidden : .visible, for: .tabBar)
+            // Tab bar always visible — hiding it trapped users on Horizon after route preview.
+            .toolbar(.visible, for: .tabBar)
             // ━━━ NUCLEAR FIX: white background behind EVERYTHING ━━━
             .background(Color.white.ignoresSafeArea())
+            .dotSpeedFeeder(locationManager: locationManager, hosContext: hosContext)
     }
 
     // MARK: - Lifecycle + onChange modifiers
@@ -321,18 +479,8 @@ struct HorizonView: View {
                 if let hk = HealthKitManager.shared { hk.requestAuthorization() }
                 #endif
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    loadFoodSuggestion()
                     if let loc = locationManager.currentLocation {
-                        if truckStopService.nearbyStops.isEmpty {
-                            lastScaleCheckLocation = loc
-                            Task {
-                                await truckStopService.searchNearby(location: loc)
-                                await MainActor.run {
-                                    truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
-                                    updateCheapestDiesel(); checkForNearbyScales(from: loc); refreshNearestParking(from: loc)
-                                }
-                            }
-                        }
+                        // Truck stops load from handleLocationUpdate (avoids duplicate places_near on launch).
                         Task {
                             await fleetTelemetryService.refreshIfNeeded()
                             await countryCompliance.refreshIfNeeded(for: loc)
@@ -345,17 +493,33 @@ struct HorizonView: View {
                     loadRemoteAlerts()
                 }
                 let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-                let todayISO = ISO8601DateFormatter().string(from: Calendar.current.startOfDay(for: Date()))
-                if lastMoodCheckDateString != todayStr && lastCheckInDateStr == todayISO {
+                let hour = Calendar.current.component(.hour, from: Date())
+                if lastMoodCheckDateString != todayStr && hour >= 18 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                        showingMoodCheck = true; lastMoodCheckDateString = todayStr
+                        presentMoodCheckIfParked()
+                    }
+                }
+                if let loc = locationManager.currentLocation {
+                    Task {
+                        await WeighStationStatusService.shared.fetchRemoteReports(
+                            near: loc.coordinate,
+                            radiusKm: 200
+                        )
                     }
                 }
                 startSpeedMonitoringForDusk()
-                Task { await fetchPendingDispatchLoads() }
+                Task { if dispatchDriverUIEnabled { await fetchPendingDispatchLoads() } }
                 let hos = regionalSettings.hosRules
                 hosContext.updateRules(maxDriving: hos.maxDrivingHours, serviceWindow: hos.serviceWindowHours,
                                        breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
+                let mph = max(0, (locationManager.currentLocation?.speed ?? 0) * 2.23694)
+                hosContext.reconcileParkedAtLaunch(isNavigating: isNavigating, speedMph: mph)
+                Task {
+                    let health = await IntegrationsHealthCheck.checkValhalla()
+                    #if DEBUG
+                    print("[TruckerEasy] Valhalla \(health.ok ? "ONLINE" : "OFFLINE") — \(health.detail)")
+                    #endif
+                }
             }
             .onDisappear {
                 locationManager.stopTracking(); speedMonitorTimer?.invalidate(); speedMonitorTimer = nil
@@ -367,30 +531,21 @@ struct HorizonView: View {
                 mapAlerts = Array(mapAlerts.suffix(10)); dismissedRestrictionIds.removeAll()
                 truckWarnings = []; URLCache.shared.removeAllCachedResponses()
             }
-            .dotSpeedFeeder(locationManager: locationManager, hosContext: hosContext)
             .onChange(of: truckProfile) { _, newProfile in newProfile.save() }
             .onChange(of: selectedNearbyCategory) { _, cat in
                 nearbyItems = []; if let cat = cat { searchNearby(category: cat) }
             }
             .onChange(of: route) { _, newRoute in
-                if newRoute == nil && truckRoute == nil { routeSteps = []; currentStepIndex = 0; showingSteps = false }
+                handleRouteStateChange(hasRoute: newRoute != nil || truckRoute != nil)
             }
             .onChange(of: truckRoute) { _, newHere in
-                if newHere == nil && route == nil {
-                    routeSteps = []; currentStepIndex = 0; showingSteps = false
-                    currentTollResult = nil; currentProfitability = nil
-                }
+                handleTruckRouteStateChange(hasRoute: newHere != nil || route != nil)
             }
             .onChange(of: isNavigating) { _, navigating in
-                UIApplication.shared.isIdleTimerDisabled = navigating
-                locationManager.setNavigationMode(navigating)
-                if navigating {
-                    bottomSheetExpanded = false; showingAIChat = false; showingSteps = false
-                    showingTruckStops = false; selectedNearbyCategory = nil; showingDispatchAlert = false
-                    showingRouteError = false; routeError = nil
-                }
+                handleNavigationModeChange(navigating)
             }
             .onChange(of: dispatchService.pendingLoad) { _, newLoad in
+                guard dispatchDriverUIEnabled else { return }
                 if let load = newLoad { pendingDispatchLoad = load; withAnimation { showingDispatchAlert = true } }
             }
             .onChange(of: regionalSettings.currentRegion) { _, _ in
@@ -401,9 +556,11 @@ struct HorizonView: View {
             .onChange(of: regionalSettings.currentLanguage) { _, newLang in
                 navigationEngine.language = newLang; VoiceNavigationManager.shared.resetForNewRoute()
             }
-            .onChange(of: locationManager.currentLocation?.timestamp) { _, _ in handleLocationUpdate() }
-            .onChange(of: locationManager.currentLocation?.timestamp) { _, _ in
+            .onChange(of: locationManager.locationFixEpoch) { _, _ in
+                handleLocationUpdate()
+                #if DEBUG
                 print("[DBG][H16] gps status update='\(gpsStatusText)' live=\(gpsIsLive)")
+                #endif
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
@@ -427,7 +584,7 @@ struct HorizonView: View {
                 .presentationDetents([.medium, .large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingTruckSettings) {
-                HorizonTruckSettingsSheet(profile: $truckProfile, lang: lang)
+                HorizonTruckSettingsSheet(profile: $truckProfile, truckSafeOnlyMode: $truckSafeOnlyMode, lang: lang)
                     .presentationDetents([.medium]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingHOSSettings) {
@@ -440,28 +597,29 @@ struct HorizonView: View {
                 })
                 .presentationDetents([.large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
-            .sheet(isPresented: $showingStopReview) {
+            .sheet(isPresented: $showingStopReview, onDismiss: { reviewTargetStop = nil }) {
                 if let stop = reviewTargetStop {
                     StopReviewSheet(stop: stop) { review in
-                        print("StopReview submitted for \(review.stopName): service=\(review.serviceRating) shower=\(review.showerRating) overall=\(review.overallRating)")
+                        try await submitStopReview(review, for: stop)
                     }
                     .presentationDetents([.large]).presentationDragIndicator(.visible)
                 }
             }
-            .sheet(isPresented: $showingTruckStopReview) {
-                if let stop = lastTruckStopForReview {
-                    HorizonTruckStopReviewSheet(stop: stop) { showingTruckStopReview = false; lastTruckStopForReview = nil }
-                        .presentationDetents([.large]).presentationDragIndicator(.visible)
-                }
-            }
             .sheet(isPresented: $showingFacilityReview) {
-                if let load = activeLoad {
-                    FacilityReviewSheet(load: load, type: facilityReviewType,
+                if let load = facilityReviewLoad, let coordinate = facilityReviewCoordinate {
+                    FacilityReviewSheet(
+                        load: load,
+                        type: facilityReviewType,
+                        visitCoordinate: coordinate,
                         onSubmit: { review in
-                            print("FacilityReview: \(review.type) at \(review.companyName ?? load.loadNumber)")
-                            pendingDeliveryAction?(); pendingDeliveryAction = nil
+                            Task { await submitFacilityReview(review) }
                         },
-                        onSkip: { pendingDeliveryAction?(); pendingDeliveryAction = nil })
+                        onSkip: {
+                            facilityReviewLoad = nil
+                            facilityReviewCoordinate = nil
+                            pendingFacilityVisit = nil
+                        }
+                    )
                     .presentationDetents([.large]).presentationDragIndicator(.visible)
                 }
             }
@@ -472,7 +630,14 @@ struct HorizonView: View {
                 .presentationDetents([.large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingMoodCheck) {
-                HorizonMoodCheckSheet(lang: lang, onSubmit: { _ in showingMoodCheck = false }, onSkip: { showingMoodCheck = false })
+                HorizonMoodCheckSheet(lang: lang, onSubmit: { rating in
+                    let log = WellnessLog(category: .mental, date: Date(), notes: "Mood \(rating)/5")
+                    log.stressLevel = 6 - rating
+                    modelContext.insert(log)
+                    try? modelContext.save()
+                    WellnessCloudSync.pushDailyCheckin(moodStars: rating, source: .horizon)
+                    showingMoodCheck = false
+                }, onSkip: { showingMoodCheck = false })
                     .presentationDetents([.medium]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingShareTrip) {
@@ -480,8 +645,14 @@ struct HorizonView: View {
                     .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showingWeighStation) {
-                WeighStationStatusSheet(stationName: nearbyWeighStationName, isPresented: $showingWeighStation)
-                    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                WeighStationStatusSheet(
+                    driverLocation: locationManager.currentLocation,
+                    prefilledTarget: weighReportPrefillTarget(),
+                    lang: lang,
+                    formatDistance: { regionalSettings.formatDistance($0) },
+                    isPresented: $showingWeighStation
+                )
+                .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showingHosDetail) {
                 DotHosDetailSheet(hosContext: hosContext)
@@ -490,20 +661,50 @@ struct HorizonView: View {
             .sheet(isPresented: $showingFuelReport) {
                 if let load = activeLoad {
                     HorizonFuelReportSheet(load: load) { gallons, price, station in
+                        #if DEBUG
                         print("FuelReport: \(gallons) gal @ $\(price) at \(station ?? "unknown")")
+                        #endif
                     }
                     .presentationDetents([.medium, .large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
                 }
             }
-            .alert("Route Error", isPresented: $showingRouteError) { Button("OK") {} }
-                message: { Text(routeError ?? "Could not calculate route") }
-            .alert("Routing Notice", isPresented: $showingRoutingNotice) { Button("OK") {} }
-                message: { Text(routingNotice ?? "Route provider changed.") }
-            .confirmationDialog("Truck-safe route unavailable", isPresented: $showingFallbackConfirmation, titleVisibility: .visible) {
-                Button("Continue with fallback GPS") { applyPendingFallbackRoute() }
-                Button("Cancel", role: .cancel) { pendingFallbackRoute = nil; pendingFallbackProvider = .unknown; bottomSheetExpanded = false }
+            .alert(lang.horizonRouteErrorTitle, isPresented: $showingRouteError) { Button(lang.okLabel) {} }
+                message: { Text(routeError ?? lang.horizonRouteErrorCouldNotCalculate) }
+            .alert(lang.horizonRoutingNoticeTitle, isPresented: $showingRoutingNotice) { Button(lang.okLabel) {} }
+                message: { Text(routingNotice ?? lang.horizonRoutingNoticeDefault) }
+            .confirmationDialog(lang.horizonTruckSafeUnavailableTitle, isPresented: $showingFallbackConfirmation, titleVisibility: .visible) {
+                Button(lang.horizonContinueWithFallbackGPS) { applyPendingFallbackRoute() }
+                Button(lang.cancelLabel, role: .cancel) { pendingFallbackRoute = nil; pendingFallbackProvider = .unknown; bottomSheetExpanded = false }
             } message: {
-                Text("No truck-safe provider responded. Continue with \(pendingFallbackProvider.rawValue) for basic navigation while restrictions may be limited.")
+                Text(lang.horizonTruckSafeFallbackExplanation(provider: pendingFallbackProvider.rawValue))
+            }
+            .sheet(isPresented: $showingRouteEasyPicker) {
+                HorizonRouteEasyPickerSheet(
+                    options: routeEasyOptions,
+                    destinationName: routeEasyPendingAddress,
+                    useMiles: !regionalSettings.currentRegion.usesMetric,
+                    currentPlan: subscriptionPlan,
+                    lang: lang,
+                    onSelect: { option in
+                        selectRouteEasyOption(option)
+                    },
+                    onUpgrade: { kind in
+                        presentRouteEasyUpgrade(for: kind)
+                    },
+                    onCancel: {
+                        showingRouteEasyPicker = false
+                        routeEasyOptions = []
+                        routeEasyPendingCoordinate = nil
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(isCalculatingRoute)
+            }
+            .sheet(isPresented: $showingRouteEasyUpgrade) {
+                SubscriptionView(highlightPlan: AppAccessPolicy.requiredPlan(for: routeEasyUpsellKind))
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
     }
 
@@ -511,8 +712,8 @@ struct HorizonView: View {
 
     @ViewBuilder private var mainStack: some View {
         ZStack(alignment: .top) {
-            // Layer 0: SOLID WHITE base — kills any dark bleed from TabView/dark mode
-            Color.white.ignoresSafeArea(.all)
+            // Layer 0: matte black while navigating / at night; light when idle day map browsing
+            (navigationPrefersDarkChrome ? Color(hex: "#0f0d0b") : Color.white).ignoresSafeArea(.all)
 
             Group {
                 #if canImport(MapboxMaps)
@@ -520,30 +721,34 @@ struct HorizonView: View {
                     HorizonMapboxSurface(
                         selectedMapStyle: selectedMapStyle,
                         locationManager: locationManager,
-                        mapAlerts: mapAlerts,
+                        mapAlerts: [],
                         route: route,
                         truckRoute: truckRoute,
+                        routeQuantumLineAccent: routeQuantumMapLineAccent,
                         isNavigating: isNavigating,
                         onStyleChange: { selectedMapStyle = $0 },
                         onControlsReady: { zoomIn, zoomOut, recenter in
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
-                        truckStops: truckStopService.nearbyStops,
+                        truckStops: isNavigating ? mapTruckStopsForDisplay : [],
                         onTruckStopTapped: { stop in selectedTruckStop = stop }
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
                 } else {
                     HorizonMapSurface(
                         selectedMapStyle: selectedMapStyle,
                         locationManager: locationManager,
-                        mapAlerts: mapAlerts,
+                        mapAlerts: isNavigating ? [] : mapAlerts,
                         route: route,
                         truckRoute: truckRoute,
+                        routeQuantumLineAccent: routeQuantumMapLineAccent,
                         isNavigating: isNavigating,
                         onStyleChange: { selectedMapStyle = $0 },
                         onControlsReady: { zoomIn, zoomOut, recenter in
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
-                        truckStops: truckStopService.nearbyStops,
+                        truckStops: mapTruckStopsForDisplay,
                         onTruckStopTapped: { stop in selectedTruckStop = stop }
                     )
                 }
@@ -551,21 +756,22 @@ struct HorizonView: View {
                 HorizonMapSurface(
                     selectedMapStyle: selectedMapStyle,
                     locationManager: locationManager,
-                    mapAlerts: mapAlerts,
+                    mapAlerts: isNavigating ? [] : mapAlerts,
                     route: route,
                     truckRoute: truckRoute,
+                    routeQuantumLineAccent: routeQuantumMapLineAccent,
                     isNavigating: isNavigating,
                     onStyleChange: { selectedMapStyle = $0 },
                     onControlsReady: { zoomIn, zoomOut, recenter in
                         mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                     },
-                    truckStops: truckStopService.nearbyStops,
+                    truckStops: mapTruckStopsForDisplay,
                     onTruckStopTapped: { stop in selectedTruckStop = stop }
                 )
                 #endif
             }
             .ignoresSafeArea()
-            .environment(\.colorScheme, .light) // Force light — prevents dark mode from affecting map container
+            .preferredColorScheme(navigationPrefersDarkChrome ? .dark : .light)
 
             if !isNavigating {
                 HorizonTopHUD(
@@ -580,248 +786,116 @@ struct HorizonView: View {
                 )
             }
 
-            // Idle map chrome: keep only a compact GPS chip on trailing side.
-            // Removes duplicated icon rails and matches cleaner professional layouts.
+            // DOT/HOS — hidden during active navigation (competitor-style clean map).
             if !isNavigating {
-                HStack {
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Spacer().frame(height: 56)
-                        idleTrailingGpsPill
-                        Spacer()
+                VStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        Spacer(minLength: 0)
+                        horizonDotHosPill
+                            .frame(width: dotHosPillSlotWidth, alignment: .trailing)
                     }
+                    .padding(.top, dotHosTopPadding)
                     .padding(.trailing, 10)
+                    Spacer(minLength: 0)
                 }
-                .onAppear {
-                    // #region agent log
-                    agentLogHorizon(
-                        runId: "post-repro-2",
-                        hypothesisId: "H-ui-8",
-                        location: "ViewsHorizonView.swift:idleMapChrome",
-                        message: "idle chrome simplified (single rail)",
-                        data: [
-                            "hasLeadingIconRail": false,
-                            "hasTopHUD": true,
-                            "hasTrailingGpsPill": true
-                        ]
-                    )
-                    // #endregion
-                    print("[DBG][H-ui-8] idle chrome simplified: no leading rail, trailing GPS pill only")
-                }
+                .zIndex(310)
+                .allowsHitTesting(true)
+            }
+
+            if isNavigating, !routeSteps.isEmpty {
+                let safeStepIndex = min(max(currentStepIndex, 0), routeSteps.count - 1)
+                HorizonTruckerPathNavigationChrome(
+                    step: routeSteps[safeStepIndex],
+                    nextStepInstruction: routeSteps.indices.contains(safeStepIndex + 1)
+                        ? routeSteps[safeStepIndex + 1].instructions : nil,
+                    formatDistance: { m in regionalSettings.formatDistance(m) },
+                    roadLine: navigationRoadLine,
+                    totalDistanceText: regionalSettings.formatDistance(activeDistanceMeters),
+                    totalDurationText: formatNavDuration(activeDurationSeconds),
+                    arrivalText: formatArrivalClock(),
+                    speedLimit: navSpeedLimitText,
+                    currentSpeed: navCurrentSpeedText,
+                    speedUnit: regionalSettings.currentRegion.distanceUnit == "mi" ? "MPH" : "KM/H",
+                    isOverspeeding: navOverspeeding,
+                    showLaneBar: isHighwayStep(routeSteps[safeStepIndex].instructions),
+                    selectedMapStyle: $selectedMapStyle,
+                    voiceManager: voiceManager,
+                    lang: lang,
+                    corridorRailItems: corridorRailItems,
+                    hosContext: hosContext,
+                    onHosTap: { showingHosDetail = true },
+                    onZoomIn: { mapZoomIn?() },
+                    onZoomOut: { mapZoomOut?() },
+                    onRecenter: { mapRecenter?() },
+                    onReroute: activeRouteDestination.map { dest in
+                        let label = truckRoute?.destinationName ?? route?.name ?? ""
+                        return { calculateRoute(to: dest, address: label) }
+                    },
+                    onStopNavigation: {
+                        navigationEngine.stopNavigation()
+                        restrictionWarningManager.clearWarnings()
+                        var t = Transaction(animation: nil); t.disablesAnimations = true
+                        withTransaction(t) {
+                            truckRoute = nil
+                            route = nil
+                            routeSteps = []
+                            currentStepIndex = 0
+                        }
+                    },
+                    onToggleSteps: { showingSteps.toggle() },
+                    onTogglePOIs: { navigationPOIsHidden.toggle() },
+                    poisHidden: navigationPOIsHidden
+                )
+                .zIndex(400)
             }
 
             navigationOverlays
             alertOverlays
-            mapControlsOverlay
+            if !isNavigating { mapControlsOverlay }
             warningsDispatchAndBottomOverlays
-            topInstructionLane
         }
+        .animation(.spring(response: 0.35), value: navigationTopChromeHeight)
     }
 
     // MARK: - Navigation Overlays
 
     /// Left column: icon-only quick actions + HOS (same gestures as before; avoids overlapping TopHUD and bottom parking pill).
-    @ViewBuilder private var idleLeadingToolColumn: some View {
-        VStack(spacing: 8) {
-            idleQuickToolIcon(icon: "mappin.and.ellipse", label: "Places") {
-                print("[DBG][H14] quick tool tapped=Places")
-                showingGlobalSearch = true
+    // idleLeadingToolColumn removed — tools are accessible via bottom sheet
+
+    /// Top-trailing DOT/HOS status. This replaces the old GPS text chip so Horizon highlights
+    /// hours-of-service compliance instead of exposing raw location/debug status.
+    @ViewBuilder private var horizonDotHosPill: some View {
+        DotHosBar(hosContext: hosContext) {
+            withAnimation(.spring(response: 0.28)) {
+                showingHosDetail = true
             }
-            idleQuickToolIcon(icon: "fuelpump.fill", label: "Fuel") {
-                print("[DBG][H14] quick tool tapped=Fuel")
-                selectedNearbyCategory = .fuel
-                searchNearby(category: .fuel)
-            }
-            idleQuickToolIcon(icon: "scalemass.fill", label: "DOT / Weigh") {
-                print("[DBG][H14] quick tool tapped=DOT/Weigh")
-                selectedNearbyCategory = .weigh
-                searchNearby(category: .weigh)
-            }
-            idleQuickToolIcon(icon: "moon.zzz.fill", label: "Rest") {
-                print("[DBG][H14] quick tool tapped=Rest")
-                selectedNearbyCategory = .rest
-                searchNearby(category: .rest)
-            }
-            Menu {
-                Button { showingHosDetail = true } label: {
-                    Label("HOS detail", systemImage: "doc.text.fill")
-                }
-                Button { showingHOSSettings = true } label: {
-                    Label("HOS settings", systemImage: "gearshape.fill")
-                }
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(Color(hex: "#c9a84c"))
-                    Text("HOS")
-                        .font(.system(size: 9, weight: .black))
-                        .foregroundColor(AppTheme.Colors.textSecondary)
-                }
-                .frame(width: 44, height: 52)
-                .background(Color(hex: "#1a1d23"))
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-            }
-            .accessibilityLabel("HOS menu")
         }
-        .onAppear {
-            print("[DBG][H15] idle leading tools shown gps='\(gpsStatusText)' live=\(gpsIsLive)")
-        }
+        .accessibilityLabel("DOT Hours of Service")
     }
 
-    /// Top-trailing GPS status — TopHUD is leading-only, so this stays clear of those buttons.
-    @ViewBuilder private var idleTrailingGpsPill: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(gpsIsLive ? Color(hex: "#10b981") : Color(hex: "#f59e0b"))
-                .frame(width: 7, height: 7)
-            Text(gpsStatusText)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 148, alignment: .trailing)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color(hex: "#0d1117").opacity(0.88))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
-        )
-    }
+    /// Bottom inset for map chrome while navigating (barra compacta + tab bar).
+    private var navigatingMapChromeBottomInset: CGFloat { 88 }
 
-    private func idleQuickToolIcon(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .background(Color(hex: "#1a1d23"))
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                )
-                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+    @ViewBuilder private var horizonParkingPill: some View {
+        Button(action: { showingStopsSheet = true }) {
+            HStack(spacing: 6) {
+                Image(systemName: "p.circle.fill").font(.system(size: 13, weight: .bold))
+                    .foregroundColor(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
+                Text(String(format: "%.1f mi", nearestParkingMiles))
+                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+                Circle().fill(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
+                    .frame(width: 7, height: 7)
+            }
+            .padding(.horizontal, 11).padding(.vertical, 7)
+            .background(Color(hex: "#0d1117")).cornerRadius(20)
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.1), lineWidth: 1))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 
     @ViewBuilder private var navigationOverlays: some View {
-        if isNavigating {
-            HStack {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "location.north.line.fill")
-                            .font(.system(size: 15, weight: .bold))
-                        Text("N")
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "#151922").opacity(0.96))
-                    .clipShape(Capsule())
-
-                    ForEach(Array(navigationAlertDistanceBadges.enumerated()), id: \.offset) { _, badge in
-                        HStack(spacing: 5) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text(badge)
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(Color(hex: "#b91c1c"))
-                        .clipShape(Capsule())
-                    }
-
-                    Button(action: { showingTruckStops = true }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                            Text("More")
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color(hex: "#232833"))
-                        .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-
-                    VStack(spacing: 1) {
-                        Text(navSpeedLimitText)
-                            .font(.system(size: 10, weight: .black))
-                            .foregroundColor(.white)
-                        Text(navCurrentSpeedText)
-                            .font(.system(size: 12, weight: .heavy))
-                            .foregroundColor(navOverspeeding ? Color(hex: "#ef4444") : Color(hex: "#22d474"))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color(hex: "#11151d").opacity(0.97))
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                }
-                .padding(.leading, 10)
-                .onAppear {
-                    // #region agent log
-                    agentLogHorizon(
-                        runId: "ui-integration-1",
-                        hypothesisId: "H-ui-left-rail",
-                        location: "ViewsHorizonView.swift:navigationOverlays",
-                        message: "left rail visible",
-                        data: [
-                            "alertsShown": navigationAlertDistanceBadges.count,
-                            "speedLimitText": navSpeedLimitText,
-                            "speedText": navCurrentSpeedText
-                        ]
-                    )
-                    // #endregion
-                }
-
-                Spacer()
-                HorizonNavigationInfoStrip(
-                    stops: truckStopService.nearbyStops,
-                    scaleAlertName: scaleAlertName,
-                    scaleAlertDistanceMiles: scaleAlertDistanceMiles,
-                    scaleAlertStatus: scaleAlertStatus,
-                    hasScaleAhead: showingScaleAlert,
-                    onSelectStop: { stop in selectedTruckStop = stop },
-                    useMiles: regionalSettings.currentRegion.distanceUnit == "mi"
-                )
-                .padding(.trailing, 8)
-                .onAppear {
-                    // #region agent log
-                    agentLogHorizon(
-                        runId: "ui-integration-1",
-                        hypothesisId: "H-ui-right-rail",
-                        location: "ViewsHorizonView.swift:navigationOverlays",
-                        message: "right rail visible",
-                        data: [
-                            "hasScaleAhead": showingScaleAlert,
-                            "scaleDistanceMi": scaleAlertDistanceMiles,
-                            "stopsCount": truckStopService.nearbyStops.count
-                        ]
-                    )
-                    // #endregion
-                }
-            }
-            .padding(.top, max(118, navigationTopInset + 66))
-            .transition(.opacity)
-        }
-
         if showingSteps, isNavigating, !routeSteps.isEmpty {
             VStack {
-                Spacer().frame(height: 160)
+                Spacer().frame(height: navigationTopChromeHeight + 20)
                 HorizonRouteStepsList(
                     steps: routeSteps, currentIndex: currentStepIndex,
                     formatDistance: { m in regionalSettings.formatDistance(m) },
@@ -845,7 +919,7 @@ struct HorizonView: View {
                     Image(systemName: "checkmark.seal.fill")
                         .font(.system(size: 48, weight: .bold))
                         .foregroundStyle(LinearGradient(colors: [Color(hex: "#22d474"), Color(hex: "#16a34a")], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Text("You have arrived!")
+                    Text(lang.horizonYouHaveArrived)
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundColor(.white)
                     Text(arrivalDestinationName)
@@ -857,7 +931,7 @@ struct HorizonView: View {
                         truckRoute = nil; route = nil; routeSteps = []; currentStepIndex = 0
                         UIApplication.shared.isIdleTimerDisabled = false
                     }) {
-                        Text("Done").font(.system(size: 16, weight: .bold)).foregroundColor(.black)
+                        Text(lang.doneLabel).font(.system(size: 16, weight: .bold)).foregroundColor(.black)
                             .frame(maxWidth: .infinity).padding(.vertical, 13)
                             .background(Color(hex: "#22d474")).cornerRadius(AppTheme.Radius.lg)
                     }
@@ -871,168 +945,98 @@ struct HorizonView: View {
             }
             .transition(.scale(scale: 0.85).combined(with: .opacity))
         }
-    }
 
-    @ViewBuilder private var topInstructionLane: some View {
-        if isNavigating, !routeSteps.isEmpty, currentStepIndex < routeSteps.count {
-            VStack(spacing: 4) {
-                HorizonNavigationStepBanner(
-                    step: routeSteps[currentStepIndex],
-                    stepIndex: currentStepIndex,
-                    totalSteps: routeSteps.count,
-                    formatDistance: { m in regionalSettings.formatDistance(m) },
-                    nextStepInstruction: routeSteps.indices.contains(currentStepIndex + 1)
-                        ? routeSteps[currentStepIndex + 1].instructions
-                        : nil,
-                    onPrevStep: {
-                        guard currentStepIndex > 0 else { return }
-                        syncNavigationStepIndexFromUI(currentStepIndex - 1)
-                    },
-                    onNextStep: {
-                        guard currentStepIndex < routeSteps.count - 1 else { return }
-                        syncNavigationStepIndexFromUI(currentStepIndex + 1)
-                    },
-                    onToggleList: { showingSteps.toggle() },
-                    onMicTap: {
-                        withAnimation(.spring(response: 0.28)) { showingAIChat = true }
-                        // #region agent log
-                        print("[DBG][H-ui-10] nav mic tapped, AI panel requested")
-                        // #endregion
-                    },
-                    speedText: {
-                        guard let speed = locationManager.currentLocation?.speed, speed > 0 else { return nil }
-                        return regionalSettings.currentRegion.distanceUnit == "mi"
-                            ? "\(Int(speed * 2.23694)) mph" : "\(Int(speed * 3.6)) km/h"
-                    }()
+        if showingScaleAlert, isNavigating {
+            VStack {
+                Spacer()
+                ScaleAlertBanner(
+                    stationName: scaleAlertName.isEmpty ? lang.horizonGenericWeighStation : scaleAlertName,
+                    distanceMiles: scaleAlertDistanceMiles,
+                    status: scaleAlertStatus,
+                    lang: lang,
+                    onDismiss: { withAnimation { showingScaleAlert = false } },
+                    provenance: scaleAlertProvenance,
+                    communityHint: scaleAlertCommunityHint,
+                    onReport: { submitScaleReport($0) },
+                    onMoreDetails: { openScaleDetailsSheet() }
                 )
-                .padding(.horizontal, AppTheme.Spacing.md)
-                .padding(.top, max(2, navigationTopInset - 2))
-                .onAppear {
-                    // #region agent log
-                    agentLogHorizon(
-                        runId: "post-repro-5",
-                        hypothesisId: "H-ui-top-lane",
-                        location: "ViewsHorizonView.swift:topInstructionLane",
-                        message: "top lane rendered via safeAreaInset",
-                        data: [
-                            "safeAreaTop": navigationTopInset,
-                            "showingSteps": showingSteps
-                        ]
-                    )
-                    // #endregion
-                }
-
-                if let nextInstruction = routeSteps.indices.contains(currentStepIndex + 1)
-                    ? routeSteps[currentStepIndex + 1].instructions
-                    : nil {
-                    HStack {
-                        HStack(spacing: 6) {
-                            Text("Then")
-                                .font(.system(size: 11, weight: .black))
-                                .foregroundColor(Color(hex: "#0d1117"))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color(hex: "#facc15"))
-                                .clipShape(Capsule())
-                            Image(systemName: "arrow.turn.up.left")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
-                            Text(nextInstruction)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Color(hex: "#111827").opacity(0.96))
-                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                        .padding(.leading, AppTheme.Spacing.md)
-                        Spacer()
-                    }
-                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, navigatingMapChromeBottomInset)
             }
-            .zIndex(900)
-            .allowsHitTesting(true)
+            .zIndex(405)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
     // MARK: - Alert Overlays
 
     @ViewBuilder private var alertOverlays: some View {
-        if showingScaleAlert {
-            VStack {
-                Spacer().frame(height: isNavigating ? 170 : 110)
-                HStack {
-                    ScaleAlertBanner(stationName: scaleAlertName, distanceMiles: scaleAlertDistanceMiles,
-                                     status: scaleAlertStatus, lang: lang,
-                                     onDismiss: { withAnimation { showingScaleAlert = false } })
-                        .frame(maxWidth: 320).padding(.leading, AppTheme.Spacing.md)
-                    Spacer()
-                }
-                Spacer()
-            }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.spring(response: 0.4), value: showingScaleAlert)
-        }
+        VStack(alignment: .leading, spacing: 8) {
+            Spacer().frame(height: isNavigating ? navigationTopChromeHeight : 110)
 
-        if showingSpeedComplianceAlert {
-            VStack {
-                Spacer().frame(height: isNavigating ? 230 : 160)
-                HStack {
-                    SpeedComplianceBanner(message: speedComplianceMessage,
-                                          onDismiss: { withAnimation { showingSpeedComplianceAlert = false } })
-                        .frame(maxWidth: 340).padding(.leading, AppTheme.Spacing.md)
-                    Spacer()
-                }
-                Spacer()
+            // Restrições — só se houver alerta ativo; compacto
+            if isNavigating, !restrictionWarningManager.activeWarnings.isEmpty {
+                TruckRestrictionsOverlay(
+                    warnings: restrictionWarningManager.activeWarnings,
+                    currentLocation: locationManager.currentLocation,
+                    dismissedWarningIds: Binding(
+                        get: { restrictionWarningManager.dismissedWarningIds },
+                        set: { restrictionWarningManager.dismissedWarningIds = $0 }
+                    )
+                )
+                .frame(maxHeight: 72)
+                .padding(.trailing, navigationRightRailWidth)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.spring(response: 0.35), value: showingSpeedComplianceAlert)
-        }
 
-        if showingGradeAlert {
-            VStack {
-                Spacer().frame(height: isNavigating ? 230 : 160)
-                HStack {
-                    GradeAlertBanner(message: gradeAlertMessage, isDescending: gradeIsDescending,
-                                     onDismiss: { withAnimation { showingGradeAlert = false } })
-                        .frame(maxWidth: 320).padding(.leading, AppTheme.Spacing.md)
-                    Spacer()
-                }
-                Spacer()
+            if showingScaleAlert, !isNavigating {
+                ScaleAlertBanner(stationName: scaleAlertName.isEmpty ? lang.horizonGenericWeighStation : scaleAlertName, distanceMiles: scaleAlertDistanceMiles,
+                                 status: scaleAlertStatus, lang: lang,
+                                 onDismiss: { withAnimation { showingScaleAlert = false } },
+                                 provenance: scaleAlertProvenance,
+                                 communityHint: scaleAlertCommunityHint,
+                                 onReport: { submitScaleReport($0) },
+                                 onMoreDetails: { openScaleDetailsSheet() })
+                    .frame(maxWidth: 320)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.spring(response: 0.35), value: showingGradeAlert)
-        }
 
-        if showingCurveAlert {
-            VStack {
-                Spacer().frame(height: isNavigating ? 230 : 160)
-                HStack {
-                    SharpCurveAlertBanner(onDismiss: { withAnimation { showingCurveAlert = false } })
-                        .frame(maxWidth: 300).padding(.leading, AppTheme.Spacing.md)
-                    Spacer()
-                }
-                Spacer()
+            if showingSpeedComplianceAlert {
+                SpeedComplianceBanner(message: speedComplianceMessage,
+                                      onDismiss: { withAnimation { showingSpeedComplianceAlert = false } })
+                    .frame(maxWidth: 340)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.spring(response: 0.3), value: showingCurveAlert)
-        }
 
-        if showingWindAlert {
-            VStack {
-                Spacer().frame(height: isNavigating ? 290 : 220)
-                HStack {
-                    WindAlertBanner(mph: windAlertMph, isGust: windAlertIsGust,
-                                    onDismiss: { withAnimation { showingWindAlert = false } })
-                        .frame(maxWidth: 300).padding(.leading, AppTheme.Spacing.md)
-                    Spacer()
-                }
-                Spacer()
+            if showingGradeAlert {
+                GradeAlertBanner(message: gradeAlertMessage, isDescending: gradeIsDescending,
+                                 onDismiss: { withAnimation { showingGradeAlert = false } })
+                    .frame(maxWidth: 320)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.spring(response: 0.35), value: showingWindAlert)
+
+            if showingCurveAlert {
+                SharpCurveAlertBanner(onDismiss: { withAnimation { showingCurveAlert = false } })
+                    .frame(maxWidth: 300)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if showingWindAlert {
+                WindAlertBanner(mph: windAlertMph, isGust: windAlertIsGust,
+                                onDismiss: { withAnimation { showingWindAlert = false } })
+                    .frame(maxWidth: 300)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            Spacer()
         }
+        .padding(.leading, AppTheme.Spacing.md)
+        .zIndex(100)
+        .animation(.spring(response: 0.35), value: showingScaleAlert)
+        .animation(.spring(response: 0.35), value: showingSpeedComplianceAlert)
+        .animation(.spring(response: 0.35), value: showingGradeAlert)
+        .animation(.spring(response: 0.3), value: showingCurveAlert)
+        .animation(.spring(response: 0.35), value: showingWindAlert)
 
         if showingDockFinder && !dockResults.isEmpty {
             VStack {
@@ -1094,58 +1098,34 @@ struct HorizonView: View {
         VStack {
             Spacer()
             HStack(alignment: .bottom) {
-                if isNavigating && showParkingPill {
-                    Button(action: { showingStopsSheet = true }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "p.circle.fill").font(.system(size: 13, weight: .bold))
-                                .foregroundColor(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
-                            Text(String(format: "%.1f mi", nearestParkingMiles))
-                                .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
-                            Circle().fill(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
-                                .frame(width: 7, height: 7)
-                        }
-                        .padding(.horizontal, 11).padding(.vertical, 7)
-                        .background(Color(hex: "#0d1117")).cornerRadius(20)
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.1), lineWidth: 1))
-                    }
-                    .padding(.leading, 12).padding(.bottom, 140)
-                    .transition(.scale.combined(with: .opacity))
+                if !isNavigating && showParkingPill {
+                    horizonParkingPill
+                        .padding(.leading, 12)
+                        .padding(.bottom, idleMapControlsBottomInset)
+                        .transition(.scale.combined(with: .opacity))
                 }
                 Spacer()
-                // Idle: stack parking above zoom on the right so it never sits under the leading tool column.
-                VStack(spacing: 10) {
-                    if !isNavigating && showParkingPill {
-                        Button(action: { showingStopsSheet = true }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "p.circle.fill").font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
-                                Text(String(format: "%.1f mi", nearestParkingMiles))
-                                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
-                                Circle().fill(nearestParkingFull ? Color(hex: "#ef4444") : Color(hex: "#10b981"))
-                                    .frame(width: 7, height: 7)
-                            }
-                            .padding(.horizontal, 11).padding(.vertical, 7)
-                            .background(Color(hex: "#0d1117")).cornerRadius(20)
-                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                if !isNavigating {
+                    VStack(spacing: 10) {
+                        HorizonMapControlsPanel(
+                            onZoomIn: { mapZoomIn?() }, onZoomOut: { mapZoomOut?() }, onRecenter: { mapRecenter?() }
+                        )
+                        Button(action: { withAnimation(.spring(response: 0.3)) { showingAIChat.toggle() } }) {
+                            Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(showingAIChat ? .white : Color(hex: "#c9a84c"))
+                                .frame(width: 44, height: 44)
+                                .background(showingAIChat ? Color(hex: "#c9a84c") : Color(hex: "#1a1a1f"))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#c9a84c").opacity(0.5), lineWidth: 0.5))
+                                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
                         }
-                        .transition(.scale.combined(with: .opacity))
                     }
-                    HorizonMapControlsPanel(
-                        onZoomIn: { mapZoomIn?() }, onZoomOut: { mapZoomOut?() }, onRecenter: { mapRecenter?() }
-                    )
-                    Button(action: { withAnimation(.spring(response: 0.3)) { showingAIChat.toggle() } }) {
-                        Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(showingAIChat ? .white : Color(hex: "#c9a84c"))
-                            .frame(width: 44, height: 44)
-                            .background(showingAIChat ? Color(hex: "#c9a84c") : Color(hex: "#1a1a1f"))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#c9a84c").opacity(0.5), lineWidth: 0.5))
-                            .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
-                    }
+                    .padding(.trailing, 12)
+                    .padding(.bottom, idleMapControlsBottomInset)
                 }
-                .padding(.trailing, 12).padding(.bottom, isNavigating ? 140 : 180)
             }
         }
+        .zIndex(120)
         .sheet(isPresented: $showingStopsSheet) {
             StopsView().presentationDetents([.large]).preferredColorScheme(.dark)
         }
@@ -1191,15 +1171,15 @@ struct HorizonView: View {
             }
         }
 
-        // Dispatch Load Alert
-        if showingDispatchAlert, let load = pendingDispatchLoad, !isNavigating {
+        // Dispatch Load Alert (fleet portal — hidden in driver beta)
+        if dispatchDriverUIEnabled, showingDispatchAlert, let load = pendingDispatchLoad, !isNavigating {
             VStack {
                 Spacer()
                 HorizonDispatchLoadBanner(load: load, lang: lang) {
                     dispatchService.acknowledgeLoad(load) { _ in }
                     dispatchService.startRoute(for: load)
                     activeLoad = load; pendingDispatchLoad = nil; showingDispatchAlert = false
-                    calculateRoute(to: load.destinationCoordinate, address: load.destinationAddress)
+                    Task { @MainActor in await runQuantumBackedDispatchRoute(for: load) }
                 } onDecline: {
                     pendingDispatchLoad = nil; showingDispatchAlert = false
                 }
@@ -1209,24 +1189,34 @@ struct HorizonView: View {
             .animation(.spring(response: 0.4), value: showingDispatchAlert)
         }
 
-        // Active Load Bar
-        if let load = activeLoad, !showingDispatchAlert {
+        // Active Load Bar (hidden in driver beta)
+        if dispatchDriverUIEnabled, let load = activeLoad, !showingDispatchAlert, !isNavigating {
             VStack {
                 Spacer()
                 HorizonActiveLoadBar(load: load, isPickedUp: loadPickedUp,
                     onFuelReport: { showingFuelReport = true },
                     onMarkPickedUp: {
-                        facilityReviewType = .pickup
-                        pendingDeliveryAction = { loadPickedUp = true }
-                        showingFacilityReview = true
+                        let coord = locationManager.currentLocation?.coordinate
+                            ?? activeRouteDestination
+                            ?? load.destinationCoordinate
+                        loadPickedUp = true
+                        pendingFacilityVisit = PendingFacilityVisit(
+                            load: load,
+                            type: .pickup,
+                            coordinate: coord,
+                            arrivedAt: Date()
+                        )
                     },
                     onMarkDelivered: {
-                        facilityReviewType = .delivery
-                        pendingDeliveryAction = {
-                            dispatchService.markDelivered(load) { _ in }
-                            activeLoad = nil; loadPickedUp = false
-                        }
-                        showingFacilityReview = true
+                        dispatchService.markDelivered(load) { _ in }
+                        pendingFacilityVisit = PendingFacilityVisit(
+                            load: load,
+                            type: .delivery,
+                            coordinate: load.destinationCoordinate,
+                            arrivedAt: Date()
+                        )
+                        activeLoad = nil
+                        loadPickedUp = false
                     })
                     .padding(.horizontal, AppTheme.Spacing.md).padding(.bottom, 100)
             }
@@ -1244,6 +1234,7 @@ struct HorizonView: View {
                     withAnimation { showingParkingPrompt = false }
                     let prefs = UserDefaults.standard
                     prefs.set(status.rawValue, forKey: "parking_\(stop.name)_\(Date().formatted(.dateTime.day().month()))")
+                    submitParkingAvailability(status, for: stop)
                 } onDismiss: {
                     withAnimation { showingParkingPrompt = false }
                 }
@@ -1254,8 +1245,12 @@ struct HorizonView: View {
             .animation(.spring(response: 0.4), value: showingParkingPrompt)
         }
 
-        // Wellness Food Suggestion
-        if showingFoodSuggestion, let suggestion = foodSuggestion, !isNavigating {
+        // Comida — só parado em posto reconhecido (Pilot, Love's, TA, etc.)
+        if showingFoodSuggestion,
+           let suggestion = foodSuggestion,
+           let stop = currentTruckStop,
+           stop.qualifiesAsFuelStopForFood,
+           !isNavigating {
             VStack {
                 Spacer()
                 FoodSuggestionBanner(suggestion: suggestion, lang: lang) {
@@ -1268,87 +1263,143 @@ struct HorizonView: View {
             .animation(.spring(response: 0.4), value: showingFoodSuggestion)
         }
 
-        // Share Trip FAB
-        if isNavigating {
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button(action: { showingShareTrip = true }) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white).frame(width: 44, height: 44)
-                            .background(AppTheme.Colors.accent).cornerRadius(12)
-                            .shadow(color: AppTheme.Colors.accent.opacity(0.5), radius: 8)
-                    }
-                    .padding(.trailing, AppTheme.Spacing.md).padding(.bottom, 100)
+        // ━━━ Bottom chrome idle (toolbar + sheet = um bloco) ━━━
+        if !isNavigating {
+            VStack(spacing: 0) {
+                Spacer().allowsHitTesting(false)
+                if isIdleBottomSheetReady {
+                    idleBottomChrome
+                } else {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color(hex: "#0d1117"))
+                        .frame(height: idleCollapsedChromeHeight)
+                        .padding(.horizontal, GPSDesignSystem.Metrics.screenHorizontalInset)
+                        .padding(.bottom, mainTabBarClearance)
                 }
             }
+            .id("idle-mode-overlay")
         }
+    }
 
-        // ━━━ Bottom Sheet / ETA Bar ━━━
+    /// Painel único no mapa parado — evita toolbar flutuando em cima do sheet.
+    @ViewBuilder private var idleBottomChrome: some View {
         VStack(spacing: 0) {
-            Spacer().allowsHitTesting(false)
-            if isNavigating {
-                // Navigation mode: do not build idle bottom sheet in hierarchy.
-                // This prevents stale expanded sheet surfaces from overlaying the map.
-                etaBar
-                    .zIndex(2)
-                    .allowsHitTesting(true)
-                    .id("nav-eta-bar")
-                    .onAppear {
-                        // #region agent log
-                        print("[DBG][OVR][H-ovr-1] bottom overlay branch=navigating etaBar hitTest=true")
-                        // #endregion
-                    }
-            } else {
-                Group {
-                    if isIdleBottomSheetReady {
-                        HorizonBottomSheet(
-                            locationManager: locationManager, activeTrip: activeTrip,
-                            isCalculatingRoute: $isCalculatingRoute, isNavigating: false,
-                            distanceMeters: activeDistanceMeters, durationSeconds: activeDurationSeconds,
-                            isExpanded: $bottomSheetExpanded,
-                            region: regionalSettings.currentRegion, lang: lang,
-                            onCenterLocation: {},
-                            onCalculateRoute: { address in calculateRoute(to: address) },
-                            onCalculateRouteToCoordinate: { coordinate, name in calculateRoute(to: coordinate, address: name) },
-                            onSelectCategory: { category in selectedNearbyCategory = category },
-                            onClearRoute: { truckRoute = nil; route = nil },
-                            showingShareTrip: $showingShareTrip,
-                            loadPickupAddress: $loadPickupAddress,
-                            loadDropoffAddress: $loadDropoffAddress,
-                            loadCargoOnBoard: $loadCargoOnBoard,
-                            isAnalyzingLoadRoute: isAnalyzingLoadRoute,
-                            onAnalyzeLoadRoute: {
-                                let dropoff = loadDropoffAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !dropoff.isEmpty else { return }
-                                isAnalyzingLoadRoute = true
-                                calculateRoute(to: dropoff)
-                                isAnalyzingLoadRoute = false
-                            }
-                        )
+            HorizonGPSToolbar(
+                lang: lang,
+                embeddedInChrome: true,
+                onDirections: {
+                    bottomSheetExpanded = true
+                    showingGlobalSearch = true
+                },
+                onPlaces: { showingTruckStops = true },
+                onWeighStation: { showingWeighStation = true },
+                onRestAreas: { selectedNearbyCategory = .rest },
+                onRouteOptions: {
+                    if routeEasyPendingCoordinate != nil, !routeEasyOptions.isEmpty {
+                        showingRouteEasyPicker = true
                     } else {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color(hex: "#0d1117"))
+                        bottomSheetExpanded = true
                     }
-                }
-                .frame(height: idleBottomSheetHeight)
-                .clipped()
-                .shadow(color: .black.opacity(0.25), radius: 8, y: -2)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: bottomSheetExpanded)
-                .id("idle-bottom-sheet")
-                .allowsHitTesting(true)
-                .onAppear {
-                    // #region agent log
-                    print("[DBG][OVR][H-ovr-1] bottom overlay branch=idle bottomSheet ready=\(isIdleBottomSheetReady) h=\(Int(idleBottomSheetHeight)) hitTest=true")
-                    // #endregion
-                }
-            }
+                },
+                onWeather: { showingWeather = true },
+                onCommunity: { showingAIChat = true },
+                onTrafficMap: { selectedMapStyle = .hybrid }
+            )
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+
+            HorizonBottomSheet(
+                locationManager: locationManager, activeTrip: activeTrip,
+                isCalculatingRoute: $isCalculatingRoute, isNavigating: false,
+                distanceMeters: activeDistanceMeters, durationSeconds: activeDurationSeconds,
+                isExpanded: $bottomSheetExpanded,
+                region: regionalSettings.currentRegion, lang: lang,
+                onCenterLocation: {},
+                onCalculateRoute: { address in calculateRoute(to: address) },
+                onCalculateRouteToCoordinate: { coordinate, name in calculateRoute(to: coordinate, address: name) },
+                onSelectCategory: { category in selectedNearbyCategory = category },
+                onClearRoute: { truckRoute = nil; route = nil },
+                showingShareTrip: $showingShareTrip,
+                loadPickupAddress: $loadPickupAddress,
+                loadDropoffAddress: $loadDropoffAddress,
+                loadCargoOnBoard: $loadCargoOnBoard,
+                isAnalyzingLoadRoute: isAnalyzingLoadRoute,
+                onAnalyzeLoadRoute: {
+                    let dropoff = loadDropoffAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !dropoff.isEmpty else { return }
+                    isAnalyzingLoadRoute = true
+                    calculateRoute(to: dropoff)
+                    isAnalyzingLoadRoute = false
+                },
+                unifiedChrome: true
+            )
         }
-        .id(isNavigating ? "nav-mode-overlay" : "idle-mode-overlay")
+        .frame(height: idleBottomSheetHeight, alignment: .top)
+        .clipped()
+        .background(GPSDesignSystem.Colors.chromeBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 8, y: -2)
+        .padding(.horizontal, GPSDesignSystem.Metrics.screenHorizontalInset)
+        .padding(.bottom, mainTabBarClearance)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: bottomSheetExpanded)
+        .id("idle-bottom-chrome")
+        .allowsHitTesting(true)
     }
 
     // MARK: - ETA Bar (navigation, OPAQUE solid background)
+
+    private var navigationRoadLine: String {
+        let road = navCurrentRoadName
+        let regionTag: String = {
+            switch regionalSettings.currentRegion {
+            case .usa: return "US"
+            case .canada: return "CA"
+            case .mexico: return "MX"
+            default: return regionalSettings.currentRegion.rawValue
+            }
+        }()
+        if road.isEmpty {
+            return truckRoute?.destinationName ?? route?.name ?? regionTag
+        }
+        return "\(road) • \(regionTag)"
+    }
+
+    private var navCurrentRoadName: String {
+        guard !routeSteps.isEmpty, currentStepIndex < routeSteps.count else { return "" }
+        let step = routeSteps[currentStepIndex]
+        let raw = step.instructions
+        let lower = raw.lowercased()
+        for keyword in [" onto ", " on ", " para "] {
+            if let range = lower.range(of: keyword) {
+                return String(raw[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return raw
+    }
+
+    private var navRoadNameBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "road.lanes")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(AppTheme.Colors.accent)
+            Text(navCurrentRoadName)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            if let dest = truckRoute?.destinationName ?? route?.name, !dest.isEmpty {
+                Text("·")
+                    .foregroundColor(Color.white.opacity(0.4))
+                Text(dest)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(Color(hex: "#0d1117").opacity(0.95))
+    }
 
     private var etaBar: some View {
         HStack(spacing: 12) {
@@ -1415,18 +1466,20 @@ struct HorizonView: View {
                 .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
             Spacer()
-            Button(action: { showingDispatchAlert = true }) {
-                HStack(spacing: 5) {
-                    Image(systemName: "ellipsis.circle.fill").font(.system(size: 12, weight: .bold))
-                    Text("More").font(.system(size: 12, weight: .bold))
+            if dispatchDriverUIEnabled {
+                Button(action: { showingDispatchAlert = true }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "ellipsis.circle.fill").font(.system(size: 12, weight: .bold))
+                        Text("More").font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "#1f2937"))
+                    .cornerRadius(10)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color(hex: "#1f2937"))
-                .cornerRadius(10)
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             Button(action: {
                 var t = Transaction(animation: nil); t.disablesAnimations = true
                 withTransaction(t) { truckRoute = nil; route = nil }
@@ -1475,9 +1528,15 @@ struct HorizonView: View {
                             fleetTelemetryService: fleetTelemetryService,
                             jurisdictionPolicyService: jurisdictionPolicyService,
                             operationalFeedService: operationalFeedService,
+                            integrationHealth: integrationHealthResults,
                             onClose: { showDataDiagnostics = false })
                             .frame(maxWidth: 300)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .task {
+                                guard !integrationHealthChecked else { return }
+                                integrationHealthChecked = true
+                                integrationHealthResults = await IntegrationsHealthCheck.runAll()
+                            }
                     }
                     if showingWeather, let weather = weatherService.currentWeather {
                         WeatherPanel(weather: weather) { showingWeather = false }
@@ -1493,13 +1552,71 @@ struct HorizonView: View {
                         .frame(maxWidth: 300)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if let publicDieselPrice {
-                        DieselMarketBanner(pricePoint: publicDieselPrice) { showingTruckStops = true }
-                            .frame(maxWidth: 300)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        HStack(spacing: 10) {
+                            GPSFuelMarkerView(price: publicDieselPrice.dieselPrice, isDeal: true, size: 44)
+                            DieselMarketBanner(pricePoint: publicDieselPrice) { showingTruckStops = true }
+                        }
+                        .frame(maxWidth: 300)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
-                .padding(.leading, AppTheme.Spacing.md).padding(.bottom, 150)
+                .padding(.leading, AppTheme.Spacing.md).padding(.bottom, 120)
                 Spacer()
+            }
+        }
+    }
+
+    // MARK: - Route / HOS sync
+
+    private func handleRouteStateChange(hasRoute: Bool) {
+        if hasRoute {
+            hosContext.beginRouteSession(estimatedDrivingSeconds: activeDurationSeconds)
+        } else if truckRoute == nil && route == nil {
+            routeSteps = []
+            currentStepIndex = 0
+            showingSteps = false
+        }
+    }
+
+    private func handleTruckRouteStateChange(hasRoute: Bool) {
+        if hasRoute {
+            hosContext.beginRouteSession(estimatedDrivingSeconds: activeDurationSeconds)
+        } else if truckRoute == nil && route == nil {
+            routeSteps = []
+            currentStepIndex = 0
+            showingSteps = false
+            currentTollResult = nil
+            currentProfitability = nil
+        }
+    }
+
+    // MARK: - Navigation mode
+
+    private func handleNavigationModeChange(_ navigating: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = navigating
+        locationManager.setNavigationMode(navigating)
+        if !navigating {
+            lastScaleVoiceKey = nil
+            hosContext.endRouteSession()
+            return
+        }
+        bottomSheetExpanded = false
+        showingAIChat = false
+        showingSteps = false
+        showingTruckStops = false
+        selectedNearbyCategory = nil
+        showingDispatchAlert = false
+        showingRouteError = false
+        routeError = nil
+        // Do not switch Mapbox style mid-navigation — triggers "Updated style is ignored"
+        // and clears route polyline annotations on device.
+        hosContext.beginRouteSession(estimatedDrivingSeconds: activeDurationSeconds)
+        guard let loc = locationManager.currentLocation else { return }
+        Task {
+            await truckStopService.searchNearby(location: loc)
+            await MainActor.run {
+                truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
+                checkForNearbyScales(from: loc)
             }
         }
     }
@@ -1508,10 +1625,12 @@ struct HorizonView: View {
 
     private func handleLocationUpdate() {
         guard let loc = locationManager.currentLocation else { return }
+        let now = Date()
         let gpsSpeedMph = max(0, loc.speed * 2.23694)
 
         navigationEngine.updateLocation(loc)
         restrictionWarningManager.updateLocation(loc)
+        truckWarnings = restrictionWarningManager.activeWarnings
         evaluateTruckSpeedCompliance(using: loc)
         evaluateGeofenceEvents(using: loc)
         hosContext.feedSpeed(fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph))
@@ -1524,7 +1643,6 @@ struct HorizonView: View {
         }
         #endif
 
-        let now = Date()
         let shouldRefreshOps: Bool = {
             guard now.timeIntervalSince(lastOpsRefreshAt) >= 10 else { return false }
             guard let last = lastOpsRefreshLocation else { return true }
@@ -1569,7 +1687,7 @@ struct HorizonView: View {
 
         let shouldRefresh: Bool
         if truckStopService.nearbyStops.isEmpty { shouldRefresh = true }
-        else if let last = lastScaleCheckLocation, loc.distance(from: last) > (isNavigating ? 5_000 : 16_000) { shouldRefresh = true }
+        else if let last = lastScaleCheckLocation, loc.distance(from: last) > (isNavigating ? 2_000 : 16_000) { shouldRefresh = true }
         else { shouldRefresh = false }
         if shouldRefresh {
             lastScaleCheckLocation = loc
@@ -1582,24 +1700,138 @@ struct HorizonView: View {
             }
         }
 
+        if isNavigating, now.timeIntervalSince(lastWeighCrowdSyncAt) >= 90 {
+            lastWeighCrowdSyncAt = now
+            Task {
+                await WeighStationStatusService.shared.fetchRemoteReports(near: loc.coordinate, radiusKm: 120)
+            }
+        }
+
         let speed = max(0, loc.speed)
         checkTruckStopProximity(from: loc, speed: speed)
-        locationHistory.append(loc)
-        if locationHistory.count > 20 { locationHistory.removeFirst() }
+        checkFacilityVisitDeparture(from: loc)
+        announceNavTruckFuelEtasIfNeeded(location: loc, speed: speed, now: now)
+        appendLocationHistorySample(loc, now: now)
         checkGradeAlert(from: loc); checkSharpCurveAlert(at: loc); checkWindAlert()
         if isNavigating { checkDestinationDock(from: loc) }
-        if speed <= 1.0 && !showingFoodSuggestion && !isNavigating && currentTruckStop == nil {
-            loadFoodSuggestion()
+    }
+
+    /// Keeps a short trail for grade/curve heuristics without recording every Core Location callback.
+    private func appendLocationHistorySample(_ loc: CLLocation, now: Date) {
+        if let prev = lastLocationHistorySample {
+            let dt = now.timeIntervalSince(lastLocationHistorySampleAt)
+            let moved = loc.distance(from: prev) >= 38
+            guard dt >= 1.05 || moved else { return }
+        }
+        lastLocationHistorySampleAt = now
+        lastLocationHistorySample = loc
+        locationHistory.append(loc)
+        let cap = 20
+        if locationHistory.count > cap {
+            locationHistory.removeFirst(locationHistory.count - cap)
         }
     }
 
     // MARK: - Route Calculation
 
+    /// Accept dispatch: optional `POST /v1/optimize` then same road-geometry stack as manual search.
+    @MainActor
+    private func runQuantumBackedDispatchRoute(for load: DispatchedLoad) async {
+        guard let origin = locationManager.currentLocation else {
+            routeError = lang.horizonRouteErrorLocationUnavailable
+            showingRouteError = true
+            return
+        }
+
+        isCalculatingRoute = true
+        bottomSheetExpanded = false
+        defer { isCalculatingRoute = false }
+
+        var optimizeResponse: RouteOptimizeResponseDTO?
+        if QuantumRouteOptimizationClient.shared.isConfigured, let trip = activeTrip {
+            do {
+                let built = try await RouteOptimizePayloadBuilder.build(
+                    load: load,
+                    trip: trip,
+                    truckProfile: truckProfile,
+                    currentLocation: origin,
+                    loadPickedUp: loadPickedUp
+                )
+                let resp = try await QuantumRouteOptimizationClient.shared.optimize(built.request)
+                optimizeResponse = resp
+                persistRouteOptimizeResponse(resp, trip: trip, load: load)
+                #if DEBUG
+                print("[Quantum] optimize OK solver=\(resp.solverUsed) status=\(resp.status)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Quantum] POST /v1/optimize skipped or failed: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        do {
+            let routing = RoutingService.shared
+            let result = try await routing.calculateTruckRoute(
+                from: origin,
+                to: load.destinationCoordinate,
+                destinationName: load.destinationAddress,
+                profile: truckProfile,
+                accessMode: routingAccessMode
+            )
+            var finalRoute = result
+            if let resp = optimizeResponse, resp.status != "error", !resp.orderedLocationIds.isEmpty {
+                finalRoute = result.withQuantumOptimization(from: resp)
+            }
+            if AppAccessPolicy.enforceTruckOnlyRouting, !routing.lastProvider.isTruckAware {
+                bottomSheetExpanded = false
+                routeError = lang.horizonRouteErrorValhallaUnavailable
+                showingRouteError = true
+                return
+            }
+            applyRoute(finalRoute, suppressUIErrors: false, destinationCoordinate: load.destinationCoordinate)
+        } catch {
+            bottomSheetExpanded = false
+            routeError = lang.horizonRoutingFailureMessage(error)
+            showingRouteError = true
+        }
+    }
+
+    @MainActor
+    private func persistRouteOptimizeResponse(_ resp: RouteOptimizeResponseDTO, trip: Trip, load: DispatchedLoad) {
+        trip.lastRouteOptimizeRequestId = resp.requestId
+        trip.lastRouteOptimizeLoadId = load.id
+        trip.lastRouteOptimizeAt = Date()
+        trip.lastRouteOptimizeSolverUsed = resp.solverUsed
+        if let m = resp.metrics {
+            trip.lastRouteOptimizeKmSavedApprox = m.approxKmSaved
+            trip.lastRouteOptimizeKmBaselineApprox = m.approxKmBaselineManualOrder
+            trip.lastRouteOptimizeKmOptimizedApprox = m.approxKmOptimizedOrder
+        }
+        try? modelContext.save()
+    }
+
     private func calculateRoute(to coordinate: CLLocationCoordinate2D, address: String) {
         let isReroute = isNavigating // If already navigating, this is a reroute
         guard let origin = locationManager.currentLocation else {
-            if !isReroute { routeError = "Location unavailable. Check GPS."; showingRouteError = true }
+            if !isReroute { routeError = lang.horizonRouteErrorLocationUnavailable; showingRouteError = true }
             return
+        }
+        if !isReroute {
+            let key = [
+                String(format: "%.5f,%.5f", origin.coordinate.latitude, origin.coordinate.longitude),
+                String(format: "%.5f,%.5f", coordinate.latitude, coordinate.longitude),
+                address
+            ].joined(separator: "|")
+            let now = Date()
+            if key == lastIdleRouteDedupeKey, now.timeIntervalSince(lastIdleRouteDedupeAt) < 2.0 {
+                #if DEBUG
+                print("[Route] SKIP duplicate coordinate route within 2s → \(address)")
+                #endif
+                return
+            }
+            lastIdleRouteDedupeKey = key
+            lastIdleRouteDedupeAt = now
         }
         // #region agent log
         agentLogHorizon(
@@ -1618,61 +1850,41 @@ struct HorizonView: View {
         )
         // #endregion
         if !isReroute { isCalculatingRoute = true; bottomSheetExpanded = false }
+        #if DEBUG
         print("[Route] \(isReroute ? "REROUTE" : "NEW") → \(address) from \(String(format: "%.5f,%.5f", origin.coordinate.latitude, origin.coordinate.longitude))")
-        Task {
-            defer {
-                Task { @MainActor in
-                    if !isReroute { isCalculatingRoute = false }
-                }
-            }
-            do {
-                let routing = RoutingService.shared
-                let result = try await routing.calculateTruckRoute(from: origin, to: coordinate, destinationName: address, profile: truckProfile)
-                await MainActor.run {
-                    if truckSafeOnlyMode && !routing.lastProvider.isTruckAware {
-                        if isReroute {
-                            print("[Route] Reroute: truck-safe unavailable, keeping current route")
-                            return // Don't disrupt active navigation
-                        }
-                        prepareFallbackRoute(result, provider: routing.lastProvider)
-                        return
-                    }
-                    if !routing.lastProvider.isTruckAware && !isReroute { prepareFallbackRoute(result, provider: routing.lastProvider); return }
-                    applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
-                }
-            } catch {
-                await MainActor.run {
-                    if isReroute {
-                        // SILENT: don't show error during active navigation — keep current route
-                        print("[Route] ⚠️ Reroute failed (keeping current route): \(error.localizedDescription)")
-                        if case RoutingServiceError.allProvidersFailed = error {
-                            // Back off reroute spam when providers are unavailable.
-                            lastRerouteAt = Date().addingTimeInterval(150)
-                        }
-                    } else {
-                        bottomSheetExpanded = false
-                        routeError = "Unable to calculate a safe route right now. Check signal and try again."
-                        showingRouteError = true
-                    }
-                }
-            }
-        }
+        #endif
+        runSingleTruckRoute(from: origin, to: coordinate, address: address, isReroute: isReroute)
     }
 
     private func calculateRoute(to address: String) {
         let isReroute = isNavigating
         guard let origin = locationManager.currentLocation else {
-            if !isReroute { routeError = "Location unavailable. Check GPS."; showingRouteError = true }
+            if !isReroute { routeError = lang.horizonRouteErrorLocationUnavailable; showingRouteError = true }
             return
         }
-        if !isReroute { isCalculatingRoute = true; bottomSheetExpanded = false }
-        print("[Route] \(isReroute ? "REROUTE" : "NEW") → '\(address)'")
-        Task {
-            defer {
-                Task { @MainActor in
-                    if !isReroute { isCalculatingRoute = false }
-                }
+        if !isReroute {
+            let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = [
+                String(format: "%.5f,%.5f", origin.coordinate.latitude, origin.coordinate.longitude),
+                "geocode",
+                trimmed
+            ].joined(separator: "|")
+            let now = Date()
+            if key == lastIdleRouteDedupeKey, now.timeIntervalSince(lastIdleRouteDedupeAt) < 2.0 {
+                #if DEBUG
+                print("[Route] SKIP duplicate address route within 2s → '\(trimmed)'")
+                #endif
+                return
             }
+            lastIdleRouteDedupeKey = key
+            lastIdleRouteDedupeAt = now
+        }
+        if !isReroute { isCalculatingRoute = true; bottomSheetExpanded = false }
+        #if DEBUG
+        print("[Route] \(isReroute ? "REROUTE" : "NEW") → '\(address)'")
+        #endif
+        Task {
+            let reroute = isReroute
             do {
                 let request = MKLocalSearch.Request()
                 request.naturalLanguageQuery = address
@@ -1689,7 +1901,7 @@ struct HorizonView: View {
                     response = try await MKLocalSearch(request: fallbackRequest).start()
                 }
                 let sortedByDistance = response.mapItems.sorted {
-                    origin.distance(from: $0.location) < origin.distance(from: $1.location)
+                    origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) < origin.distance(from: CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude))
                 }
                 // #region agent log
                 agentLogHorizon(
@@ -1700,8 +1912,8 @@ struct HorizonView: View {
                     data: [
                         "query": address,
                         "candidateCount": sortedByDistance.count,
-                        "nearestMeters": Int(sortedByDistance.first.map { origin.distance(from: $0.location) } ?? -1),
-                        "farthestMeters": Int(sortedByDistance.last.map { origin.distance(from: $0.location) } ?? -1)
+                        "nearestMeters": Int(sortedByDistance.first.map { origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) } ?? -1),
+                        "farthestMeters": Int(sortedByDistance.last.map { origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) } ?? -1)
                     ]
                 )
                 // #endregion
@@ -1709,7 +1921,7 @@ struct HorizonView: View {
                     throw RoutingServiceError.geocodeFailed(address)
                 }
                 let destinationName = first.name ?? address
-                let destinationDistance = origin.distance(from: first.location)
+                let destinationDistance = origin.distance(from: CLLocation(latitude: first.placemark.coordinate.latitude, longitude: first.placemark.coordinate.longitude))
                 guard destinationDistance < 1_500_000 else {
                     throw RoutingServiceError.geocodeFailed("Destination too far from current location (\(Int(destinationDistance/1000)) km)")
                 }
@@ -1721,47 +1933,36 @@ struct HorizonView: View {
                     message: "Selected geocode candidate for routing",
                     data: [
                         "selectedName": destinationName,
-                        "selectedLat": first.location.coordinate.latitude,
-                        "selectedLon": first.location.coordinate.longitude,
+                        "selectedLat": first.placemark.coordinate.latitude,
+                        "selectedLon": first.placemark.coordinate.longitude,
                         "selectedDistanceMeters": Int(destinationDistance)
                     ]
                 )
                 // #endregion
-                let routing = RoutingService.shared
-                let result = try await routing.calculateTruckRoute(
-                    from: origin,
-                    to: first.location.coordinate,
-                    destinationName: destinationName,
-                    profile: truckProfile
-                )
+                let coord = first.placemark.coordinate
                 await MainActor.run {
-                    if truckSafeOnlyMode && !routing.lastProvider.isTruckAware {
-                        if isReroute {
-                            print("[Route] Reroute: truck-safe unavailable, keeping current route")
-                            return
-                        }
-                        prepareFallbackRoute(result, provider: routing.lastProvider)
-                        return
-                    }
-                    if !routing.lastProvider.isTruckAware && !isReroute { prepareFallbackRoute(result, provider: routing.lastProvider); return }
-                    applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: first.location.coordinate)
+                    runSingleTruckRoute(from: origin, to: coord, address: destinationName, isReroute: reroute)
                 }
             } catch {
                 await MainActor.run {
-                    if isReroute {
+                    if !reroute { isCalculatingRoute = false }
+                    if reroute {
+                        #if DEBUG
                         print("[Route] ⚠️ Reroute failed (keeping current route): \(error.localizedDescription)")
+                        #endif
                         if case RoutingServiceError.allProvidersFailed = error {
-                            // Back off reroute spam when providers are unavailable.
                             lastRerouteAt = Date().addingTimeInterval(150)
                         }
                     } else {
                         bottomSheetExpanded = false
                         if let parsed = parseCoordinateAddress(address) {
-                            routeError = "Address resolved to coordinates, but safe route is unavailable. Try again."
+                            routeError = lang.horizonRouteErrorAddressNoSafeRoute
                             showingRouteError = true
+                            #if DEBUG
                             print("[Route] Parsed coordinate route blocked for safety: \(parsed.latitude),\(parsed.longitude)")
+                            #endif
                         } else {
-                            routeError = "Could not resolve destination address. Please pick a destination from Search."
+                            routeError = lang.horizonRouteErrorCouldNotResolveAddress
                             showingRouteError = true
                         }
                     }
@@ -1792,7 +1993,7 @@ struct HorizonView: View {
 
         let steps = [
             RouteStep(
-                instruction: "Navigate to \(destinationName)",
+                instruction: lang.horizonNavigateToDestination(destinationName),
                 distanceMeters: distanceMeters,
                 durationSeconds: durationSeconds,
                 maneuver: "continue"
@@ -1805,7 +2006,7 @@ struct HorizonView: View {
             distanceMeters: distanceMeters,
             durationSeconds: durationSeconds,
             destinationName: destinationName,
-            truckNotices: [TruckRouteNotice(code: "EMERGENCY", title: "Emergency route mode", details: "Road graph unavailable; using direct guidance line.")]
+            truckNotices: [TruckRouteNotice(code: "EMERGENCY", title: lang.horizonEmergencyRouteTitle, details: lang.horizonEmergencyRouteDetails)]
         )
     }
 
@@ -1850,9 +2051,13 @@ struct HorizonView: View {
             ]
         )
         // #endregion
+        #if DEBUG
         print("[ApplyRoute] ✅ coords=\(result.coordinates.count), steps=\(result.steps.count), dist=\(Int(result.distanceMeters))m, name='\(result.destinationName)'")
+        #endif
         for (i, s) in result.steps.prefix(5).enumerated() {
+            #if DEBUG
             print("[ApplyRoute]   step[\(i)]: '\(s.instruction)' maneuver='\(s.maneuver)' dist=\(Int(s.distanceMeters))m")
+            #endif
         }
 
         if !suppressUIErrors {
@@ -1862,50 +2067,50 @@ struct HorizonView: View {
 
         guard !result.coordinates.isEmpty else {
             if suppressUIErrors {
+                #if DEBUG
                 print("[ApplyRoute] ⚠️ Suppressed error: route has no coordinates")
+                #endif
                 return
             }
-            routeError = "Route has no coordinates"; showingRouteError = true; return
+            routeError = lang.horizonRouteErrorNoCoordinates; showingRouteError = true; return
         }
         guard result.distanceMeters > 0 else {
             if suppressUIErrors {
+                #if DEBUG
                 print("[ApplyRoute] ⚠️ Suppressed error: route distance is zero")
+                #endif
                 return
             }
-            routeError = "Route distance is zero"; showingRouteError = true; return
+            routeError = lang.horizonRouteErrorZeroDistance; showingRouteError = true; return
         }
 
-        // Bulletproof: if route has steps, use them; filter only truly empty instructions
-        var steps = result.steps
-            .filter { !$0.instruction.trimmingCharacters(in: .whitespaces).isEmpty }
-            .filter { $0.maneuver != "depart" }
-            .map { DisplayRouteStep($0) }
+        // Filter steps once — UI and NavigationEngine must share the same indices.
+        let (steps, engineSteps) = Self.filteredNavigationSteps(from: result, lang: lang)
 
-        // If filtering removed ALL steps, try without the depart filter
-        if steps.isEmpty && !result.steps.isEmpty {
-            print("[ApplyRoute] ⚠️ depart filter removed all steps, retrying without filter")
-            steps = result.steps
-                .filter { !$0.instruction.trimmingCharacters(in: .whitespaces).isEmpty }
-                .map { DisplayRouteStep($0) }
+        print("[ApplyRoute] ✅ navigation ON · steps=\(steps.count) · \(Int(result.distanceMeters))m · '\(result.destinationName)'")
+        #if DEBUG
+        for (i, s) in engineSteps.prefix(5).enumerated() {
+            print("[ApplyRoute]   step[\(i)]: '\(s.instruction)' maneuver='\(s.maneuver)' dist=\(Int(s.distanceMeters))m")
         }
+        #endif
 
-        // Last resort: if still 0 steps, create a single "navigate to destination" step
-        if steps.isEmpty {
-            print("[ApplyRoute] ⚠️ STILL 0 steps after all filters — creating fallback step")
-            steps = [DisplayRouteStep(RouteStep(
-                instruction: "Navigate to \(result.destinationName)",
-                distanceMeters: result.distanceMeters,
-                durationSeconds: result.durationSeconds,
-                maneuver: "continue"
-            ))]
-        }
-
-        print("[ApplyRoute] final steps=\(steps.count)")
+        let routeForNavigation = TruckRoute(
+            coordinates: result.coordinates,
+            steps: engineSteps,
+            distanceMeters: result.distanceMeters,
+            durationSeconds: result.durationSeconds,
+            destinationName: result.destinationName,
+            truckNotices: result.truckNotices,
+            provenance: result.provenance,
+            tollCostUSD: result.tollCostUSD,
+            tollCurrency: result.tollCurrency,
+            tollPoints: result.tollPoints
+        )
 
         var t = Transaction(animation: nil); t.disablesAnimations = true
         withTransaction(t) {
             bottomSheetExpanded = false; showingSteps = false
-            truckRoute = result; route = nil
+            truckRoute = routeForNavigation; route = nil
             routeSteps = steps; currentStepIndex = 0
         }
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
@@ -1916,8 +2121,11 @@ struct HorizonView: View {
         let provider = RoutingService.shared.lastProvider
         lastRoutingProvider = provider; dockCheckDone = false
         navigationEngine.language = lang
-        navigationEngine.startNavigation(route: result)
+        navigationEngine.startNavigation(route: routeForNavigation)
         VoiceNavigationManager.shared.resetForNewRoute()
+        lastNavFuelEtaVoiceAt = .distantPast
+        UIApplication.shared.isIdleTimerDisabled = true
+        mapRecenter?()
 
         // Toll data
         let distanceM = result.distanceMeters
@@ -1949,12 +2157,16 @@ struct HorizonView: View {
         navigationEngine.onNeedsReroute = {
             // Cooldown: don't reroute more than once per 30 seconds (prevents API rate limiting)
             guard Date().timeIntervalSince(lastRerouteAt) > 30 else {
+                #if DEBUG
                 print("[Route] Reroute skipped — cooldown active (\(Int(30 - Date().timeIntervalSince(lastRerouteAt)))s remaining)")
+                #endif
                 return
             }
             lastRerouteAt = Date()
             guard let dest = activeRouteDestination else {
+                #if DEBUG
                 print("[Route] Reroute skipped — destination coordinate unavailable")
+                #endif
                 return
             }
             // #region agent log
@@ -1973,8 +2185,9 @@ struct HorizonView: View {
             calculateRoute(to: dest, address: result.destinationName)
         }
         navigationEngine.onArrival = {
-            let dest = result.destinationName.isEmpty ? "your destination" : result.destinationName
+            let dest = result.destinationName.isEmpty ? lang.horizonArrivalYourDestination : result.destinationName
             arrivalDestinationName = dest
+            navigationEngine.stopNavigation()
             var t = Transaction(animation: nil); t.disablesAnimations = true
             withTransaction(t) {
                 truckRoute = nil; route = nil; routeSteps = []; currentStepIndex = 0
@@ -1988,15 +2201,24 @@ struct HorizonView: View {
     }
 
     @MainActor
-    private func prepareFallbackRoute(_ route: TruckRoute, provider: RoutingService.RoutingProvider) {
+    private func prepareFallbackRoute(
+        _ route: TruckRoute,
+        provider: RoutingService.RoutingProvider,
+        destinationCoordinate: CLLocationCoordinate2D? = nil
+    ) {
         bottomSheetExpanded = false
         let isFirstFallback = !hasAcceptedFallbackThisSession
         hasAcceptedFallbackThisSession = true
         if isFirstFallback {
-            routingNotice = "Route via \(provider.rawValue) — truck restrictions may be limited."
+            if route.provenance?.quantumStopOrderFromAPI == true {
+                routingNotice =
+                    lang.horizonRoutingNoticeQuantum(provider: provider.rawValue, solver: route.provenance?.solverUsed ?? "solver")
+            } else {
+                routingNotice = lang.horizonRoutingNoticeSimple(provider: provider.rawValue)
+            }
             showingRoutingNotice = true
         }
-        applyRoute(route)
+        applyRoute(route, destinationCoordinate: destinationCoordinate)
     }
 
     @MainActor
@@ -2039,10 +2261,10 @@ struct HorizonView: View {
             let results = (try? await MKLocalSearch(request: request).start())?.mapItems ?? []
             await MainActor.run {
                 nearbyItems = results.prefix(15).compactMap { item in
-                    let loc = item.location; let dist = location.distance(from: loc)
-                    let addrText = item.address?.shortAddress ?? item.addressRepresentations?.cityWithContext ?? item.name ?? ""
+                    let loc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude); let dist = location.distance(from: loc)
+                    let addrText = item.placemark.title ?? item.name ?? ""
                     return NearbyStopItem(name: item.name ?? "Unknown", address: addrText,
-                        coordinate: loc.coordinate, distanceMeters: dist, phone: item.phoneNumber, category: category)
+                        coordinate: item.placemark.coordinate, distanceMeters: dist, phone: item.phoneNumber, category: category)
                 }.sorted { $0.distanceMeters < $1.distanceMeters }
                 isLoadingNearby = false
             }
@@ -2060,25 +2282,83 @@ struct HorizonView: View {
 
     private func refreshNearestParking(from location: CLLocation) {
         Task {
-            let request = MKLocalSearch.Request()
-            request.naturalLanguageQuery = "truck parking"
-            request.region = MKCoordinateRegion(center: location.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3))
-            guard let items = try? await MKLocalSearch(request: request).start() else { return }
-            let nearest = items.mapItems.compactMap { item -> (String, Double)? in
-                guard let name = item.name else { return nil }
-                let coord: CLLocationCoordinate2D
-                if #available(iOS 26.0, *) { coord = item.location.coordinate } else { coord = item.placemark.coordinate }
-                let dist = location.distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude)) / 1609.34
-                return (name, dist)
-            }.sorted { $0.1 < $1.1 }.first
-            guard let (name, miles) = nearest, miles < 15 else {
-                await MainActor.run { showParkingPill = false }; return
+            var resolvedName = ""
+            var resolvedMiles = Double.greatestFiniteMagnitude
+            var isFull = false
+
+            if SupabaseConfig.isConfigured,
+               let rows = try? await PoiPlacesService.shared.fetchPlacesNear(
+                   location: location,
+                   radiusMeters: 40_000,
+                   poiTypes: ["truck_stop", "rest_area"],
+                   limit: 25
+               ) {
+                let heading = locationManager.currentHeading?.trueHeading
+                let ahead = rows.compactMap { row -> (PlacesNearRow, Double)? in
+                    let dist = row.distance_m ?? location.distance(
+                        from: CLLocation(latitude: row.lat, longitude: row.lon)
+                    )
+                    guard dist < 24_140 else { return nil }
+                    if let heading {
+                        let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
+                        let diff = abs(angleDeltaDegrees(heading, location.coordinate.bearing(to: coord)))
+                        guard diff <= 75 else { return nil }
+                    }
+                    return (row, dist)
+                }.sorted { $0.1 < $1.1 }.first
+
+                if let (row, distMeters) = ahead {
+                    resolvedName = row.name ?? row.brand ?? "Truck parking"
+                    resolvedMiles = distMeters / 1609.34
+                    let available = row.gov_parking_available ?? row.parking_available
+                    if let available, available == 0 { isFull = true }
+                    else if row.parking_status?.lowercased() == "full" { isFull = true }
+                    else if let siteOpen = row.gov_site_open, !siteOpen { isFull = true }
+                }
             }
-            let reports = (try? await SupabaseClient.shared.fetchRecentRoadReports(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude, radiusKm: 25)) ?? []
-            let cutoff = Date().addingTimeInterval(-3600 * 4)
-            let isFull = reports.contains { $0.report_type == "parkingFull" && $0.location_name == name && (ISO8601DateFormatter().date(from: $0.reported_at) ?? .distantPast) > cutoff }
+
+            if resolvedMiles > 15 {
+                let request = MKLocalSearch.Request()
+                request.naturalLanguageQuery = "truck parking"
+                request.region = MKCoordinateRegion(center: location.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.3))
+                if let items = try? await MKLocalSearch(request: request).start() {
+                    let nearest = items.mapItems.compactMap { item -> (String, Double)? in
+                        guard let name = item.name else { return nil }
+                        let coord = item.placemark.coordinate
+                        let dist = location.distance(from: CLLocation(latitude: coord.latitude, longitude: coord.longitude)) / 1609.34
+                        return (name, dist)
+                    }.sorted { $0.1 < $1.1 }.first
+                    if let (name, miles) = nearest, miles < resolvedMiles {
+                        resolvedName = name
+                        resolvedMiles = miles
+                        isFull = false
+                    }
+                }
+            }
+
+            guard resolvedMiles < 15, !resolvedName.isEmpty else {
+                await MainActor.run { showParkingPill = false }
+                return
+            }
+
+            if !isFull {
+                let reports = (try? await SupabaseClient.shared.fetchRecentRoadReports(
+                    latitude: location.coordinate.latitude,
+                    longitude: location.coordinate.longitude,
+                    radiusKm: 25
+                )) ?? []
+                let cutoff = Date().addingTimeInterval(-3600 * 4)
+                isFull = reports.contains {
+                    $0.report_type == "parkingFull"
+                        && $0.location_name == resolvedName
+                        && (ISO8601DateFormatter().date(from: $0.reported_at) ?? .distantPast) > cutoff
+                }
+            }
+
             await MainActor.run {
-                nearestParkingName = name; nearestParkingMiles = miles; nearestParkingFull = isFull
+                nearestParkingName = resolvedName
+                nearestParkingMiles = resolvedMiles
+                nearestParkingFull = isFull
                 withAnimation { showParkingPill = true }
             }
         }
@@ -2086,73 +2366,234 @@ struct HorizonView: View {
 
     // MARK: - Scale (Weigh Station) Detection
 
+    private func openScaleDetailsSheet() {
+        openWeighStationReportSheet()
+    }
+
+    private func openWeighStationReportSheet() {
+        showingWeighStation = true
+    }
+
+    private func weighReportPrefillTarget() -> WeighStationReportTarget? {
+        guard scaleAlertPoiPlaceId != nil || !scaleAlertName.isEmpty else { return nil }
+        let coord = scaleAlertCoordinate ?? locationManager.currentLocation?.coordinate
+        guard let coord else { return nil }
+        let name = scaleAlertName.isEmpty ? lang.horizonGenericWeighStation : scaleAlertName
+        return WeighStationReportTarget(
+            id: scaleAlertPoiPlaceId ?? UUID(),
+            name: name,
+            latitude: coord.latitude,
+            longitude: coord.longitude,
+            poiPlaceId: scaleAlertPoiPlaceId,
+            distanceMeters: scaleAlertDistanceMiles * 1609.34,
+            govStatus: scaleAlertGovStatus,
+            govSource: scaleAlertGovSource,
+            countryCode: nil
+        )
+    }
+
+    private func submitScaleReport(_ status: WeighStationStatus) {
+        let name = scaleAlertName.isEmpty ? lang.horizonGenericWeighStation : scaleAlertName
+        let coord = scaleAlertCoordinate ?? locationManager.currentLocation?.coordinate
+        WeighStationStatusService.shared.submit(
+            status: status,
+            for: name,
+            latitude: coord?.latitude,
+            longitude: coord?.longitude,
+            poiPlaceId: scaleAlertPoiPlaceId
+        )
+        let resolved = WeighStationStatusService.shared.resolve(
+            stationName: name,
+            near: coord,
+            govStatus: scaleAlertGovStatus,
+            govSource: scaleAlertGovSource,
+            govSiteOpen: scaleAlertGovSiteOpen
+        )
+        scaleAlertStatus = resolved.displayStatus
+        scaleAlertProvenance = resolved.provenance
+        scaleAlertCommunityHint = resolved.communityHint ?? status
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// Auto scale detection — no driver action. Wider corridor + GPS course when navigating.
+    private func scaleDetectionProfile(for location: CLLocation) -> (alertMeters: Double, searchMeters: Double, headingTolerance: Double) {
+        if isNavigating {
+            return (12_000, 48_000, 100)
+        }
+        return (5_000, 24_140, 70)
+    }
+
+    private func isScaleAhead(
+        of location: CLLocation,
+        target: CLLocationCoordinate2D,
+        headingTolerance: Double
+    ) -> Bool {
+        let bearing = locationManager.bestBearing
+        guard location.speed >= 2 || locationManager.currentHeading != nil else { return true }
+        let diff = abs(angleDeltaDegrees(bearing, location.coordinate.bearing(to: target)))
+        return diff <= headingTolerance
+    }
+
+    @MainActor
+    private func presentMoodCheckIfParked() {
+        guard !isNavigating else { return }
+        if AppAccessPolicy.moodCheckOnlyWhenParked {
+            let speedMph = max(0, (locationManager.currentLocation?.speed ?? 0) * 2.23694)
+            guard speedMph < 3 else { return }
+        }
+        let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        guard lastMoodCheckDateString != todayStr else { return }
+        showingMoodCheck = true
+        lastMoodCheckDateString = todayStr
+    }
+
     private func checkForNearbyScales(from location: CLLocation) {
-        let queries = countryCompliance.weighQueries
-        let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 40_000, longitudinalMeters: 40_000)
         Task {
-            var allItems: [MKMapItem] = []
-            for query in queries {
-                let req = MKLocalSearch.Request(); req.naturalLanguageQuery = query; req.region = region
-                let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
-                allItems.append(contentsOf: items)
-            }
-            var deduped: [MKMapItem] = []
-            for item in allItems {
-                let loc = item.location
-                if !deduped.contains(where: { $0.location.distance(from: loc) < 500 }) { deduped.append(item) }
-            }
-            let heading = locationManager.currentHeading?.trueHeading
-            let nearest = deduped.map { item in
-                let itemLoc = item.location; let dist = location.distance(from: itemLoc)
-                let isAhead: Bool
-                if let heading { let diff = abs(angleDeltaDegrees(heading, location.coordinate.bearing(to: itemLoc.coordinate))); isAhead = diff <= 70 }
-                else { isAhead = true }
-                return (item, dist, isAhead)
-            }.filter { $0.2 }.filter { $0.1 < 24_140 }.sorted { $0.1 < $1.1 }.first
-            guard let (nearestItem, distMeters, _) = nearest else {
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
+            let limits = scaleDetectionProfile(for: location)
+            var stationName = lang.horizonGenericWeighStation
+            var distMeters: Double = .greatestFiniteMagnitude
+            var stationCoord: CLLocationCoordinate2D?
+            var govWeighStatus: String?
+            var govWeighSource: String?
+            var govSiteOpen: Bool?
+            var poiPlaceId: UUID?
+
+            // 1) Supabase: OSM + USDOT NTAD weigh POIs (official locations)
+            if let rows = try? await PoiPlacesService.shared.fetchWeighStationsNear(
+                location: location,
+                radiusMeters: limits.searchMeters,
+                limit: isNavigating ? 60 : 40
+            ) {
+                let ahead = rows.compactMap { row -> (PlacesNearRow, Double)? in
+                    let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
+                    let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+                    let dist = location.distance(from: itemLoc)
+                    guard dist < limits.searchMeters else { return nil }
+                    guard isScaleAhead(of: location, target: coord, headingTolerance: limits.headingTolerance) else { return nil }
+                    return (row, dist)
+                }.sorted { ($0.1) < ($1.1) }.first
+
+                if let (row, dist) = ahead, dist <= limits.alertMeters {
+                    stationName = row.name ?? stationName
+                    distMeters = dist
+                    stationCoord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
+                    poiPlaceId = row.id
+                    govWeighStatus = row.gov_weigh_status
+                    govWeighSource = row.gov_weigh_source
+                    govSiteOpen = row.gov_site_open
                 }
-                return
             }
-            guard distMeters <= 5_000 else {
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
-                }
-                return
-            }
-            let distMiles = distMeters / 1609.34; let stationName = nearestItem.name ?? "Weigh Station"
-            let weighService = WeighStationStatusService.shared
-            await weighService.fetchRemoteReports()
-            let liveStatus = weighService.latestStatus(for: stationName)
-            await MainActor.run {
-                scaleAlertName = stationName; scaleAlertDistanceMiles = distMiles
-                switch liveStatus {
-                case .open: scaleAlertStatus = .open; case .closed: scaleAlertStatus = .closed
-                case .monitoring: scaleAlertStatus = .unknown; case nil: scaleAlertStatus = .unknown
-                }
-                let alertTier: String
-                if distMeters <= 500 {
-                    alertTier = "500m"
-                } else if distMeters <= 2_000 {
-                    alertTier = "2km"
-                } else {
-                    alertTier = "5km"
-                }
-                // #region agent log
-                agentLogHorizon(
-                    runId: "post-repro-6",
-                    hypothesisId: "H-scale-distance-tiers",
-                    location: "ViewsHorizonView.swift:checkForNearbyScales",
-                    message: "scale alert distance tier selected",
-                    data: [
-                        "distanceMeters": Int(distMeters),
-                        "tier": alertTier,
-                        "stationName": stationName
-                    ]
+
+            // 2) MapKit fallback when Supabase has no weigh POI nearby
+            if distMeters > limits.alertMeters {
+                let queries = countryCompliance.weighQueries
+                let region = MKCoordinateRegion(
+                    center: location.coordinate,
+                    latitudinalMeters: limits.searchMeters,
+                    longitudinalMeters: limits.searchMeters
                 )
-                // #endregion
+                var allItems: [MKMapItem] = []
+                for query in queries {
+                    let req = MKLocalSearch.Request(); req.naturalLanguageQuery = query; req.region = region
+                    let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
+                    allItems.append(contentsOf: items)
+                }
+                var deduped: [MKMapItem] = []
+                for item in allItems {
+                    let loc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
+                    if !deduped.contains(where: { CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: loc) < 500 }) {
+                        deduped.append(item)
+                    }
+                }
+                let nearest = deduped.map { item in
+                    let itemLoc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
+                    let dist = location.distance(from: itemLoc)
+                    let isAhead = isScaleAhead(
+                        of: location,
+                        target: item.placemark.coordinate,
+                        headingTolerance: limits.headingTolerance
+                    )
+                    return (item, dist, isAhead)
+                }.filter { $0.2 }.filter { $0.1 < limits.searchMeters }.sorted { $0.1 < $1.1 }.first
+
+                guard let (nearestItem, d, _) = nearest, d <= limits.alertMeters else {
+                    await MainActor.run {
+                        withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
+                    }
+                    return
+                }
+                stationName = nearestItem.name ?? stationName
+                distMeters = d
+                stationCoord = nearestItem.placemark.coordinate
+            }
+
+            guard distMeters <= limits.alertMeters else {
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
+                }
+                return
+            }
+
+            let distMiles = distMeters / 1609.34
+            let weighService = WeighStationStatusService.shared
+            await weighService.fetchRemoteReports(near: stationCoord ?? location.coordinate, radiusKm: 80)
+            await operationalFeedService.refreshIfNeeded(for: stationCoord ?? location.coordinate)
+            operationalFeedService.applyWeighSignals()
+
+            let resolved = weighService.resolve(
+                stationName: stationName,
+                near: stationCoord,
+                govStatus: govWeighStatus,
+                govSource: govWeighSource,
+                govSiteOpen: govSiteOpen
+            )
+
+            await MainActor.run {
+                scaleAlertName = stationName
+                scaleAlertDistanceMiles = distMiles
+                scaleAlertCoordinate = stationCoord
+                scaleAlertPoiPlaceId = poiPlaceId
+                scaleAlertGovStatus = govWeighStatus
+                scaleAlertGovSource = govWeighSource
+                scaleAlertGovSiteOpen = govSiteOpen
+                scaleAlertStatus = resolved.displayStatus
+                scaleAlertProvenance = resolved.provenance
+                scaleAlertCommunityHint = resolved.communityHint
                 withAnimation(.spring(response: 0.4)) { showingScaleAlert = true }
+                if isNavigating {
+                    let distText = regionalSettings.formatDistance(distMeters)
+                    let statusNote: String?
+                    switch scaleAlertProvenance {
+                    case .official:
+                        switch scaleAlertStatus {
+                        case .open: statusNote = lang.voiceScaleOfficialOpenPhrase
+                        case .closed: statusNote = lang.voiceScaleOfficialClosedPhrase
+                        case .monitoring, .unknown: statusNote = nil
+                        }
+                    case .community:
+                        if let hint = scaleAlertCommunityHint {
+                            switch hint {
+                            case .open: statusNote = lang.voiceScaleReportedOpenPhrase
+                            case .closed: statusNote = lang.voiceScaleReportedClosedPhrase
+                            case .monitoring: statusNote = lang.voiceScaleUnconfirmedPhrase
+                            }
+                        } else {
+                            statusNote = lang.voiceScaleUnconfirmedPhrase
+                        }
+                    case .locationOnly:
+                        statusNote = lang.voiceScaleUnconfirmedPhrase
+                    }
+                    let voiceKey = "\(poiPlaceId?.uuidString ?? stationName)-\(Int(distMeters / 800))"
+                    if lastScaleVoiceKey != voiceKey {
+                        lastScaleVoiceKey = voiceKey
+                        VoiceNavigationManager.shared.announceScaleAheadWithStatus(
+                            stationName: stationName,
+                            distanceText: distText,
+                            statusNote: statusNote,
+                            lang: lang
+                        )
+                    }
+                }
             }
         }
     }
@@ -2167,8 +2608,13 @@ struct HorizonView: View {
         Task {
             let payload = RoadReportPayload(driver_id: SupabaseClient.shared.currentDriverId, report_type: type.rawValue.lowercased(),
                 latitude: location.coordinate.latitude, longitude: location.coordinate.longitude, location_name: nil)
-            do { try await SupabaseClient.shared.submitRoadReport(payload) }
-            catch { print("MapAlert: sync failed — \(error.localizedDescription)") }
+            do {
+                try await SupabaseClient.shared.submitRoadReport(payload)
+            } catch {
+                #if DEBUG
+                print("MapAlert: sync failed — \(error.localizedDescription)")
+                #endif
+            }
         }
     }
 
@@ -2204,7 +2650,11 @@ struct HorizonView: View {
                         if mapAlerts.count > 50 { mapAlerts.removeFirst() }
                     }
                 }
-            } catch { print("MapAlerts: remote fetch failed — \(error.localizedDescription)") }
+            } catch {
+                #if DEBUG
+                print("MapAlerts: remote fetch failed — \(error.localizedDescription)")
+                #endif
+            }
         }
     }
 
@@ -2222,7 +2672,11 @@ struct HorizonView: View {
                 guard !showingDispatchAlert else { return }
                 dispatchService.handleIncomingLoad(load)
             }
-        } catch { print("HorizonView: fetchPendingDispatchLoads failed — \(error.localizedDescription)") }
+        } catch {
+            #if DEBUG
+            print("HorizonView: fetchPendingDispatchLoads failed — \(error.localizedDescription)")
+            #endif
+        }
     }
 
     // MARK: - Compliance
@@ -2243,7 +2697,7 @@ struct HorizonView: View {
         lastSpeedComplianceAlertAt = now
         let currentSpeed = regionalSettings.formatSpeed(speedKmh)
         let limitText = regionalSettings.formatSpeed(legalLimit)
-        speedComplianceMessage = "Truck speed \(currentSpeed) is above local heavy-vehicle guidance (\(limitText)). Reduce speed."
+        speedComplianceMessage = lang.truckSpeedComplianceMessage(currentFormatted: currentSpeed, limitFormatted: limitText)
         withAnimation(.spring(response: 0.35)) { showingSpeedComplianceAlert = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
             withAnimation(.easeOut(duration: 0.25)) { showingSpeedComplianceAlert = false }
@@ -2268,8 +2722,8 @@ struct HorizonView: View {
     }
 
     @MainActor private func emitGeofenceEvent(type: String, geofenceName: String, at coordinate: CLLocationCoordinate2D) {
-        let title = type == "entry" ? "Entered geofence" : "Exited geofence"
-        speedComplianceMessage = "\(title): \(geofenceName)"
+        let title = lang.horizonGeofenceBanner(isEntry: type == "entry", name: geofenceName)
+        speedComplianceMessage = title
         withAnimation(.spring(response: 0.35)) { showingSpeedComplianceAlert = true }
         let voiceId = UUID()
         voiceManager.announceRoadAlert(type: speedComplianceMessage, alertId: voiceId, lang: lang)
@@ -2283,35 +2737,242 @@ struct HorizonView: View {
     // MARK: - Truck Stop Proximity
 
     private func checkTruckStopProximity(from location: CLLocation, speed: Double) {
-        let arrivalThreshold: Double = 350; let departureThreshold: Double = 600
-        guard let nearest = truckStopService.nearbyStops.min(by: {
-            location.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <
-            location.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude))
-        }) else { return }
-        let distToNearest = location.distance(from: CLLocation(latitude: nearest.coordinate.latitude, longitude: nearest.coordinate.longitude))
-        if distToNearest < arrivalThreshold && speed < 3.0 {
-            if currentTruckStop?.name != nearest.name {
-                currentTruckStop = nearest
-                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [self] in
-                    guard currentTruckStop?.name == nearest.name else { return }
-                    showingFoodSuggestion = false; lastFoodSuggestionLocation = nil; loadFoodSuggestion()
+        let arrivalThreshold: Double = 350
+        let departureThreshold: Double = 600
+        let stops = truckStopService.nearbyStops
+        guard !stops.isEmpty else { return }
+
+        var nearest: TruckStopItem?
+        var nearestDist = Double.greatestFiniteMagnitude
+        for stop in stops {
+            let dist = location.distance(from: CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude))
+            if dist < nearestDist {
+                nearestDist = dist
+                nearest = stop
+            }
+        }
+        guard let nearestStop = nearest else { return }
+
+        let distToNearest = nearestDist
+        let isStopped = speed < 3.0
+
+        if distToNearest < arrivalThreshold && isStopped && nearestStop.qualifiesAsFuelStopForFood {
+            if currentTruckStop?.name != nearestStop.name {
+                currentTruckStop = nearestStop
+                truckStopArrivedAt = Date()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [self] in
+                    guard currentTruckStop?.name == nearestStop.name, isStoppedAtTruckStop else { return }
+                    lastFoodSuggestionLocation = nil
+                    loadFoodSuggestion()
                 }
-                if parkingPromptShownFor != nearest.name {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [self] in
-                        guard currentTruckStop?.name == nearest.name else { return }
-                        parkingPromptShownFor = nearest.name
+                if parkingPromptShownFor != nearestStop.name {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [self] in
+                        guard currentTruckStop?.name == nearestStop.name, isStoppedAtTruckStop else { return }
+                        parkingPromptShownFor = nearestStop.name
                         withAnimation(.spring(response: 0.4)) { showingParkingPrompt = true }
                     }
                 }
             }
-        } else if distToNearest > departureThreshold {
+        } else if distToNearest > departureThreshold || (speed > 8.0 && distToNearest > arrivalThreshold) {
             if let prevStop = currentTruckStop {
-                currentTruckStop = nil; showingParkingPrompt = false; lastTruckStopForReview = prevStop
-                DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
-                    guard !showingTruckStopReview, lastTruckStopForReview?.name == prevStop.name else { return }
-                    withAnimation(.spring(response: 0.4)) { showingTruckStopReview = true }
+                let dwell = truckStopArrivedAt.map { Date().timeIntervalSince($0) } ?? 0
+                currentTruckStop = nil
+                truckStopArrivedAt = nil
+                showingParkingPrompt = false
+                showingFoodSuggestion = false
+                foodSuggestion = nil
+
+                guard dwell >= stopReviewMinDwellSeconds else { return }
+                reviewTargetStop = prevStop
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [self] in
+                    guard reviewTargetStop?.name == prevStop.name, !showingStopReview else { return }
+                    withAnimation(.spring(response: 0.4)) { showingStopReview = true }
                 }
             }
+        } else if speed > 5.0 {
+            showingFoodSuggestion = false
+        }
+    }
+
+    private var isStoppedAtTruckStop: Bool {
+        guard let loc = locationManager.currentLocation else { return false }
+        return loc.speed >= 0 && loc.speed < 3.5
+    }
+
+    @MainActor
+    private func checkFacilityVisitDeparture(from location: CLLocation) {
+        guard let visit = pendingFacilityVisit, !showingFacilityReview else { return }
+        let center = CLLocation(latitude: visit.coordinate.latitude, longitude: visit.coordinate.longitude)
+        let dist = location.distance(from: center)
+        let dwell = Date().timeIntervalSince(visit.arrivedAt)
+        guard dist > facilityDepartureRadiusMeters, dwell >= facilityReviewMinDwellSeconds else { return }
+
+        pendingFacilityVisit = nil
+        facilityReviewLoad = visit.load
+        facilityReviewType = visit.type
+        facilityReviewCoordinate = visit.coordinate
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [self] in
+            guard facilityReviewLoad?.loadNumber == visit.load.loadNumber else { return }
+            withAnimation(.spring(response: 0.4)) { showingFacilityReview = true }
+        }
+    }
+
+    private func submitParkingAvailability(
+        _ status: HorizonTruckStopParkingBanner.ParkingAvailability,
+        for stop: TruckStopItem
+    ) {
+        guard SupabaseClient.shared.isAuthenticated,
+              let driverId = SupabaseClient.shared.currentDriverId else {
+            routingNotice = regionalSettings.currentLanguage == .portuguese
+                ? "Faça login para enviar status de parking."
+                : "Sign in to report parking status."
+            showingRoutingNotice = true
+            #if DEBUG
+            print("[ParkingReport] skipped remote sync: driver is not authenticated")
+            #endif
+            return
+        }
+        let total = stop.amenities.parkingSlots ?? 50
+        let available: Int
+        switch status {
+        case .many:
+            available = max(15, Int(Double(total) * 0.65))
+        case .some:
+            available = max(3, Int(Double(total) * 0.20))
+        case .full:
+            available = 0
+        }
+
+        let structured = TruckStopParkingReportPayload(
+            poi_place_id: stop.dataSource == .supabase ? stop.id : nil,
+            driver_id: driverId,
+            location_name: stop.name,
+            latitude: stop.coordinate.latitude,
+            longitude: stop.coordinate.longitude,
+            status: status.rawValue.lowercased(),
+            available_slots: available,
+            total_slots: total
+        )
+
+        Task {
+            do {
+                try await SupabaseClient.shared.submitTruckStopParkingReport(structured)
+            } catch {
+                let fallbackType: CrowdsourceReport.ReportType = status == .full ? .parkingFull : .parkingAvailable
+                let fallback = RoadReportPayload(
+                    driver_id: driverId,
+                    report_type: fallbackType.backendKey,
+                    latitude: stop.coordinate.latitude,
+                    longitude: stop.coordinate.longitude,
+                    location_name: stop.name
+                )
+                do {
+                    try await SupabaseClient.shared.submitRoadReport(fallback)
+                } catch {
+                    await MainActor.run {
+                        routingNotice = regionalSettings.currentLanguage == .portuguese
+                            ? "Não foi possível enviar o status agora. Tente novamente depois."
+                            : "Could not send status right now. Try again later."
+                        showingRoutingNotice = true
+                    }
+                }
+                #if DEBUG
+                print("[ParkingReport] structured sync failed, fallback attempted: \(error.localizedDescription)")
+                #endif
+            }
+        }
+    }
+
+    private func submitStopReview(_ review: StopReview, for stop: TruckStopItem) async throws {
+        let ratings = [review.serviceRating, review.showerRating, review.foodRating].filter { $0 > 0 }
+        let overall = ratings.isEmpty ? 1.0 : Double(ratings.reduce(0, +)) / Double(ratings.count)
+
+        if SupabaseClient.shared.isAuthenticated,
+           let driverId = SupabaseClient.shared.currentDriverId {
+            let payload = TruckStopReviewPayload(
+                poi_place_id: stop.dataSource == .supabase ? stop.id : nil,
+                driver_id: driverId,
+                location_name: stop.name,
+                latitude: stop.coordinate.latitude,
+                longitude: stop.coordinate.longitude,
+                easy_access_rating: nil,
+                cleanliness_rating: review.showerRating > 0 ? review.showerRating : nil,
+                restaurants_rating: review.foodRating > 0 ? review.foodRating : nil,
+                friendly_service_rating: review.serviceRating > 0 ? review.serviceRating : nil,
+                price_rating: nil,
+                overall_rating: max(1.0, min(5.0, overall)),
+                restaurant_names: [],
+                has_healthy_options: nil,
+                comments: review.notes.isEmpty ? nil : review.notes
+            )
+            try await SupabaseClient.shared.submitTruckStopReview(payload)
+        }
+
+        await MainActor.run {
+            WellnessVisitLinker.linkTruckStopReview(
+                review,
+                stopName: stop.name,
+                coordinate: stop.coordinate,
+                modelContext: modelContext
+            )
+            reviewTargetStop = nil
+            showingStopReview = false
+        }
+    }
+
+    @MainActor
+    private func submitFacilityReview(_ review: FacilityReview) async {
+        let ratings = [review.treatmentRating, review.bathroomRating, review.foodAccessRating, review.accessRating].filter { $0 > 0 }
+        let overall = ratings.isEmpty ? 1.0 : Double(ratings.reduce(0, +)) / Double(ratings.count)
+
+        if SupabaseClient.shared.isAuthenticated,
+           let driverId = SupabaseClient.shared.currentDriverId {
+            let payload = ShipperFacilityReviewPayload(
+                driver_id: driverId,
+                load_number: review.loadNumber,
+                company_id: review.companyId,
+                company_name: review.companyName,
+                review_type: review.type == .pickup ? "pickup" : "delivery",
+                latitude: review.coordinate.latitude,
+                longitude: review.coordinate.longitude,
+                treatment_rating: review.treatmentRating > 0 ? review.treatmentRating : nil,
+                bathroom_rating: review.bathroomRating > 0 ? review.bathroomRating : nil,
+                food_access_rating: review.foodAccessRating > 0 ? review.foodAccessRating : nil,
+                access_rating: review.accessRating > 0 ? review.accessRating : nil,
+                wait_minutes: review.waitMinutes,
+                overall_rating: max(1.0, min(5.0, overall)),
+                notes: review.notes.isEmpty ? nil : review.notes
+            )
+            do {
+                try await SupabaseClient.shared.submitShipperFacilityReview(payload)
+            } catch {
+                #if DEBUG
+                print("[FacilityReview] sync failed: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        WellnessVisitLinker.linkFacilityReview(review, modelContext: modelContext)
+
+        facilityReviewLoad = nil
+        facilityReviewCoordinate = nil
+        showingFacilityReview = false
+    }
+
+    /// During navigation: voice when a nearby truck stop is ~30 minutes away (diesel awareness).
+    private func announceNavTruckFuelEtasIfNeeded(location: CLLocation, speed: Double, now: Date) {
+        guard isNavigating, voiceManager.isEnabled else { return }
+        guard now.timeIntervalSince(lastNavFuelEtaVoiceAt) >= 24 else { return }
+        guard !truckStopService.nearbyStops.isEmpty else { return }
+
+        let minSpeedMs = max(speed, 6.7)
+        for stop in truckStopService.nearbyStops.prefix(36) {
+            let dist = location.distance(from: CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude))
+            let etaMinutes = Int(round((dist / minSpeedMs) / 60.0))
+            guard (26...34).contains(etaMinutes) else { continue }
+            VoiceNavigationManager.shared.announceTruckFuelEta(stopName: stop.name, etaMinutes: etaMinutes, lang: lang)
+            lastNavFuelEtaVoiceAt = now
+            return
         }
     }
 
@@ -2368,10 +3029,10 @@ struct HorizonView: View {
             let results = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
             await MainActor.run {
                 dockResults = results.prefix(5).compactMap { item in
-                    let dist = location.distance(from: item.location)
-                    let addr = item.address?.shortAddress ?? item.addressRepresentations?.cityWithContext ?? item.name ?? ""
+                    let dist = location.distance(from: CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude))
+                    let addr = item.placemark.title ?? item.name ?? ""
                     return NearbyStopItem(name: item.name ?? "Loading Dock", address: addr,
-                        coordinate: item.location.coordinate, distanceMeters: dist, phone: item.phoneNumber, category: .rest)
+                        coordinate: item.placemark.coordinate, distanceMeters: dist, phone: item.phoneNumber, category: .rest)
                 }
                 if !dockResults.isEmpty {
                     withAnimation(.spring(response: 0.4)) { showingDockFinder = true }
@@ -2384,28 +3045,40 @@ struct HorizonView: View {
     // MARK: - Wellness
 
     private func loadFoodSuggestion() {
-        guard let location = locationManager.currentLocation else { return }
+        guard let location = locationManager.currentLocation,
+              let stop = currentTruckStop,
+              stop.qualifiesAsFuelStopForFood,
+              isStoppedAtTruckStop,
+              !isNavigating else {
+            showingFoodSuggestion = false
+            return
+        }
         if let last = lastFoodSuggestionLocation, location.distance(from: last) < 500 { return }
+
         let profile = HealthProfile.loadSaved()
         let isMetric = lang != .english
-        Task {
-            let request = MKLocalSearch.Request()
-            request.naturalLanguageQuery = profile.foodSearchQuery
-            request.region = MKCoordinateRegion(center: location.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
-            let results = (try? await MKLocalSearch(request: request).start())?.mapItems ?? []
-            await MainActor.run {
-                if let item = results.first {
-                    let itemLoc = item.location; let dist = location.distance(from: itemLoc)
-                    let addrText = item.address?.shortAddress ?? item.addressRepresentations?.cityWithContext ?? item.name ?? ""
-                    foodSuggestion = FoodSuggestion(name: item.name ?? "Nearby Restaurant", address: addrText,
-                        coordinate: itemLoc.coordinate, distanceMeters: dist, reason: profile.suggestionReason, useMetric: isMetric)
-                    showingFoodSuggestion = true; lastFoodSuggestionLocation = location
-                }
-            }
-        }
+        let stopLocation = CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude)
+        let restaurant = stop.amenities.restaurantNames.first
+        let name = restaurant.map { "\(stop.name) · \($0)" } ?? stop.name
+        foodSuggestion = FoodSuggestion(
+            name: name,
+            address: stop.address,
+            coordinate: stop.coordinate,
+            distanceMeters: location.distance(from: stopLocation),
+            reason: "\(profile.suggestionReason) · parada \(stop.network.rawValue)",
+            useMetric: isMetric
+        )
+        showingFoodSuggestion = true
+        lastFoodSuggestionLocation = location
     }
 
     // MARK: - Utility Functions
+
+    private func isHighwayStep(_ instructions: String) -> Bool {
+        let t = instructions.lowercased()
+        return t.contains("i-") || t.contains("interstate") || t.contains("highway")
+            || t.contains("freeway") || t.contains("merge") || t.contains("us-")
+    }
 
     private func angleDeltaDegrees(_ a: Double, _ b: Double) -> Double {
         var delta = (a - b).truncatingRemainder(dividingBy: 360)
@@ -2446,8 +3119,9 @@ struct HorizonView: View {
         speedMonitorTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
             let now = Date(); guard now.timeIntervalSince(lastSpeedCheckDate) > 25 else { return }
             lastSpeedCheckDate = now
-            if isDuskNow(at: now) && isVehicleStopped() && !hasShownMoodAtDuskToday {
-                showingMoodCheck = true; hasShownMoodAtDuskToday = true
+            if isDuskNow(at: now) && isVehicleStopped() && !hasShownMoodAtDuskToday && !isNavigating {
+                presentMoodCheckIfParked()
+                hasShownMoodAtDuskToday = true
             }
             if Calendar.current.isDateInToday(now) == false { hasShownMoodAtDuskToday = false }
         }
@@ -2512,11 +3186,35 @@ struct HorizonView: View {
 
     private var navigationAlertDistanceBadges: [String] {
         guard let current = locationManager.currentLocation else { return [] }
-        let sorted = mapAlerts
-            .map { CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude).distance(from: current) }
-            .sorted()
-            .prefix(3)
-        return sorted.map { regionalSettings.formatDistance($0) }
+        var badges: [String] = []
+        if isNavigating {
+            let restrictionPairs = restrictionWarningManager.activeWarnings.compactMap { w -> (Double, String)? in
+                guard let c = w.coordinate else { return nil }
+                let d = current.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+                let label = restrictionBadgeLabel(for: w.type)
+                return (d, "\(label) \(regionalSettings.formatDistance(d))")
+            }.sorted { $0.0 < $1.0 }
+            badges.append(contentsOf: restrictionPairs.prefix(3).map { $0.1 })
+        }
+        if badges.count < 3 {
+            let cap = 3 - badges.count
+            let alertDistances = mapAlerts.map {
+                current.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude))
+            }.sorted()
+            badges.append(contentsOf: alertDistances.prefix(cap).map { regionalSettings.formatDistance($0) })
+        }
+        return badges
+    }
+
+    private func restrictionBadgeLabel(for type: TruckRestrictionWarning.WarningType) -> String {
+        switch type {
+        case .lowBridge, .heightLimit: return "Bridge"
+        case .weightLimit: return "Weight"
+        case .hazmat: return "Hazmat"
+        case .tunnel: return "Tunnel"
+        case .narrowRoad: return "Narrow"
+        case .general: return "Alert"
+        }
     }
 
     private func formatArrivalClock() -> String {
@@ -2525,6 +3223,200 @@ struct HorizonView: View {
         formatter.dateFormat = "h:mm a z"
         formatter.timeZone = .current
         return formatter.string(from: arrival)
+    }
+
+    // MARK: - Route Easy (compare truck routes)
+
+    private func selectRouteEasyOption(_ option: RouteEasyOption) {
+        guard let coord = routeEasyPendingCoordinate else {
+            routeError = lang.horizonRouteErrorCouldNotCalculate
+            showingRouteError = true
+            return
+        }
+        let address = routeEasyPendingAddress
+        showingRouteEasyPicker = false
+        commitSelectedRoute(option, coordinate: coord, address: address)
+    }
+
+    private func presentRouteEasyUpgrade(for kind: RouteEasyKind) {
+        routeEasyUpsellKind = kind
+        showingRouteEasyPicker = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            showingRouteEasyUpgrade = true
+        }
+    }
+
+    private func runRouteEasyPlanning(
+        from origin: CLLocation,
+        to coordinate: CLLocationCoordinate2D,
+        address: String
+    ) {
+        isCalculatingRoute = true
+        bottomSheetExpanded = false
+        let diesel = publicDieselPrice?.dieselPrice ?? 3.85
+        let mpg: Double = (truckProfile.truckType == .straight) ? 10.0 : 6.5
+        let fuelStop = cheapestDieselStop
+        let usesTruck = subscriptionPlan.hasTruckRoutes || AppAccessPolicy.unlockAllFeaturesForTesting
+
+        Task { @MainActor in
+            do {
+                let routing = RoutingService.shared
+                let fast = try await routing.calculateTruckRoute(
+                    from: origin,
+                    to: coordinate,
+                    destinationName: address,
+                    profile: truckProfile,
+                    avoidTolls: false,
+                    accessMode: routingAccessMode
+                )
+                let provider = routing.lastProvider
+                let fastest = RouteEasyEngine.fastestOption(
+                    route: fast,
+                    provider: provider,
+                    dieselPricePerGallon: diesel,
+                    mpg: mpg,
+                    usesTruckForFreeTier: usesTruck
+                )
+
+                isCalculatingRoute = false
+                routeEasyPendingCoordinate = coordinate
+                routeEasyPendingAddress = address
+                routeEasyOptions = [fastest]
+                commitSelectedRoute(fastest, coordinate: coordinate, address: address)
+
+                // Enrich route options in background — must not block entering navigation.
+                Task { @MainActor in
+                    do {
+                        let options = try await RouteEasyEngine.buildOptions(
+                            from: origin,
+                            to: coordinate,
+                            destinationName: address,
+                            profile: truckProfile,
+                            dieselPricePerGallon: diesel,
+                            mpg: mpg,
+                            cheapestFuelStop: fuelStop,
+                            effectivePlan: subscriptionPlan,
+                            includeFuelSmart: routeEasyIncludesFuelSmart,
+                            prefetchedFastest: fast,
+                            prefetchedFastProvider: provider
+                        )
+                        routeEasyOptions = options
+                        #if DEBUG
+                        print("[RouteEasy] Picker ready — \(options.count) options")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("[RouteEasy] optional enrich failed: \(error.localizedDescription)")
+                        #endif
+                    }
+                }
+            } catch {
+                isCalculatingRoute = false
+                bottomSheetExpanded = false
+                routeError = lang.horizonRoutingFailureMessage(error)
+                showingRouteError = true
+                print("[RouteEasy] failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Shared step filter for turn-by-turn UI + `NavigationEngine` (same indices).
+    private static func filteredNavigationSteps(
+        from result: TruckRoute,
+        lang: AppLanguage
+    ) -> ([DisplayRouteStep], [RouteStep]) {
+        var raw = result.steps
+            .filter { !$0.instruction.trimmingCharacters(in: .whitespaces).isEmpty }
+            .filter { $0.maneuver.lowercased() != "depart" }
+
+        if raw.isEmpty, !result.steps.isEmpty {
+            raw = result.steps.filter { !$0.instruction.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        if raw.isEmpty {
+            raw = [RouteStep(
+                instruction: lang.horizonNavigateToDestination(result.destinationName),
+                distanceMeters: result.distanceMeters,
+                durationSeconds: result.durationSeconds,
+                maneuver: "continue"
+            )]
+        }
+        return (raw.map { DisplayRouteStep($0) }, raw)
+    }
+
+    private func runSingleTruckRoute(
+        from origin: CLLocation,
+        to coordinate: CLLocationCoordinate2D,
+        address: String,
+        isReroute: Bool
+    ) {
+        if !isReroute {
+            isCalculatingRoute = true
+            bottomSheetExpanded = false
+        }
+        Task { @MainActor in
+            do {
+                let routing = RoutingService.shared
+                let result = try await routing.calculateTruckRoute(
+                    from: origin,
+                    to: coordinate,
+                    destinationName: address,
+                    profile: truckProfile,
+                    avoidTolls: false,
+                    accessMode: routingAccessMode
+                )
+                if !isReroute { isCalculatingRoute = false }
+                routeEasyPendingCoordinate = coordinate
+                routeEasyPendingAddress = address
+                destinationAddress = address
+                applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
+                print("[Route] ✅ NAV START · \(routing.lastProvider.rawValue) · \(Int(result.distanceMeters / 1609)) mi · \(address)")
+            } catch {
+                if !isReroute { isCalculatingRoute = false }
+                if isReroute {
+                    routingNotice = lang.horizonRerouteFailedMessage
+                    showingRoutingNotice = true
+                    if case RoutingServiceError.allProvidersFailed = error {
+                        lastRerouteAt = Date().addingTimeInterval(150)
+                    }
+                    print("[Route] reroute failed: \(error.localizedDescription)")
+                } else {
+                    bottomSheetExpanded = false
+                    routeError = lang.horizonRoutingFailureMessage(error)
+                    showingRouteError = true
+                    print("[Route] failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func commitSelectedRoute(
+        _ option: RouteEasyOption,
+        coordinate: CLLocationCoordinate2D,
+        address: String,
+        isReroute: Bool = false
+    ) {
+        let routing = RoutingService.shared
+        lastRoutingProvider = option.provider
+        let result = option.route
+
+        if option.kind != .fastest,
+           !AppAccessPolicy.unlockAllFeaturesForTesting,
+           !option.isAccessible(for: subscriptionPlan) {
+            presentRouteEasyUpgrade(for: option.kind)
+            return
+        }
+
+        if AppAccessPolicy.enforceTruckOnlyRouting, !option.provider.isTruckAware {
+            if isReroute { return }
+            bottomSheetExpanded = false
+            routeError = lang.horizonRouteErrorValhallaUnavailable
+            showingRouteError = true
+            return
+        }
+        destinationAddress = address
+        applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
+        print("[RouteEasy] Applied \(option.kind.rawValue) via \(routing.lastProvider.rawValue) · \(Int(result.distanceMeters / 1609)) mi")
     }
 
     private func handleAIRouteIntent(_ text: String) -> Bool {

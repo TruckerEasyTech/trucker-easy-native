@@ -74,10 +74,9 @@ class DispatchService {
         scheduleReceivedConfirmation(for: load)
     }
 
-    // Parse deep link URL and extract load info
+    /// Custom scheme `truckereasy://dispatch?...` or Universal Link `https://truckereasy.com/dispatch/...?...`
     func handleDeepLink(_ url: URL) -> DispatchedLoad? {
-        guard url.scheme == "truckereasy",
-              url.host == "dispatch",
+        guard isDispatchDeepLink(url),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems else { return nil }
 
@@ -113,6 +112,16 @@ class DispatchService {
         return load
     }
 
+    private func isDispatchDeepLink(_ url: URL) -> Bool {
+        if url.scheme?.lowercased() == "truckereasy", url.host == "dispatch" { return true }
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme == "https" || scheme == "http" else { return false }
+        let host = url.host?.lowercased() ?? ""
+        guard host == "truckereasy.com" || host == "www.truckereasy.com" else { return false }
+        let path = url.path.lowercased()
+        return path.contains("dispatch") || path.hasPrefix("/app/")
+    }
+
     // Report back to dispatcher that load was received/acknowledged
     func acknowledgeLoad(_ load: DispatchedLoad, completion: @escaping (Bool) -> Void) {
         Task {
@@ -120,7 +129,9 @@ class DispatchService {
                 try await SupabaseClient.shared.acknowledgeLoad(id: load.id)
                 await MainActor.run { completion(true) }
             } catch {
+                #if DEBUG
                 print("DispatchService: failed to acknowledge load \(load.id) — \(error.localizedDescription)")
+                #endif
                 await MainActor.run { completion(false) }
             }
         }
@@ -164,7 +175,9 @@ class DispatchService {
             do {
                 try await SupabaseClient.shared.updateLoadStatus(id: load.id, status: .enRoute)
             } catch {
+                #if DEBUG
                 print("DispatchService: failed to update status to en_route — \(error.localizedDescription)")
+                #endif
             }
         }
     }
@@ -176,7 +189,9 @@ class DispatchService {
                 try await SupabaseClient.shared.updateLoadStatus(id: load.id, status: .delivered)
                 await MainActor.run { completion(true) }
             } catch {
+                #if DEBUG
                 print("DispatchService: failed to mark delivered — \(error.localizedDescription)")
+                #endif
                 await MainActor.run { completion(false) }
             }
         }
@@ -197,7 +212,9 @@ class DispatchService {
                 )
                 await MainActor.run { completion(true) }
             } catch {
+                #if DEBUG
                 print("DispatchService: failed to report fuel stop — \(error.localizedDescription)")
+                #endif
                 await MainActor.run { completion(false) }
             }
         }
@@ -260,8 +277,8 @@ private struct DispatchTruckConfig {
         truckType: .semi
     )
 
-    // MKDirections doesn't natively support truck routing yet in MapKit.
-    // These restrictions are used to display warnings and to pass to HERE SDK / Mapbox.
+    // MapKit MKDirections has no truck dimensions (height/GVW); we use automobile + tollPreference when avoiding tolls.
+    // These restrictions are used to display warnings and to pass to the active map / routing stack.
     // For MapKit routes, we annotate known low-clearance bridges as map overlays.
     var heightWarningText: String {
         "Max height: \(String(format: "%.2f", heightMeters))m (\(String(format: "%.0f'", heightMeters * 3.28084))\(String(format: "%.0f\"", (heightMeters * 3.28084 - floor(heightMeters * 3.28084)) * 12)))"
@@ -274,7 +291,7 @@ private struct DispatchTruckConfig {
 // O modelo partilhado inclui:
 // - Equatable
 // - CLLocationCoordinate2D
-// - Conversão automática de TruckRouteNotice (HERE API)
+// - Conversão automática de TruckRouteNotice (provedor de rota)
 
 /*
 struct TruckRestrictionWarning: Identifiable {

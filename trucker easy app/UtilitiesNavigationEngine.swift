@@ -65,6 +65,12 @@ final class NavigationEngine {
     private var lastLocation: CLLocation?
     private var offRouteStreak: Int = 0
 
+    /// Incremental polyline search anchor — avoids scanning thousands of coordinates every GPS tick (main-thread jank).
+    private var lastClosestCoordinateIndex: Int = 0
+
+    /// Prefix distance along polyline to each vertex — built once per route so ETA updates stay O(1) per GPS tick.
+    private var vertexDistanceFromStart: [Double] = []
+
     var currentInstruction: String? {
         activeRoute?.steps[safe: currentStepIndex]?.instruction
     }
@@ -76,6 +82,8 @@ final class NavigationEngine {
         lastSpokenStepIndex = -1
         isOffRoute = false
         offRouteStreak = 0
+        lastClosestCoordinateIndex = 0
+        vertexDistanceFromStart = Self.computePrefixDistances(route.coordinates)
 
         if route.durationSeconds > 0 {
             eta = Date().addingTimeInterval(route.durationSeconds)
@@ -83,7 +91,9 @@ final class NavigationEngine {
         }
         distanceRemaining = route.distanceMeters
 
+        #if DEBUG
         print("[Navigation] ✅ Started navigation to \(route.destinationName)")
+        #endif
     }
 
     func stopNavigation() {
@@ -93,12 +103,16 @@ final class NavigationEngine {
         lastSpokenStepIndex = -1
         isOffRoute = false
         offRouteStreak = 0
+        lastClosestCoordinateIndex = 0
+        vertexDistanceFromStart = []
         eta = nil
         distanceToNextStep = 0
         distanceRemaining = 0
         timeRemaining = 0
 
+        #if DEBUG
         print("[Navigation] ⏹️ Navigation stopped")
+        #endif
     }
 
     /// Keep UI-driven step browsing consistent with engine state (prevents "snapping back" / weird reroutes).
@@ -180,21 +194,91 @@ final class NavigationEngine {
     }
 
     private func findClosestPointOnRoute(to location: CLLocation, route: TruckRoute) -> (CLLocation, Int) {
-        var closest = CLLocation(latitude: route.coordinates[0].latitude, longitude: route.coordinates[0].longitude)
-        var closestDistance = location.distance(from: closest)
-        var closestIndex = 0
+        let coords = route.coordinates
+        guard let first = coords.first else {
+            return (location, 0)
+        }
+        let n = coords.count
+        if n == 1 {
+            let l = CLLocation(latitude: first.latitude, longitude: first.longitude)
+            return (l, 0)
+        }
 
-        for (index, coordinate) in route.coordinates.enumerated() {
-            let candidate = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            let distance = location.distance(from: candidate)
-            if distance < closestDistance {
-                closestDistance = distance
-                closest = candidate
-                closestIndex = index
+        func loc(at i: Int) -> CLLocation {
+            let c = coords[i]
+            return CLLocation(latitude: c.latitude, longitude: c.longitude)
+        }
+
+        var idx = min(max(lastClosestCoordinateIndex, 0), n - 1)
+        let anchorDist = location.distance(from: loc(at: idx))
+
+        // Cold start or lost sync / large jump — coarse scan so we don't climb into a wrong local minimum.
+        if lastClosestCoordinateIndex == 0 && anchorDist > 250 {
+            idx = coarseClosestCoordinateIndex(to: location, coordinates: coords)
+        } else if anchorDist > offRouteThreshold * 4 {
+            idx = coarseClosestCoordinateIndex(to: location, coordinates: coords)
+        }
+
+        while idx < n - 1 {
+            let d0 = location.distance(from: loc(at: idx))
+            let d1 = location.distance(from: loc(at: idx + 1))
+            if d1 < d0 { idx += 1 } else { break }
+        }
+        while idx > 0 {
+            let d0 = location.distance(from: loc(at: idx))
+            let dm = location.distance(from: loc(at: idx - 1))
+            if dm < d0 { idx -= 1 } else { break }
+        }
+
+        let refineRadius = min(48, max(n / 4, 24))
+        let low = max(0, idx - refineRadius)
+        let high = min(n - 1, idx + refineRadius)
+        var bestIdx = idx
+        var bestDist = location.distance(from: loc(at: idx))
+        if low <= high {
+            for i in low...high {
+                let d = location.distance(from: loc(at: i))
+                if d < bestDist {
+                    bestDist = d
+                    bestIdx = i
+                }
             }
         }
 
-        return (closest, closestIndex)
+        lastClosestCoordinateIndex = bestIdx
+        let bc = coords[bestIdx]
+        return (CLLocation(latitude: bc.latitude, longitude: bc.longitude), bestIdx)
+    }
+
+    /// ~O(n/stride) fallback when the vehicle is far from the last anchor or polyline is huge.
+    private func coarseClosestCoordinateIndex(to location: CLLocation, coordinates: [CLLocationCoordinate2D]) -> Int {
+        let n = coordinates.count
+        guard n > 0 else { return 0 }
+        var best = 0
+        var bestD = Double.greatestFiniteMagnitude
+        let strideBy = max(1, min(n / 250, 80))
+        var i = 0
+        while i < n {
+            let c = coordinates[i]
+            let d = location.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+            if d < bestD {
+                bestD = d
+                best = i
+            }
+            i += strideBy
+        }
+        return best
+    }
+
+    private static func computePrefixDistances(_ coords: [CLLocationCoordinate2D]) -> [Double] {
+        guard coords.count >= 2 else { return coords.isEmpty ? [] : [0] }
+        var out = Array(repeating: 0.0, count: coords.count)
+        for i in 1..<coords.count {
+            let a = CLLocation(latitude: coords[i - 1].latitude, longitude: coords[i - 1].longitude)
+            let b = CLLocation(latitude: coords[i].latitude, longitude: coords[i].longitude)
+            out[i] = out[i - 1] + a.distance(from: b)
+        }
+        return out
     }
 
     private func calculateDistanceToNextStep(from location: CLLocation, route: TruckRoute, startIndex: Int) -> Double {
@@ -217,11 +301,22 @@ final class NavigationEngine {
             return
         }
 
-        var remaining: Double = 0
-        for index in routeIndex..<(route.coordinates.count - 1) {
-            let p1 = CLLocation(latitude: route.coordinates[index].latitude, longitude: route.coordinates[index].longitude)
-            let p2 = CLLocation(latitude: route.coordinates[index + 1].latitude, longitude: route.coordinates[index + 1].longitude)
-            remaining += p1.distance(from: p2)
+        let remaining: Double
+        if vertexDistanceFromStart.count == route.coordinates.count {
+            let i = min(max(routeIndex, 0), vertexDistanceFromStart.count - 1)
+            let total = vertexDistanceFromStart.last ?? route.distanceMeters
+            remaining = max(0, total - vertexDistanceFromStart[i])
+        } else {
+            var acc = 0.0
+            let maxIdx = route.coordinates.count - 1
+            if routeIndex < maxIdx {
+                for index in routeIndex..<maxIdx {
+                    let p1 = CLLocation(latitude: route.coordinates[index].latitude, longitude: route.coordinates[index].longitude)
+                    let p2 = CLLocation(latitude: route.coordinates[index + 1].latitude, longitude: route.coordinates[index + 1].longitude)
+                    acc += p1.distance(from: p2)
+                }
+            }
+            remaining = acc
         }
 
         distanceRemaining = remaining
@@ -253,7 +348,9 @@ final class NavigationEngine {
         let distanceText = formatDistance(distanceToNextStep)
         let instruction = step.instruction
 
+        #if DEBUG
         print("[Navigation] 🔊 Announcing: In \(distanceText), \(instruction)")
+        #endif
 
         VoiceNavigationManager.shared.announceStep(
             instructions: instruction,
@@ -280,7 +377,9 @@ final class NavigationEngine {
         isOffRoute = true
         state = .rerouting
 
+        #if DEBUG
         print("[Navigation] ⚠️ User is off-route! Requesting reroute...")
+        #endif
 
         Task {
             await onNeedsReroute?()
@@ -291,7 +390,9 @@ final class NavigationEngine {
         guard state == .navigating else { return }
 
         state = .arrived
+        #if DEBUG
         print("[Navigation] 🎯 Arrived at destination!")
+        #endif
 
         VoiceNavigationManager.shared.announceArrival(lang: language)
         onArrival?()

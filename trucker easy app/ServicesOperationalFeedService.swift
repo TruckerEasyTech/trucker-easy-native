@@ -48,6 +48,7 @@ struct PartnerWeighSignal: Decodable {
     let longitude: Double
     let status: String
     let updatedAt: Date?
+    let source: String?
 
     enum CodingKeys: String, CodingKey {
         case stationName = "station_name"
@@ -55,12 +56,24 @@ struct PartnerWeighSignal: Decodable {
         case longitude
         case status
         case updatedAt = "updated_at"
+        case source
     }
 }
 
 private struct PartnerOperationalFeedResponse: Decodable {
     let parkingSignals: [PartnerParkingSignal]
     let weighSignals: [PartnerWeighSignal]
+
+    init(parkingSignals: [PartnerParkingSignal], weighSignals: [PartnerWeighSignal]) {
+        self.parkingSignals = parkingSignals
+        self.weighSignals = weighSignals
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        parkingSignals = try container.decodeIfPresent([PartnerParkingSignal].self, forKey: .parkingSignals) ?? []
+        weighSignals = try container.decodeIfPresent([PartnerWeighSignal].self, forKey: .weighSignals) ?? []
+    }
 
     enum CodingKeys: String, CodingKey {
         case parkingSignals = "parking_signals"
@@ -114,9 +127,14 @@ final class OperationalFeedService {
             service.setPartnerStatus(
                 status,
                 for: signal.stationName,
-                updatedAt: signal.updatedAt ?? Date()
+                updatedAt: signal.updatedAt ?? Date(),
+                source: signal.source
             )
         }
+    }
+
+    func ingestPartnerParkingSignals(_ incoming: [PartnerParkingSignal]) {
+        parkingSignals = mergeParkingSignals(from: [incoming, parkingSignals])
     }
 
     private func fetchAll(lat: Double, lon: Double) async throws -> [(source: String, response: PartnerOperationalFeedResponse)] {
@@ -145,10 +163,10 @@ final class OperationalFeedService {
 
         do {
             let supabase = try await fetchFromSupabase(lat: lat, lon: lon)
-            results.append(("crowd:supabase", supabase))
-            newHealth["crowd:supabase"] = "ok"
+            results.append(("official:supabase-ops-feed", supabase))
+            newHealth["official:supabase-ops-feed"] = "ok"
         } catch {
-            newHealth["crowd:supabase"] = "error: \(error.localizedDescription)"
+            newHealth["official:supabase-ops-feed"] = "error: \(error.localizedDescription)"
         }
 
         sourceHealth = newHealth
@@ -231,14 +249,22 @@ final class OperationalFeedService {
     }
 
     private func mergeWeighSignals(from groups: [[PartnerWeighSignal]]) -> [PartnerWeighSignal] {
+        let ranked = groups.flatMap { $0 }.sorted { weighSignalPriority($0) < weighSignalPriority($1) }
         var seen = Set<String>()
         var merged: [PartnerWeighSignal] = []
-        for signal in groups.flatMap({ $0 }) {
+        for signal in ranked {
             let key = "\(signal.stationName.lowercased())-\(String(format: "%.4f", signal.latitude))-\(String(format: "%.4f", signal.longitude))"
             if seen.contains(key) { continue }
             seen.insert(key)
             merged.append(signal)
         }
         return merged
+    }
+
+    private func weighSignalPriority(_ signal: PartnerWeighSignal) -> Int {
+        let src = (signal.source ?? "").lowercased()
+        if WeighStationStatusProvenance.isOfficialSource(src) { return 0 }
+        if src.contains("crowd") { return 2 }
+        return 1
     }
 }

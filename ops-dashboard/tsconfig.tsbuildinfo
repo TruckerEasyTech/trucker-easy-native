@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/metricschart.tsx","./src/integrations/supabase/client.ts","./src/pages/alertspage.tsx","./src/pages/apitestpage.tsx","./src/pages/documentationpage.tsx","./src/pages/monitoringpage.tsx","./src/pages/routingconfigpage.tsx","./src/types/ops-dashboard.ts"],"version":"5.9.3"}

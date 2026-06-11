@@ -1,0 +1,7 @@
+# Trucker Easy — atualização semanal de POIs (domingo 04:00 horário local)
+# Instalar: crontab -e e colar (ajuste o caminho do repo):
+#
+# 0 4 * * 0 cd /Users/thaiskeller/Developer/trucker-easy-app && ./scripts/run_poi_ingest.sh >> backend/osm-poi-ingest/logs/cron.log 2>&1
+#
+# EC2 Valhalla (recomendado em produção):
+# 0 4 * * 0 cd /home/ubuntu/osm-poi-ingest && ./run_weekly.sh >> logs/cron.log 2>&1

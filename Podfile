@@ -1,4 +1,4 @@
-platform :ios, '15.0'
+platform :ios, '18.0'
 
 target 'trucker easy app' do
   use_frameworks!

@@ -1,6 +1,6 @@
 -- ============================================================
 -- TRUCKER EASY — Supabase Setup SQL
--- Project: qhwuwiiwdzqkjzjqgpvx
+-- Project (example): usowafvqawbunyhmfscx — run against your active Supabase project
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ============================================================
 
@@ -181,5 +181,44 @@ alter table logistics_news enable row level security;
 create policy "anyone_read_news" on logistics_news for select using (true);
 
 -- ============================================================
--- DONE — All 9 tables created.
+-- 10. FLEET TELEMETRY STREAM (optional — SupabaseRealtimeTelemetryProvider)
+-- ============================================================
+create table if not exists fleet_telemetry_stream (
+  id                 uuid primary key default gen_random_uuid(),
+  driver_id          text,
+  speed_mph          double precision,
+  engine_rpm         double precision,
+  engine_hours       double precision,
+  odometer_miles     double precision,
+  fuel_level_percent double precision,
+  vin                text,
+  dtc_codes          text[] default '{}',
+  reported_at        timestamptz not null default now()
+);
+alter table fleet_telemetry_stream enable row level security;
+create policy "anyone_read_telemetry" on fleet_telemetry_stream for select using (true);
+create policy "auth_insert_telemetry"  on fleet_telemetry_stream for insert with check (true);
+
+-- ============================================================
+-- 11. JURISDICTION POLICIES (fallback when no external policy API)
+-- ============================================================
+create table if not exists jurisdiction_policies (
+  id                        uuid primary key default gen_random_uuid(),
+  country_code              text not null,
+  state_or_province_code    text,
+  max_truck_speed_kmh       double precision,
+  max_gross_weight_kg       int,
+  max_height_cm             int,
+  max_length_cm             int,
+  max_width_cm              int,
+  legal_reference_url       text,
+  updated_at                timestamptz not null default now()
+);
+create index if not exists idx_jurisdiction_country_state
+  on jurisdiction_policies (country_code, state_or_province_code);
+alter table jurisdiction_policies enable row level security;
+create policy "anyone_read_jurisdiction" on jurisdiction_policies for select using (true);
+
+-- ============================================================
+-- DONE — 11 tables. Edge Function `ops-feed` is separate (deploy via Supabase CLI if used).
 -- ============================================================

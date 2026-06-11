@@ -1,11 +1,12 @@
 // UtilitiesDotHOS.swift
 // TruckerEasy — DOT Hours of Service Engine
-// © 2024–2025 TruckerEasy. All rights reserved.
+// © 2024–2026 TruckerEasy. All rights reserved.
 //
-// Three components:
+// Four components:
 //  1. DotHosContext   — @Observable class, 1-second timer, status machine
 //  2. DotSpeedFeeder  — feeds live GPS speed into the context, auto-detects DRIVING
-//  3. DotHosBar       — compact visual bar for the map overlay (top-right)
+//  3. DotHosBar       — pill DOT (Horizon idle + rota/navegação, canto superior direito)
+//  4. DotHosColorLine  — linha de cor (uso interno / legado)
 
 import SwiftUI
 import Observation
@@ -52,7 +53,8 @@ final class DotHosContext {
     // MARK: Elapsed counters (seconds)
     private(set) var drivingElapsed: Double  = 0
     private(set) var dutyElapsed: Double     = 0
-    private(set) var breakElapsed: Double    = 0   // time resting since last driving stint
+    private(set) var breakElapsed: Double    = 0   // continuous rest/off-duty time
+    private(set) var breakDrivingElapsed: Double = 0 // driving since last qualifying 30-min break
     private(set) var shiftElapsed: Double    = 0   // total on-duty window
 
     // MARK: Current status
@@ -64,6 +66,9 @@ final class DotHosContext {
     // MARK: Violation / warning flags
     private(set) var needsMandatoryBreak: Bool  = false  // driving > breakAfterSeconds without 30-min break
     private(set) var isViolation: Bool           = false  // driving > maxDrivingSeconds
+
+    /// Active route ETA (seconds) — drives green/yellow/red vs trip time while navigating.
+    private(set) var routeEtaSeconds: Double = 0
 
     // MARK: Timer
     private var timer: Timer?
@@ -81,11 +86,13 @@ final class DotHosContext {
     private let kDriving    = "dot_drivingElapsed"
     private let kDuty       = "dot_dutyElapsed"
     private let kShift      = "dot_shiftElapsed"
+    private let kBreakDrive = "dot_breakDrivingElapsed"
     private let kStatus     = "dot_statusRaw"
     private let kResetDate  = "dot_lastResetDate"
 
     init() {
         restoreState()
+        autoResetIfNewDay()
         startTimer()
     }
 
@@ -117,9 +124,28 @@ final class DotHosContext {
         dutyElapsed    = 0
         shiftElapsed   = 0
         breakElapsed   = 0
+        breakDrivingElapsed = 0
         needsMandatoryBreak = false
         isViolation         = false
+        routeEtaSeconds     = 0
         saveState()
+    }
+
+    func beginRouteSession(estimatedDrivingSeconds: Double) {
+        routeEtaSeconds = max(0, estimatedDrivingSeconds)
+    }
+
+    func endRouteSession() {
+        routeEtaSeconds = 0
+    }
+
+    /// Horizon idle open — parked drivers should not see a red HOS bar from stale on-duty persistence.
+    func reconcileParkedAtLaunch(isNavigating: Bool, speedMph: Double) {
+        guard !isNavigating else { return }
+        autoResetIfNewDay()
+        if speedMph < stoppedSpeedThreshold, status == .driving || status == .onDuty {
+            setStatus(.offDuty)
+        }
     }
 
     // MARK: - Speed feed (called by DotSpeedFeeder every update)
@@ -134,23 +160,55 @@ final class DotHosContext {
     var shiftRemaining: Double    { max(0, serviceWindowSeconds - shiftElapsed) }
     var drivingFraction: Double   { min(1, drivingElapsed / maxDrivingSeconds) }
     var shiftFraction: Double     { min(1, shiftElapsed   / serviceWindowSeconds) }
+    var criticalRemainingSeconds: Double { min(drivingRemaining, shiftRemaining) }
 
-    /// Fraction of driving hours *remaining* (used for bar fill: 1 = full tank, 0 = empty)
+    /// Fractions remaining (used for bar fill: 1 = full legal time, 0 = no legal time left).
     var drivingRemainingFraction: Double { 1 - drivingFraction }
     var shiftRemainingFraction: Double   { 1 - shiftFraction }
+    var criticalRemainingFraction: Double { min(drivingRemainingFraction, shiftRemainingFraction) }
 
     var formattedDrivingRemaining: String { formatHMS(drivingRemaining) }
     var formattedShiftRemaining: String   { formatHMS(shiftRemaining) }
+    var formattedCriticalRemaining: String { formatHMS(criticalRemainingSeconds) }
 
-    // Color logic
+    /// Violation counts for UI only while driver is on duty / driving (not parked off-duty).
+    var isActiveViolation: Bool {
+        isViolation && (status == .driving || status == .onDuty)
+    }
+
+    // Color logic — green at route start; yellow when tight; red when HOS almost gone.
     var barColor: Color {
-        if isViolation { return Color(hex: "#ef4444") }
-        if drivingRemainingFraction < 0.10 { return Color(hex: "#ef4444") }
-        if drivingRemainingFraction < 0.25 { return Color(hex: "#f59e0b") }
+        if routeEtaSeconds > 0 { return routeAwareBarColor }
+        // Parked / off-duty: never flash red on map open — only warn once driver is on duty.
+        if status == .offDuty || status == .sleeper {
+            return Color(hex: "#22c55e")
+        }
+        if isActiveViolation { return Color(hex: "#ef4444") }
+        if criticalRemainingFraction < 0.15 { return Color(hex: "#ef4444") }
+        if criticalRemainingFraction < 0.35 || needsMandatoryBreak { return Color(hex: "#f59e0b") }
         return Color(hex: "#22c55e")
     }
 
-    var isRedFlashing: Bool { drivingRemainingFraction < 0.10 || isViolation }
+    private var routeAwareBarColor: Color {
+        let remaining = criticalRemainingSeconds
+        let eta = routeEtaSeconds
+        if isActiveViolation || remaining < eta * 0.12 { return Color(hex: "#ef4444") }
+        if needsMandatoryBreak || remaining < eta * 1.30 { return Color(hex: "#f59e0b") }
+        return Color(hex: "#22c55e")
+    }
+
+    var isRedFlashing: Bool {
+        if status == .offDuty || status == .sleeper { return false }
+        if routeEtaSeconds > 0 {
+            return isActiveViolation || criticalRemainingSeconds < routeEtaSeconds * 0.12
+        }
+        return criticalRemainingFraction < 0.15 || isActiveViolation
+    }
+    var flashInterval: TimeInterval {
+        if isViolation || criticalRemainingFraction < 0.02 { return 0.25 }
+        if criticalRemainingFraction < 0.05 { return 0.50 }
+        return 1.00
+    }
 
     // MARK: - Timer tick
 
@@ -159,7 +217,7 @@ final class DotHosContext {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.tick()
         }
-        RunLoop.main.add(timer!, forMode: .common)
+        if let t = timer { RunLoop.main.add(t, forMode: .common) }
     }
 
     private func tick() {
@@ -174,20 +232,31 @@ final class DotHosContext {
             drivingElapsed += 1
             dutyElapsed    += 1
             shiftElapsed   += 1
+            breakDrivingElapsed += 1
+            breakElapsed = 0
             speedBelowThresholdSeconds = 0
 
         case .onDuty:
             dutyElapsed  += 1
             shiftElapsed += 1
+            breakElapsed = 0
 
         case .offDuty, .sleeper:
             breakElapsed += 1
 
         }
 
-        // Update violation flags
-        needsMandatoryBreak = drivingElapsed >= breakAfterSeconds && breakElapsed < breakDurationSeconds
-        isViolation         = drivingElapsed > maxDrivingSeconds
+        if breakElapsed >= breakDurationSeconds {
+            breakDrivingElapsed = 0
+        }
+        if breakElapsed >= 10 * 3600 {
+            resetDay()
+            return
+        }
+
+        // Update violation flags from the critical FMCSA clocks.
+        needsMandatoryBreak = breakDrivingElapsed >= breakAfterSeconds
+        isViolation = drivingElapsed > maxDrivingSeconds || shiftElapsed > serviceWindowSeconds
 
         // Autosave every 60 ticks
         if Int(drivingElapsed) % 60 == 0 { saveState() }
@@ -211,8 +280,16 @@ final class DotHosContext {
         }
     }
 
+    private func calendarDayKey(for date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar.current
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+
     private func autoResetIfNewDay() {
-        let today = ISO8601DateFormatter().string(from: Calendar.current.startOfDay(for: Date()))
+        let today = calendarDayKey()
         let stored = UserDefaults.standard.string(forKey: kResetDate) ?? ""
         if stored != today {
             resetDay()
@@ -226,12 +303,14 @@ final class DotHosContext {
         UserDefaults.standard.set(drivingElapsed, forKey: kDriving)
         UserDefaults.standard.set(dutyElapsed,    forKey: kDuty)
         UserDefaults.standard.set(shiftElapsed,   forKey: kShift)
+        UserDefaults.standard.set(breakDrivingElapsed, forKey: kBreakDrive)
     }
 
     private func restoreState() {
         drivingElapsed = UserDefaults.standard.double(forKey: kDriving)
         dutyElapsed    = UserDefaults.standard.double(forKey: kDuty)
         shiftElapsed   = UserDefaults.standard.double(forKey: kShift)
+        breakDrivingElapsed = UserDefaults.standard.double(forKey: kBreakDrive)
         let raw        = UserDefaults.standard.string(forKey: kStatus) ?? DotDutyStatus.offDuty.rawValue
         if let s = DotDutyStatus(rawValue: raw) { status = s }
     }
@@ -301,7 +380,7 @@ struct DotHosBar: View {
                     Spacer()
 
                     // Warning icons
-                    if hosContext.isViolation {
+                    if hosContext.isActiveViolation {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 9))
                             .foregroundColor(Color(hex: "#ef4444"))
@@ -312,58 +391,23 @@ struct DotHosBar: View {
                     }
                 }
 
-                // Driving remaining label
+                // Tempo crítico restante
                 HStack(spacing: 2) {
-                    Text(hosContext.formattedDrivingRemaining)
+                    Text(hosContext.formattedCriticalRemaining)
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(hosColor)
                         .opacity(hosContext.isRedFlashing ? (flash ? 1 : 0.35) : 1)
-                    Text("drive")
+                    Text("left")
                         .font(.system(size: 8))
                         .foregroundColor(Color(hex: "#94a3b8"))
                     Spacer()
                 }
 
-                // Progress bar — driving hours remaining
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        // Track
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.white.opacity(0.1))
-                            .frame(height: 5)
-
-                        // Fill (remaining, not consumed)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(barGradient)
-                            .frame(width: max(4, geo.size.width * hosContext.drivingRemainingFraction), height: 5)
-                            .opacity(hosContext.isRedFlashing ? (flash ? 1 : 0.4) : 1)
-                    }
-                }
-                .frame(height: 5)
-
-                // Shift window remaining (smaller secondary bar)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.white.opacity(0.07))
-                            .frame(height: 3)
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color(hex: "#f59e0b").opacity(0.7))
-                            .frame(width: max(3, geo.size.width * hosContext.shiftRemainingFraction), height: 3)
-                    }
-                }
-                .frame(height: 3)
-
-                // Shift label
-                HStack(spacing: 2) {
-                    Text(hosContext.formattedShiftRemaining)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundColor(Color(hex: "#94a3b8"))
-                    Text("shift")
-                        .font(.system(size: 8))
-                        .foregroundColor(Color(hex: "#64748b"))
-                    Spacer()
-                }
+                // Linha única — cor muda com tempo HOS (sem barra de shift separada)
+                Rectangle()
+                    .fill(hosColor)
+                    .frame(height: 3)
+                    .opacity(hosContext.isRedFlashing ? (flash ? 1 : 0.4) : 1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -383,32 +427,71 @@ struct DotHosBar: View {
         .onChange(of: hosContext.isRedFlashing) { _, flashing in
             if flashing { startFlash() } else { flashTimer?.invalidate(); flash = true }
         }
+        .onChange(of: hosContext.flashInterval) { _, _ in
+            startFlash()
+        }
     }
 
     // MARK: - Helpers
 
     private var hosColor: Color { hosContext.barColor }
 
-    private var barGradient: LinearGradient {
-        LinearGradient(
-            colors: [hosColor, hosColor.opacity(0.7)],
-            startPoint: .leading,
-            endPoint: .trailing
-        )
+    private func startFlash() {
+        flashTimer?.invalidate()
+        guard hosContext.isRedFlashing else { flash = true; return }
+        let interval = hosContext.flashInterval
+        flashTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: min(0.45, interval * 0.8))) { flash.toggle() }
+        }
+        if let ft = flashTimer { RunLoop.main.add(ft, forMode: .common) }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: 4 — DotHosColorLine  (one line, color = time remaining; tap for detail)
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct DotHosColorLine: View {
+    let hosContext: DotHosContext
+    let onTap: () -> Void
+
+    @State private var flash = false
+    @State private var flashTimer: Timer? = nil
+
+    var body: some View {
+        Button(action: onTap) {
+            Rectangle()
+                .fill(hosContext.barColor)
+                .frame(height: 3)
+                .frame(maxWidth: .infinity)
+                .opacity(hosContext.isRedFlashing ? (flash ? 1 : 0.4) : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("DOT hours remaining \(hosContext.formattedCriticalRemaining)")
+        .onAppear { startFlash() }
+        .onDisappear { flashTimer?.invalidate() }
+        .onChange(of: hosContext.isRedFlashing) { _, flashing in
+            if flashing { startFlash() } else { flashTimer?.invalidate(); flash = true }
+        }
+        .onChange(of: hosContext.flashInterval) { _, _ in startFlash() }
     }
 
     private func startFlash() {
         flashTimer?.invalidate()
         guard hosContext.isRedFlashing else { flash = true; return }
-        flashTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.45)) { flash.toggle() }
+        let interval = hosContext.flashInterval
+        flashTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: min(0.45, interval * 0.8))) { flash.toggle() }
         }
-        RunLoop.main.add(flashTimer!, forMode: .common)
+        if let ft = flashTimer { RunLoop.main.add(ft, forMode: .common) }
     }
 }
 
+/// Backward-compatible alias (same component — no separate row with clock text).
+typealias DotHosNavStrip = DotHosColorLine
+
 // ─────────────────────────────────────────────────────────────────────────────
-// MARK: 4 — DotHosDetailSheet  (full HOS panel, shown on tap)
+// MARK: 5 — DotHosDetailSheet  (full HOS panel, shown on tap)
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct DotHosDetailSheet: View {
@@ -465,7 +548,7 @@ struct DotHosDetailSheet: View {
                         )
 
                         // Alerts
-                        if hosContext.isViolation {
+                        if hosContext.isActiveViolation {
                             HosAlertBanner(
                                 icon: "exclamationmark.triangle.fill",
                                 color: Color(hex: "#ef4444"),

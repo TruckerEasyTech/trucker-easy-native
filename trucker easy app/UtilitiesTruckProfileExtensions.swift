@@ -12,7 +12,7 @@ import CoreLocation
 
 // MARK: - TruckProfile → TruckSpecifications
 extension TruckProfile {
-    /// Converts TruckProfile to TruckSpecifications for HERE API
+    /// Converts TruckProfile to TruckSpecifications for routing / compliance APIs
     func toSpecifications() -> TruckSpecifications {
         // Conversão de unidades:
         // heightMeters → heightCm

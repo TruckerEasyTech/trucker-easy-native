@@ -46,10 +46,7 @@ struct MapView: View {
     }
     
     var currentLocationDescription: String {
-        if let location = locationManager.currentLocation {
-            return String(format: "%.6f, %.6f", location.coordinate.latitude, location.coordinate.longitude)
-        }
-        return "Locating..."
+        locationManager.currentLocation == nil ? "Locating..." : "Current Location"
     }
     
     var body: some View {
@@ -247,10 +244,7 @@ struct NavigationRouteSheet: View {
     @State private var errorMessage: String?
     
     var startingLocation: String {
-        if let location = locationManager.currentLocation {
-            return String(format: "%.6f, %.6f", location.coordinate.latitude, location.coordinate.longitude)
-        }
-        return "Current Location"
+        locationManager.currentLocation == nil ? "Locating..." : "Current Location"
     }
     
     var body: some View {
@@ -331,7 +325,7 @@ struct NavigationRouteSheet: View {
                 }
 
                 let request = MKDirections.Request()
-                request.source = MKMapItem(location: currentLocation, address: nil)
+                request.source = MKMapItem(placemark: MKPlacemark(coordinate: currentLocation.coordinate))
                 request.destination = destItem
                 request.transportType = .automobile
                 
@@ -374,9 +368,9 @@ struct AddGeofenceView: View {
                         Slider(value: $radius, in: 100...5000, step: 100)
                     }
                     
-                    if let location = locationManager.currentLocation {
+                    if locationManager.currentLocation != nil {
                         LabeledContent("Location") {
-                            Text(String(format: "%.6f, %.6f", location.coordinate.latitude, location.coordinate.longitude))
+                            Text("Current GPS fix")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

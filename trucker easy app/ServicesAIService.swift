@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 private func agentLogAIService(
     runId: String,
@@ -24,7 +26,7 @@ private func agentLogAIService(
 }
 
 // MARK: - AI Service
-// Primary:  Apple Foundation Models (on-device, private, iOS 26+)
+// Primary:  Apple Foundation Models (on-device, private, iOS 18+)
 // Fallback: OpenRouter free-tier (cloud, works on any device with internet)
 
 @Observable
@@ -39,10 +41,10 @@ final class AIService {
 
     /// System prompt shared between both providers
     private let systemPrompt = """
-    You are Easy AI, an assistant embedded in Trucker Easy, an app for professional truck drivers. \
-    Help with: route planning, Hours of Service (HOS) compliance, fuel prices, truck stops, \
-    rest areas, load planning, weight limits, vehicle maintenance, DOT regulations, weather \
-    conditions, IFTA fuel tax, and general trucking questions. \
+    You are Route Easy, the routing assistant inside Trucker Easy for professional truck drivers. \
+    Help compare routes: time, estimated tolls, fuel cost, and truck restrictions. \
+    Also help with HOS, truck stops, weight limits, DOT rules, and weather. \
+    When the navigation context lists tolls or diesel, use those numbers — do not invent prices. \
     Be concise and practical. Respond in the same language the driver uses.
     """
 
@@ -55,49 +57,42 @@ final class AIService {
     /// Streams a response to `message`, using Foundation Models when available and
     /// falling back to OpenRouter otherwise. Yields incremental text chunks.
     func streamResponse(to message: String, context: [String]) -> AsyncThrowingStream<String, Error> {
-        let model = SystemLanguageModel.default
-        if case .available = model.availability {
-            // #region agent log
-            agentLogAIService(
-                runId: "post-fix",
-                hypothesisId: "H7",
-                location: "ServicesAIService.swift:streamResponse",
-                message: "Using Foundation Models provider",
-                data: [:]
-            )
-            // #endregion
-            return streamWithFoundationModels(message: message, context: context)
+        #if canImport(FoundationModels)
+        if #available(iOS 26, *) {
+            let model = SystemLanguageModel.default
+            if case .available = model.availability {
+                agentLogAIService(
+                    runId: "post-fix",
+                    hypothesisId: "H7",
+                    location: "ServicesAIService.swift:streamResponse",
+                    message: "Using Foundation Models provider",
+                    data: [:]
+                )
+                return streamWithFoundationModels(message: message, context: context)
+            }
         }
+        #endif
         if apiKey.isEmpty {
-            // #region agent log
             agentLogAIService(
                 runId: "post-fix",
                 hypothesisId: "H7",
                 location: "ServicesAIService.swift:streamResponse",
                 message: "AI unavailable: no on-device model + missing OpenRouterAPIKey",
-                data: [
-                    "foundationModelsAvailable": false
-                ]
+                data: ["foundationModelsAvailable": false]
             )
-            // #endregion
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: AIError.serviceUnavailable(
                     "No on-device model available and OpenRouterAPIKey is missing."
                 ))
             }
         }
-        // #region agent log
         agentLogAIService(
             runId: "post-fix",
             hypothesisId: "H7",
             location: "ServicesAIService.swift:streamResponse",
             message: "Using OpenRouter provider",
-            data: [
-                "foundationModelsAvailable": false,
-                "hasOpenRouterKey": true
-            ]
+            data: ["foundationModelsAvailable": false, "hasOpenRouterKey": true]
         )
-        // #endregion
         return streamWithOpenRouter(message: message, context: context)
     }
 
@@ -125,8 +120,10 @@ final class AIService {
         return []
     }
 
-    // MARK: - Foundation Models (on-device)
+    // MARK: - Foundation Models (on-device, iOS 26+)
 
+    #if canImport(FoundationModels)
+    @available(iOS 26, *)
     private func streamWithFoundationModels(
         message: String,
         context: [String]
@@ -136,16 +133,14 @@ final class AIService {
                 do {
                     let session = LanguageModelSession(instructions: systemPrompt)
 
-                    // Build a compact context string from recent messages
                     let recentContext = context.suffix(8).joined(separator: "\n")
                     let prompt = recentContext.isEmpty
                         ? message
                         : "\(recentContext)\n\nUser: \(message)"
 
-                    // ResponseStream<String> yields Snapshots with cumulative (aggregated) text
                     var previousLength = 0
                     for try await snapshot in session.streamResponse(to: prompt) {
-                        let current = snapshot.content  // String.PartiallyGenerated (String)
+                        let current = snapshot.content
                         let newPart = String(current.dropFirst(previousLength))
                         previousLength = current.count
                         if !newPart.isEmpty {
@@ -154,7 +149,6 @@ final class AIService {
                     }
                     continuation.finish()
                 } catch {
-                    // If Foundation Models fails at runtime, fall back to OpenRouter
                     do {
                         for try await chunk in streamWithOpenRouter(message: message, context: context) {
                             continuation.yield(chunk)
@@ -167,6 +161,7 @@ final class AIService {
             }
         }
     }
+    #endif
 
     // MARK: - OpenRouter (cloud fallback)
 

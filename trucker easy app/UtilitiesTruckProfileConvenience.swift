@@ -75,7 +75,8 @@ extension TruckProfile {
             route: route,
             userLocation: origin,
             specs: specs,
-            regulations: regs
+            regulations: regs,
+            language: AppLanguage.persistedDriverChoice
         )
         
         return (route, warnings)
@@ -87,7 +88,7 @@ extension TruckProfile {
     func checkCompliance(in country: RegulationProfile.Country) -> ComplianceChecker.ComplianceResult {
         let profile = RegulationProfile.profile(for: country)
         let specs = self.toSpecifications()
-        return ComplianceChecker.check(specs: specs, against: profile)
+        return ComplianceChecker.check(specs: specs, against: profile, language: AppLanguage.persistedDriverChoice)
     }
     
     /// Check if this truck profile is compliant at a specific location
@@ -96,7 +97,7 @@ extension TruckProfile {
     func checkCompliance(at coordinate: CLLocationCoordinate2D) async -> ComplianceChecker.ComplianceResult {
         let profile = await RegulationProfile.profile(for: coordinate)
         let specs = self.toSpecifications()
-        return ComplianceChecker.check(specs: specs, against: profile)
+        return ComplianceChecker.check(specs: specs, against: profile, language: AppLanguage.persistedDriverChoice)
     }
 }
 

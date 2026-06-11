@@ -4,6 +4,25 @@
 import SwiftUI
 import MapKit
 
+// MARK: - Shared maneuver icon (banner + “Then” strip)
+
+enum NavigationManeuverIcon {
+    static func symbol(for instructions: String) -> String {
+        let t = instructions.lowercased()
+        if t.contains("u-turn") || t.contains("u turn") { return "arrow.uturn.left" }
+        if t.contains("turn left sharply") || t.contains("sharp left") { return "arrow.turn.up.left" }
+        if t.contains("turn right sharply") || t.contains("sharp right") { return "arrow.turn.up.right" }
+        if t.contains("turn left") || t.contains("left turn") || t.contains("bear left") || t.contains("keep left") || t.contains("slight left") { return "arrow.turn.down.left" }
+        if t.contains("turn right") || t.contains("right turn") || t.contains("bear right") || t.contains("keep right") || t.contains("slight right") { return "arrow.turn.down.right" }
+        if t.contains("roundabout") || t.contains("rotary") || t.contains("traffic circle") { return "arrow.clockwise.circle" }
+        if t.contains("merge") || t.contains("ramp") || t.contains("highway") { return "arrow.merge" }
+        if t.contains("exit") { return "arrow.up.right.circle" }
+        if t.contains("arrive") || t.contains("destination") || t.contains("reached") { return "mappin.circle.fill" }
+        if t.contains("ferry") { return "ferry.fill" }
+        return "arrow.up"
+    }
+}
+
 // MARK: - Navigation Step Banner
 
 struct HorizonNavigationStepBanner: View {
@@ -19,120 +38,138 @@ struct HorizonNavigationStepBanner: View {
     var onMicTap: (() -> Void)? = nil
     var speedText: String? = nil
 
-    private var compactHeight: CGFloat { 72 }
+    private var bannerShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            cornerRadii: RectangleCornerRadii(
+                topLeading: 0,
+                bottomLeading: 16,
+                bottomTrailing: 16,
+                topTrailing: 0
+            ),
+            style: .continuous
+        )
+    }
+
+    private var maneuverLabel: String {
+        let t = step.instructions.lowercased()
+        if t.contains("stay on") || t.contains("continue") { return "Stay on" }
+        if t.contains("turn left") || t.contains("bear left") || t.contains("keep left") { return "Turn left" }
+        if t.contains("turn right") || t.contains("bear right") || t.contains("keep right") { return "Turn right" }
+        if t.contains("u-turn") || t.contains("u turn") { return "U-turn" }
+        if t.contains("merge") { return "Merge onto" }
+        if t.contains("exit") { return "Take exit" }
+        if t.contains("ramp") { return "Take ramp" }
+        if t.contains("roundabout") { return "Roundabout" }
+        if t.contains("arrive") || t.contains("destination") { return "Arrive at" }
+        return "Head to"
+    }
 
     private var mainStreetName: String {
         let raw = step.instructions
         let lower = raw.lowercased()
-        if let range = lower.range(of: " onto ") {
-            return String(raw[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let range = lower.range(of: " on ") {
-            return String(raw[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let range = lower.range(of: " para ") {
-            return String(raw[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        for keyword in [" onto ", " on ", " para ", " to "] {
+            if let range = lower.range(of: keyword) {
+                return String(raw[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
         return raw
     }
 
+    private var nextRoadNumber: String? {
+        let name = mainStreetName
+        let patterns = ["I-", "US-", "SR-", "Hwy ", "Route "]
+        for p in patterns {
+            if name.lowercased().hasPrefix(p.lowercased()) { return name }
+        }
+        if name.first?.isNumber == true { return name }
+        return nil
+    }
+
+    private var formattedDistance: String {
+        step.distance > 0 ? formatDistance(step.distance) : ""
+    }
+
     private var maneuverIcon: String {
-        let t = step.instructions.lowercased()
-        if t.contains("u-turn") || t.contains("u turn") { return "arrow.uturn.left" }
-        if t.contains("turn left sharply") || t.contains("sharp left") { return "arrow.turn.up.left" }
-        if t.contains("turn right sharply") || t.contains("sharp right") { return "arrow.turn.up.right" }
-        if t.contains("turn left") || t.contains("left turn") || t.contains("bear left") || t.contains("keep left") || t.contains("slight left") { return "arrow.turn.down.left" }
-        if t.contains("turn right") || t.contains("right turn") || t.contains("bear right") || t.contains("keep right") || t.contains("slight right") { return "arrow.turn.down.right" }
-        if t.contains("roundabout") || t.contains("rotary") || t.contains("traffic circle") { return "arrow.clockwise.circle" }
-        if t.contains("merge") || t.contains("ramp") || t.contains("highway") { return "arrow.merge" }
-        if t.contains("exit") { return "arrow.up.right.circle" }
-        if t.contains("arrive") || t.contains("destination") || t.contains("reached") { return "mappin.circle.fill" }
-        if t.contains("ferry") { return "ferry.fill" }
-        return "arrow.up"
+        NavigationManeuverIcon.symbol(for: step.instructions)
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 2) {
-                Image(systemName: maneuverIcon)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 40, height: 28)
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+            // Large maneuver arrow (competitor-style prominence)
+            Image(systemName: maneuverIcon)
+                .font(.system(size: 44, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 56, height: 56)
+                .contentShape(Rectangle())
 
-                Text(step.distance > 0 ? formatDistance(step.distance) : "")
-                    .font(.system(size: 14, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-            }
-            .frame(width: 58)
-            .padding(.vertical, 4)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 1)
-
+            // Distance first, then street — matches common truck nav / competitor hierarchy
             VStack(alignment: .leading, spacing: 4) {
-                Text(mainStreetName)
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(formattedDistance.isEmpty ? "—" : formattedDistance)
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
 
-                Text(step.instructions)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-
-            VStack(spacing: 6) {
-                if let onMicTap {
-                    Button(action: onMicTap) {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 30, height: 30)
-                            .background(Color(hex: "#20242b"))
-                            .clipShape(Circle())
+                    if let road = nextRoadNumber {
+                        Text(road)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(GPSDesignSystem.Colors.textPrimary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(GPSDesignSystem.Colors.routeActive)
+                            .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous))
                     }
                 }
 
+                Text(mainStreetName)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+
+                Text(maneuverLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.5))
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            // Mic + list in one horizontal row — avoids vertical icon stacking / overlap
+            HStack(spacing: 10) {
+                if let onMicTap {
+                    Button(action: onMicTap) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.white.opacity(0.14))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button(action: onToggleList) {
                     Image(systemName: "list.bullet")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(AppTheme.Colors.accent)
-                        .frame(width: 40, height: 36)
-                        .accessibilityLabel("Route steps")
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Route steps")
             }
-            .padding(.vertical, 4)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: GPSDesignSystem.Metrics.navHeaderHeight, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity)
-        .frame(height: compactHeight)
-        .background(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                // Keep the bar only in its own compact top lane; avoid material bleed over map.
-                .fill(Color.black.opacity(0.97))
-                .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+        .background(bannerShape.fill(GPSDesignSystem.Colors.chromeBackground.opacity(0.96)))
+        .overlay(bannerShape.stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 12, y: 6)
         .zIndex(500)
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        // #region agent log
-                        let minY = Int(proxy.frame(in: .global).minY)
-                        print("[DBG][H-ui-11][H-banner-size] h=\(Int(proxy.size.height)) w=\(Int(proxy.size.width)) minY=\(minY) hasThen=\((nextStepInstruction?.isEmpty == false)) streetLen=\(mainStreetName.count)")
-                        // #endregion
-                    }
-            }
-        )
     }
 }
 
@@ -146,6 +183,8 @@ struct HorizonNavigationInfoStrip: View {
     let hasScaleAhead: Bool
     let onSelectStop: (TruckStopItem) -> Void
     var useMiles: Bool = true
+    /// Limita cartões na coluna direita para não empilhar sobre zoom/ETA.
+    var maxCards: Int = 2
 
     private var nearestFuelStop: TruckStopItem? {
         stops.min(by: { $0.distanceMeters < $1.distanceMeters })
@@ -158,7 +197,7 @@ struct HorizonNavigationInfoStrip: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let fuel = nearestFuelStop {
+            if maxCards >= 1, let fuel = nearestFuelStop {
                 Button(action: { onSelectStop(fuel) }) {
                     NavInfoCard(
                         icon: "fuelpump.fill",
@@ -170,14 +209,16 @@ struct HorizonNavigationInfoStrip: View {
                 .buttonStyle(.plain)
             }
 
-            NavInfoCard(
-                icon: "scalemass.fill",
-                color: scaleColor,
-                topLine: hasScaleAhead ? String(format: "%.1f mi", scaleAlertDistanceMiles) : "–",
-                bottomLine: hasScaleAhead ? scaleStatusLabel : "Balança"
-            )
+            if maxCards >= 2 {
+                NavInfoCard(
+                    icon: "scalemass.fill",
+                    color: scaleColor,
+                    topLine: hasScaleAhead ? String(format: "%.1f mi", scaleAlertDistanceMiles) : "–",
+                    bottomLine: hasScaleAhead ? scaleStatusLabel : "Scale"
+                )
+            }
 
-            if let reefer = nearestReeferStop {
+            if maxCards >= 3, let reefer = nearestReeferStop {
                 Button(action: { onSelectStop(reefer) }) {
                     NavInfoCard(
                         icon: "snowflake",
@@ -210,17 +251,19 @@ struct HorizonNavigationInfoStrip: View {
 
     private var scaleColor: Color {
         switch scaleAlertStatus {
-        case .open:    return Color(hex: "#ef4444")
-        case .closed:  return Color(hex: "#22d474")
-        case .unknown: return AppTheme.Colors.textSecondary
+        case .open:       return Color(hex: "#ef4444")
+        case .closed:     return Color(hex: "#22d474")
+        case .monitoring: return Color(hex: "#f59e0b")
+        case .unknown:    return AppTheme.Colors.textSecondary
         }
     }
 
     private var scaleStatusLabel: String {
         switch scaleAlertStatus {
-        case .open:    return "OPEN"
-        case .closed:  return "FECHADA"
-        case .unknown: return "à frente"
+        case .open:       return "OPEN"
+        case .closed:     return "CLOSED"
+        case .monitoring: return "MONITOR"
+        case .unknown:    return "AHEAD"
         }
     }
 }
@@ -386,5 +429,50 @@ struct VoiceNavigationModifier: ViewModifier {
                     break
                 }
             }
+    }
+}
+
+// MARK: - Quantum / route-optimize badge (stop order vs road geometry)
+
+/// Shown when `POST /v1/optimize` succeeded for this leg — clarifies that the **purple line** (if shown) is still road geometry.
+struct HorizonQuantumRouteBadge: View {
+    let provenance: TruckRouteProvenance
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: provenance.usesQuantumAccentPolyline ? "atom" : "arrow.triangle.swap")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                Text(provenance.driverBadgeTitle)
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundColor(.white)
+            }
+            Text(provenance.driverBadgeSubtitle)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white.opacity(0.88))
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.35, green: 0.15, blue: 0.55).opacity(0.96),
+                            Color(red: 0.22, green: 0.08, blue: 0.38).opacity(0.96)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
     }
 }

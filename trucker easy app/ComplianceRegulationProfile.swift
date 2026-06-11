@@ -243,7 +243,9 @@ struct RegulationProfile {
                     return profile(forISOCode: countryCode)
                 }
             } catch {
+                #if DEBUG
                 print("[RegulationProfile] ⚠️ Geocoding failed: \(error.localizedDescription)")
+                #endif
             }
         }
 
@@ -261,9 +263,12 @@ struct RegulationProfile {
             return .canada
         case "GB", "GBR", "UK":
             return .uk
+        // EU-27 + EEA (IS, NO) + CH + candidate / neighbourhood states often crossed in road freight
         case "AT", "BE", "BG", "CY", "CZ", "DK", "EE", "ES", "FI", "GR",
              "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL",
-             "PT", "RO", "SE", "SI", "SK":
+             "PT", "RO", "SE", "SI", "SK", "IS", "NO", "LI", "CH",
+             "AD", "MC", "SM", "VA",
+             "BA", "RS", "ME", "MK", "AL", "MD", "UA", "XK":
             return .eu
         case "DE", "DEU":
             return .germany
@@ -275,6 +280,10 @@ struct RegulationProfile {
             return .mexico
         case "AU", "AUS":
             return .australia
+        // Latin America & Caribbean — conservative generic (not BR/MX-specific law)
+        case "AR", "CL", "CO", "PE", "EC", "BO", "UY", "PY", "VE", "GY", "SR", "GF",
+             "GT", "HN", "SV", "NI", "CR", "PA", "BZ", "CU", "DO", "HT", "JM", "TT", "BB":
+            return .generic
         default:
             return .generic
         }
@@ -321,10 +330,14 @@ struct ComplianceChecker {
         }
     }
     
-    /// Check truck specifications against regulation profile
-    static func check(specs: TruckSpecifications, against regulations: RegulationProfile) -> ComplianceResult {
+    /// Check truck specifications against regulation profile (violation copy follows driver language).
+    static func check(
+        specs: TruckSpecifications,
+        against regulations: RegulationProfile,
+        language: AppLanguage
+    ) -> ComplianceResult {
         var violations: [ComplianceResult.Violation] = []
-        
+
         // Height check
         if specs.heightCm > regulations.maxHeightCm {
             let severity: ComplianceResult.Violation.Severity
@@ -334,16 +347,21 @@ struct ComplianceChecker {
             } else {
                 severity = .hard
             }
-            
+
             violations.append(.init(
                 type: .height,
                 severity: severity,
-                message: "Height \(specs.heightCm)cm exceeds limit of \(regulations.maxHeightCm)cm",
+                message: localizedViolationMessage(
+                    type: .height,
+                    current: specs.heightCm,
+                    limit: regulations.maxHeightCm,
+                    language: language
+                ),
                 current: specs.heightCm,
                 limit: regulations.maxHeightCm
             ))
         }
-        
+
         // Weight check
         if specs.grossWeightKg > regulations.maxWeightKg {
             let severity: ComplianceResult.Violation.Severity
@@ -353,33 +371,48 @@ struct ComplianceChecker {
             } else {
                 severity = .hard
             }
-            
+
             violations.append(.init(
                 type: .weight,
                 severity: severity,
-                message: "Weight \(specs.grossWeightKg)kg exceeds limit of \(regulations.maxWeightKg)kg",
+                message: localizedViolationMessage(
+                    type: .weight,
+                    current: specs.grossWeightKg,
+                    limit: regulations.maxWeightKg,
+                    language: language
+                ),
                 current: specs.grossWeightKg,
                 limit: regulations.maxWeightKg
             ))
         }
-        
+
         // Length check
         if specs.lengthCm > regulations.maxLengthCm {
             violations.append(.init(
                 type: .length,
                 severity: .soft,  // Length usually has more flexibility
-                message: "Length \(specs.lengthCm)cm exceeds limit of \(regulations.maxLengthCm)cm",
+                message: localizedViolationMessage(
+                    type: .length,
+                    current: specs.lengthCm,
+                    limit: regulations.maxLengthCm,
+                    language: language
+                ),
                 current: specs.lengthCm,
                 limit: regulations.maxLengthCm
             ))
         }
-        
+
         // Width check
         if specs.widthCm > regulations.maxWidthCm {
             violations.append(.init(
                 type: .width,
                 severity: .hard,  // Width is usually strict
-                message: "Width \(specs.widthCm)cm exceeds limit of \(regulations.maxWidthCm)cm",
+                message: localizedViolationMessage(
+                    type: .width,
+                    current: specs.widthCm,
+                    limit: regulations.maxWidthCm,
+                    language: language
+                ),
                 current: specs.widthCm,
                 limit: regulations.maxWidthCm
             ))
@@ -396,5 +429,130 @@ struct ComplianceChecker {
         }
         
         return ComplianceResult(level: level, violations: violations)
+    }
+
+    private static func localizedViolationMessage(
+        type: ComplianceResult.Violation.ViolationType,
+        current: Int,
+        limit: Int,
+        language: AppLanguage
+    ) -> String {
+        switch type {
+        case .height:
+            switch language {
+            case .english, .hindi, .arabic:
+                return "Height \(current) cm exceeds the legal limit of \(limit) cm"
+            case .portuguese:
+                return "Altura \(current) cm acima do limite legal de \(limit) cm"
+            case .spanish, .spanishLatam:
+                return "Altura \(current) cm supera el límite legal de \(limit) cm"
+            case .french:
+                return "Hauteur \(current) cm au-dessus de la limite légale de \(limit) cm"
+            case .german:
+                return "Höhe \(current) cm über dem gesetzlichen Limit von \(limit) cm"
+            case .polish:
+                return "Wysokość \(current) cm przekracza limit prawny \(limit) cm"
+            case .russian:
+                return "Высота \(current) см превышает законный предел \(limit) см"
+            }
+        case .weight:
+            switch language {
+            case .english, .hindi, .arabic:
+                return "Weight \(current) kg exceeds the legal limit of \(limit) kg"
+            case .portuguese:
+                return "Peso \(current) kg acima do limite legal de \(limit) kg"
+            case .spanish, .spanishLatam:
+                return "Peso \(current) kg supera el límite legal de \(limit) kg"
+            case .french:
+                return "Masse \(current) kg au-dessus de la limite légale de \(limit) kg"
+            case .german:
+                return "Gewicht \(current) kg über dem gesetzlichen Limit von \(limit) kg"
+            case .polish:
+                return "Masa \(current) kg przekracza limit prawny \(limit) kg"
+            case .russian:
+                return "Масса \(current) кг превышает законный предел \(limit) кг"
+            }
+        case .length:
+            switch language {
+            case .english, .hindi, .arabic:
+                return "Length \(current) cm exceeds the legal limit of \(limit) cm"
+            case .portuguese:
+                return "Comprimento \(current) cm acima do limite legal de \(limit) cm"
+            case .spanish, .spanishLatam:
+                return "Longitud \(current) cm supera el límite legal de \(limit) cm"
+            case .french:
+                return "Longueur \(current) cm au-dessus de la limite légale de \(limit) cm"
+            case .german:
+                return "Länge \(current) cm über dem gesetzlichen Limit von \(limit) cm"
+            case .polish:
+                return "Długość \(current) cm przekracza limit prawny \(limit) cm"
+            case .russian:
+                return "Длина \(current) см превышает законный предел \(limit) см"
+            }
+        case .width:
+            switch language {
+            case .english, .hindi, .arabic:
+                return "Width \(current) cm exceeds the legal limit of \(limit) cm"
+            case .portuguese:
+                return "Largura \(current) cm acima do limite legal de \(limit) cm"
+            case .spanish, .spanishLatam:
+                return "Anchura \(current) cm supera el límite legal de \(limit) cm"
+            case .french:
+                return "Largeur \(current) cm au-dessus de la limite légale de \(limit) cm"
+            case .german:
+                return "Breite \(current) cm über dem gesetzlichen Limit von \(limit) cm"
+            case .polish:
+                return "Szerokość \(current) cm przekracza limit prawny \(limit) cm"
+            case .russian:
+                return "Ширина \(current) см превышает законный предел \(limit) см"
+            }
+        }
+    }
+}
+
+// MARK: - Localized country labels (driver UI language)
+
+extension RegulationProfile.Country {
+    /// Human-readable country/region for the active app language (`RegionalSettingsManager` / `selectedLanguage`).
+    func displayName(for lang: AppLanguage) -> String {
+        switch (self, lang) {
+        case (.usa, .portuguese): return "Estados Unidos"
+        case (.usa, .spanish), (.usa, .spanishLatam): return "Estados Unidos"
+        case (.usa, .french): return "États-Unis"
+        case (.usa, .german): return "Vereinigte Staaten"
+        case (.usa, .polish): return "Stany Zjednoczone"
+        case (.usa, .russian): return "США"
+        case (.canada, .portuguese): return "Canadá"
+        case (.canada, .spanish), (.canada, .spanishLatam): return "Canadá"
+        case (.canada, .french): return "Canada"
+        case (.mexico, .portuguese): return "México"
+        case (.mexico, .spanish), (.mexico, .spanishLatam): return "México"
+        case (.brazil, .english): return "Brazil"
+        case (.brazil, .spanish), (.brazil, .spanishLatam): return "Brasil"
+        case (.brazil, .french): return "Brésil"
+        case (.brazil, .german): return "Brasilien"
+        case (.uk, .portuguese): return "Reino Unido"
+        case (.uk, .spanish), (.uk, .spanishLatam): return "Reino Unido"
+        case (.uk, .french): return "Royaume-Uni"
+        case (.uk, .german): return "Vereinigtes Königreich"
+        case (.eu, .portuguese): return "União Europeia"
+        case (.eu, .spanish), (.eu, .spanishLatam): return "Unión Europea"
+        case (.eu, .french): return "Union européenne"
+        case (.eu, .german): return "Europäische Union"
+        case (.germany, .portuguese): return "Alemanha"
+        case (.germany, .spanish), (.germany, .spanishLatam): return "Alemania"
+        case (.germany, .french): return "Allemagne"
+        case (.france, .portuguese): return "França"
+        case (.france, .spanish), (.france, .spanishLatam): return "Francia"
+        case (.france, .german): return "Frankreich"
+        case (.australia, .portuguese): return "Austrália"
+        case (.australia, .spanish), (.australia, .spanishLatam): return "Australia"
+        case (.generic, .portuguese): return "Internacional"
+        case (.generic, .spanish), (.generic, .spanishLatam): return "Internacional"
+        case (.generic, .french): return "International"
+        case (.generic, .german): return "International"
+        default:
+            return displayName
+        }
     }
 }

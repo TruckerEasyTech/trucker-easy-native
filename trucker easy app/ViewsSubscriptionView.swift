@@ -4,6 +4,8 @@ import StoreKit
 // MARK: - Subscription View (Checkout Page)
 // Inspired by Trucker Path - "Built by a driver. For drivers."
 struct SubscriptionView: View {
+    var highlightPlan: TruckerEasyPlan? = nil
+
     @State private var selectedPlan: Plan = .annual
     @State private var showingTrial = false
     @State private var showingError = false
@@ -23,6 +25,13 @@ struct SubscriptionView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
+                    if AppAccessPolicy.unlockAllFeaturesForTesting {
+                        testingModeBanner
+                    }
+                    if let highlightPlan {
+                        routeUpsellBanner(for: highlightPlan)
+                    }
+                    RouteEasyPlanComparison(highlight: highlightPlan)
                     // MARK: Hero Section
                     ZStack {
                         LinearGradient(
@@ -158,6 +167,28 @@ struct SubscriptionView: View {
                         TrustBadges()
                             .padding(.horizontal, AppTheme.Spacing.md)
 
+                        if AppDistributionConfig.hasPublicDownloadLink,
+                           let downloadURL = AppDistributionConfig.publicDownloadURL {
+                            Link(destination: downloadURL) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "arrow.down.app.fill")
+                                        .font(.system(size: 18, weight: .bold))
+                                    Text(
+                                        AppDistributionConfig.appStoreURL != nil
+                                            ? "Download on the App Store"
+                                            : "Join the TestFlight beta"
+                                    )
+                                    .font(.system(size: 16, weight: .bold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(AppTheme.Colors.accent)
+                                .cornerRadius(AppTheme.Radius.md)
+                            }
+                            .padding(.horizontal, AppTheme.Spacing.md)
+                        }
+
                         // MARK: Driver to Driver Quote
                         DriverToDriverQuote()
                             .padding(.horizontal, AppTheme.Spacing.md)
@@ -202,6 +233,50 @@ struct SubscriptionView: View {
         }
     }
 
+    private var testingModeBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "flask.fill")
+                .foregroundColor(AppTheme.Colors.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Testing build")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                Text("Premium, Route Easy, AI, and Valhalla truck routing are unlocked.")
+                    .font(.system(size: 12))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.Colors.backgroundCard)
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.top, AppTheme.Spacing.md)
+    }
+
+    private func routeUpsellBanner(for plan: TruckerEasyPlan) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: plan >= .premium ? "sparkles" : "dollarsign.circle.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(AppTheme.Colors.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plan >= .premium ? "Unlock AI Smart Route" : "Unlock No-Toll Truck Routes")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                Text(plan >= .premium
+                     ? "Premium compares time, tolls, diesel price, and fuel stops for the most economical run."
+                     : "Standard adds Valhalla truck routing that avoids tolls when possible.")
+                    .font(.system(size: 12))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(AppTheme.Colors.backgroundCard)
+        .cornerRadius(12)
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.top, AppTheme.Spacing.md)
+    }
+
     // MARK: - Purchase Action
     @MainActor
     private func startPurchase() async {
@@ -232,7 +307,78 @@ struct SubscriptionView: View {
             let formatted = p.priceFormatStyle.format(monthly)
             return formatted
         }
-        return "$14.16"
+        return AppDistributionConfig.MarketingPrice.annualPerMonthUSD
+    }
+}
+
+// MARK: - Route Easy plan comparison (upsell at route start)
+
+private struct RouteEasyPlanComparison: View {
+    let highlight: TruckerEasyPlan?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ROUTE EASY — 3 OPTIONS")
+                .font(AppTheme.Typography.small())
+                .foregroundColor(AppTheme.Colors.textSecondary)
+                .kerning(1.2)
+
+            routeTierRow(
+                badge: "FREE",
+                title: "Fastest route",
+                detail: "Basic driving directions included.",
+                color: Color(hex: "#60a5fa"),
+                emphasized: highlight == nil || highlight == .free
+            )
+            routeTierRow(
+                badge: "STANDARD",
+                title: "No toll route",
+                detail: "Truck-safe Valhalla routing that skips tolls when possible.",
+                color: Color(hex: "#22c55e"),
+                emphasized: highlight == .standard
+            )
+            routeTierRow(
+                badge: "PREMIUM",
+                title: "AI Smart route",
+                detail: "Optimizes fuel + tolls + time — shows estimated savings before you roll.",
+                color: Color(hex: "#f59e0b"),
+                emphasized: highlight == .premium
+            )
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.top, AppTheme.Spacing.md)
+    }
+
+    private func routeTierRow(badge: String, title: String, detail: String, color: Color, emphasized: Bool) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(badge)
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(emphasized ? .black : color)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(emphasized ? color : color.opacity(0.2))
+                .cornerRadius(4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+            }
+            Spacer()
+            if emphasized {
+                Image(systemName: "arrow.up.circle.fill")
+                    .foregroundColor(color)
+            }
+        }
+        .padding(12)
+        .background(emphasized ? color.opacity(0.08) : AppTheme.Colors.backgroundCard)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(emphasized ? color.opacity(0.45) : Color.clear, lineWidth: 1)
+        )
     }
 }
 

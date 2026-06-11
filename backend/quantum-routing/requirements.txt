@@ -1,0 +1,15 @@
+# Motor quântico (Ocean) — instalar em venv; não faz parte do build iOS.
+# https://docs.dwavequantum.com/en/latest/ocean/install.html
+python-dotenv>=1.0.0
+fastapi>=0.115.0
+httpx>=0.28.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+numpy>=2.0.0
+dimod>=0.12.0
+dwave-system>=1.27.0
+dwave-neal>=0.6.0
+# Amazon Braket → D-Wave QPU (opcional; só necessário se USE_AMAZON_BRAKET=1)
+amazon-braket-ocean-plugin>=1.0.11
+amazon-braket-sdk>=1.60.0
+boto3>=1.34.0

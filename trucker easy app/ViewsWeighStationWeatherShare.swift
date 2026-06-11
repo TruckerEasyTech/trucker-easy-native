@@ -76,6 +76,8 @@ struct WeighStationReport: Identifiable {
     let reportedBy: String
     let reportedAt: Date
     var confirmations: Int
+    let latitude: Double?
+    let longitude: Double?
 
     var timeAgo: String {
         let interval = Date().timeIntervalSince(reportedAt)
@@ -96,6 +98,108 @@ struct WeighStationReport: Identifiable {
     }
 }
 
+/// Target scale for a driver report — Supabase POI, MapKit, or GPS fallback (nationwide).
+struct WeighStationReportTarget: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let latitude: Double
+    let longitude: Double
+    let poiPlaceId: UUID?
+    let distanceMeters: Double?
+    let govStatus: String?
+    let govSource: String?
+    let countryCode: String?
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    static func from(_ row: PlacesNearRow) -> WeighStationReportTarget {
+        WeighStationReportTarget(
+            id: row.id,
+            name: row.name ?? "Weigh Station",
+            latitude: row.lat,
+            longitude: row.lon,
+            poiPlaceId: row.id,
+            distanceMeters: row.distance_m,
+            govStatus: row.gov_weigh_status,
+            govSource: row.gov_weigh_source,
+            countryCode: row.country_code
+        )
+    }
+
+    static func fallback(at coordinate: CLLocationCoordinate2D?, name: String) -> WeighStationReportTarget {
+        let coord = coordinate ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        return WeighStationReportTarget(
+            id: UUID(),
+            name: name,
+            latitude: coord.latitude,
+            longitude: coord.longitude,
+            poiPlaceId: nil,
+            distanceMeters: nil,
+            govStatus: nil,
+            govSource: nil,
+            countryCode: nil
+        )
+    }
+}
+
+// MARK: - Status provenance (safety: official vs community vs location-only)
+
+enum WeighStationStatusProvenance: Equatable {
+    case official(source: String)
+    case community
+    case locationOnly
+
+    var isOfficial: Bool {
+        if case .official = self { return true }
+        return false
+    }
+
+    static func isOfficialSource(_ raw: String?) -> Bool {
+        guard let raw else { return false }
+        let s = raw.lowercased()
+        if s.isEmpty || s == "crowd" || s.contains("driver") { return false }
+        return s.contains("511")
+            || s.contains("on511")
+            || s.contains("cvse")
+            || s.contains("bc_cvse")
+            || s.contains("ntad")
+            || s.contains("usdot")
+            || s.contains("dot")
+            || s.contains("gov")
+            || s.contains("caltrans")
+            || s.contains("ohgo")
+            || s.contains("tpims")
+            || s.contains("road511")
+            || s.contains("ntad")
+            || s.contains("official")
+    }
+
+    static func prettySource(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "Government" }
+        let s = raw.lowercased()
+        if s.contains("on511") || s.contains("511on") { return "Ontario 511" }
+        if s.contains("bc_cvse") || s.contains("cvse") { return "BC CVSE" }
+        if s.contains("ntad") || s.contains("usdot") { return "USDOT NTAD" }
+        if s.contains("ut_udot") || s.contains("udot") { return "Utah UDOT" }
+        if s.contains("caltrans") { return "Caltrans" }
+        if s.contains("ohgo") { return "OHGO" }
+        if s.contains("tpims") { return "TPIMS" }
+        if s.contains("road511") { return "511/DOT" }
+        if s.contains("ntad") { return "USDOT NTAD" }
+        if s.contains("crowd") { return "Drivers" }
+        return raw.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+struct WeighStationResolvedStatus: Equatable {
+    let displayStatus: ScaleAlertBanner.ScaleStatus
+    let provenance: WeighStationStatusProvenance
+    /// Community hint when official data is missing — shown as advisory, not primary safety signal.
+    let communityHint: WeighStationStatus?
+}
+
 // MARK: - WeighStation Status Service (Supabase-backed, crowdsourced)
 
 @Observable
@@ -105,18 +209,170 @@ final class WeighStationStatusService {
     // keyed by station name — shared across all drivers via Supabase
     private(set) var reports: [String: [WeighStationReport]] = [:]
     private(set) var isSyncing = false
-    private var partnerOverrides: [String: (status: WeighStationStatus, updatedAt: Date)] = [:]
+    private var partnerOverrides: [String: (status: WeighStationStatus, updatedAt: Date, source: String?)] = [:]
 
     func latestStatus(for stationName: String) -> WeighStationStatus? {
+        latestStatus(for: stationName, near: nil)
+    }
+
+    /// Name match first, then partner/crowd reports within ~600 m (government + driver reports).
+    func latestStatus(for stationName: String, near coordinate: CLLocationCoordinate2D?) -> WeighStationStatus? {
         if let partner = partnerOverrides[stationName],
            Date().timeIntervalSince(partner.updatedAt) <= 900 {
             return partner.status
         }
-        return reports[stationName]?.first?.status
+        if let coord = coordinate,
+           let geo = latestPartnerEntry(near: coord, withinMeters: 600, officialOnly: false) {
+            return geo.status
+        }
+        if let direct = reports[stationName]?.first?.status {
+            return direct
+        }
+        if let coord = coordinate {
+            return latestCrowdStatus(near: coord, withinMeters: 800)
+        }
+        return nil
     }
 
-    func setPartnerStatus(_ status: WeighStationStatus, for stationName: String, updatedAt: Date = Date()) {
-        partnerOverrides[stationName] = (status, updatedAt)
+    /// When weigh feed is static `monitoring`, prefer `site_open` (e.g. ON511 rest areas) for open/closed display.
+    static func effectiveGovernmentStatus(weighStatus: String?, siteOpen: Bool?) -> String? {
+        let normalized = weighStatus?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "open" || normalized == "closed" { return normalized }
+        if let siteOpen {
+            return siteOpen ? "open" : "closed"
+        }
+        if normalized == "monitoring" { return "monitoring" }
+        return weighStatus
+    }
+
+    /// Safety-first resolution: official status drives UI; community is advisory only.
+    func resolve(
+        stationName: String,
+        near coordinate: CLLocationCoordinate2D?,
+        govStatus: String?,
+        govSource: String?,
+        govSiteOpen: Bool? = nil
+    ) -> WeighStationResolvedStatus {
+        let effectiveGov = Self.effectiveGovernmentStatus(weighStatus: govStatus, siteOpen: govSiteOpen)
+        if let gov = Self.statusFromGovernmentField(effectiveGov) {
+            return WeighStationResolvedStatus(
+                displayStatus: scaleStatus(from: gov),
+                provenance: .official(source: WeighStationStatusProvenance.prettySource(govSource)),
+                communityHint: latestCommunityHint(for: stationName, near: coordinate)
+            )
+        }
+
+        if let partner = latestOfficialPartner(for: stationName, near: coordinate) {
+            return WeighStationResolvedStatus(
+                displayStatus: scaleStatus(from: partner.status),
+                provenance: .official(source: WeighStationStatusProvenance.prettySource(partner.source)),
+                communityHint: latestCommunityHint(for: stationName, near: coordinate)
+            )
+        }
+
+        if let crowd = latestCommunityHint(for: stationName, near: coordinate) {
+            return WeighStationResolvedStatus(
+                displayStatus: .unknown,
+                provenance: .community,
+                communityHint: crowd
+            )
+        }
+
+        return WeighStationResolvedStatus(
+            displayStatus: .unknown,
+            provenance: .locationOnly,
+            communityHint: nil
+        )
+    }
+
+    private func scaleStatus(from status: WeighStationStatus) -> ScaleAlertBanner.ScaleStatus {
+        switch status {
+        case .open: return .open
+        case .closed: return .closed
+        case .monitoring: return .monitoring
+        }
+    }
+
+    private func latestOfficialPartner(
+        for stationName: String,
+        near coordinate: CLLocationCoordinate2D?
+    ) -> (status: WeighStationStatus, source: String?)? {
+        if let partner = partnerOverrides[stationName],
+           Date().timeIntervalSince(partner.updatedAt) <= 900,
+           WeighStationStatusProvenance.isOfficialSource(partner.source) {
+            return (partner.status, partner.source)
+        }
+        if let coord = coordinate,
+           let geo = latestPartnerEntry(near: coord, withinMeters: 600, officialOnly: true) {
+            return geo
+        }
+        return nil
+    }
+
+    private func latestCommunityHint(
+        for stationName: String,
+        near coordinate: CLLocationCoordinate2D?
+    ) -> WeighStationStatus? {
+        if let direct = reports[stationName]?.first?.status { return direct }
+        if let coord = coordinate {
+            return latestCrowdStatus(near: coord, withinMeters: 800)
+        }
+        return nil
+    }
+
+    private func latestPartnerEntry(
+        near coordinate: CLLocationCoordinate2D,
+        withinMeters: CLLocationDistance,
+        officialOnly: Bool
+    ) -> (status: WeighStationStatus, source: String?)? {
+        let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        var best: (WeighStationStatus, Date, String?)?
+        for (_, entry) in partnerOverrides {
+            guard Date().timeIntervalSince(entry.updatedAt) <= 900 else { continue }
+            if officialOnly, !WeighStationStatusProvenance.isOfficialSource(entry.source) { continue }
+            _ = here
+            if best == nil || entry.updatedAt > best!.1 {
+                best = (entry.status, entry.updatedAt, entry.source)
+            }
+        }
+        guard let best else { return nil }
+        return (best.0, best.2)
+    }
+
+    private func latestCrowdStatus(near coordinate: CLLocationCoordinate2D, withinMeters: CLLocationDistance) -> WeighStationStatus? {
+        let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        var best: (WeighStationStatus, Date)?
+        for (_, stationReports) in reports {
+            for report in stationReports {
+                guard let lat = report.latitude, let lon = report.longitude else { continue }
+                let dist = here.distance(from: CLLocation(latitude: lat, longitude: lon))
+                guard dist <= withinMeters else { continue }
+                if best == nil || report.reportedAt > best!.1 {
+                    best = (report.status, report.reportedAt)
+                }
+            }
+        }
+        return best?.0
+    }
+
+    /// Government / partner feed status (OHGO, TPIMS, NTAD-derived) from `places_near`.
+    static func statusFromGovernmentField(_ raw: String?) -> WeighStationStatus? {
+        guard let raw else { return nil }
+        switch raw.lowercased() {
+        case "open": return .open
+        case "closed": return .closed
+        case "monitoring": return .monitoring
+        default: return nil
+        }
+    }
+
+    func setPartnerStatus(
+        _ status: WeighStationStatus,
+        for stationName: String,
+        updatedAt: Date = Date(),
+        source: String? = nil
+    ) {
+        partnerOverrides[stationName] = (status, updatedAt, source)
     }
 
     /// Submit a report locally and sync to Supabase backend
@@ -125,6 +381,7 @@ final class WeighStationStatusService {
                 for stationName: String,
                 latitude: Double? = nil,
                 longitude: Double? = nil,
+                poiPlaceId: UUID? = nil,
                 by user: String = "You") {
         // 1. Update local state immediately for instant UI feedback
         let report = WeighStationReport(
@@ -132,7 +389,9 @@ final class WeighStationStatusService {
             outcome: outcome,
             reportedBy: user,
             reportedAt: Date(),
-            confirmations: 0
+            confirmations: 0,
+            latitude: latitude,
+            longitude: longitude
         )
         reports[stationName, default: []].insert(report, at: 0)
         if (reports[stationName]?.count ?? 0) > 10 {
@@ -145,15 +404,21 @@ final class WeighStationStatusService {
                 station_name: stationName,
                 driver_id: SupabaseClient.shared.currentDriverId,
                 status: status.rawValue.lowercased(),
-                outcome: outcome?.rawValue.lowercased(),
                 latitude: latitude,
-                longitude: longitude
+                longitude: longitude,
+                poi_place_id: poiPlaceId?.uuidString,
+                details: WeighStationReportDetailsPayload(
+                    outcome: outcome?.rawValue.lowercased(),
+                    source: "trucker_easy_app"
+                )
             )
             do {
                 try await SupabaseClient.shared.submitWeighStationReport(payload)
             } catch {
                 // Non-fatal: local report still visible to this driver
+                #if DEBUG
                 print("WeighStationStatusService: sync failed — \(error.localizedDescription)")
+                #endif
             }
         }
     }
@@ -163,15 +428,30 @@ final class WeighStationStatusService {
         reports[stationName]![idx].confirmations += 1
     }
 
-    /// Fetch recent crowdsourced reports from Supabase and merge with local state
-    func fetchRemoteReports() async {
+    /// Fetch recent crowdsourced reports from Supabase and merge with local state.
+    /// When `near` is set, only reports within `radiusKm` are loaded (nationwide corridor use).
+    func fetchRemoteReports(
+        near coordinate: CLLocationCoordinate2D? = nil,
+        radiusKm: Double = 150
+    ) async {
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
         do {
-            let records: [WeighStationReportRecord] = try await SupabaseClient.shared.fetchWeighStationReports()
+            let records: [WeighStationReportRecord]
+            if let coordinate {
+                records = try await SupabaseClient.shared.fetchWeighStationReportsNear(
+                    latitude: coordinate.latitude,
+                    longitude: coordinate.longitude,
+                    radiusKm: radiusKm
+                )
+            } else {
+                records = try await SupabaseClient.shared.fetchWeighStationReports()
+            }
             await MainActor.run {
-                reports = [:]
+                if coordinate == nil {
+                    reports = [:]
+                }
                 for record in records {
                     let status: WeighStationStatus
                     switch record.status.lowercased() {
@@ -195,21 +475,24 @@ final class WeighStationStatusService {
                         outcome: outcome,
                         reportedBy: reporter,
                         reportedAt: reportedAt,
-                        confirmations: record.confirmations ?? 0
+                        confirmations: record.confirmations ?? 0,
+                        latitude: record.latitude,
+                        longitude: record.longitude
                     )
                     reports[record.station_name, default: []].append(report)
                 }
                 // Sort each station's reports newest first and cap at 20
                 for key in reports.keys {
-                    reports[key] = reports[key]!
-                        .sorted { $0.reportedAt > $1.reportedAt }
-                        .prefix(20)
-                        .map { $0 }
+                    if let existing = reports[key] {
+                        reports[key] = Array(existing.sorted { $0.reportedAt > $1.reportedAt }.prefix(20))
+                    }
                 }
             }
         } catch {
             // Non-fatal: app still works with local reports
+            #if DEBUG
             print("WeighStationStatusService: fetch failed — \(error.localizedDescription)")
+            #endif
         }
     }
 }
@@ -217,13 +500,34 @@ final class WeighStationStatusService {
 // MARK: - WeighStation Status Sheet (2-step flow)
 
 struct WeighStationStatusSheet: View {
-    let stationName: String
+    let driverLocation: CLLocation?
+    let prefilledTarget: WeighStationReportTarget?
+    let lang: AppLanguage
+    let formatDistance: (Double) -> String
     @Binding var isPresented: Bool
 
     @State private var service = WeighStationStatusService.shared
     @State private var selectedStatus: WeighStationStatus? = nil
     @State private var selectedOutcome: WeighStationOpenOutcome? = nil
     @State private var submitted = false
+    @State private var nearbyTargets: [WeighStationReportTarget] = []
+    @State private var selectedTargetId: UUID?
+    @State private var isLoadingStations = false
+
+    private var activeTarget: WeighStationReportTarget {
+        if let id = selectedTargetId,
+           let match = nearbyTargets.first(where: { $0.id == id }) {
+            return match
+        }
+        if let prefilledTarget { return prefilledTarget }
+        if let first = nearbyTargets.first { return first }
+        return WeighStationReportTarget.fallback(
+            at: driverLocation?.coordinate,
+            name: lang.horizonGenericWeighStation
+        )
+    }
+
+    private var stationName: String { activeTarget.name }
 
     private var latestReport: WeighStationReport? { service.reports[stationName]?.first }
     private var recentReports: [WeighStationReport] {
@@ -235,9 +539,13 @@ struct WeighStationStatusSheet: View {
             ScrollView {
                 VStack(spacing: 0) {
 
+                    stationPickerCard
+                        .padding(.top, 16)
+                        .padding(.horizontal, 20)
+
                     // ── Current status banner ──────────────────────────────
                     currentStatusBanner
-                        .padding(.top, 20)
+                        .padding(.top, 16)
                         .padding(.horizontal, 20)
 
                     Divider()
@@ -289,13 +597,98 @@ struct WeighStationStatusSheet: View {
             .animation(.spring(response: 0.35), value: submitted)
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            // Load remote crowdsourced reports when sheet opens
-            Task { await service.fetchRemoteReports() }
+        .task {
+            await loadNearbyStations()
         }
     }
 
     // MARK: Sub-views
+
+    private var stationPickerCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(lang.scaleSelectStationLabel, systemImage: "scalemass.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.white)
+
+            if isLoadingStations {
+                HStack(spacing: 10) {
+                    ProgressView().tint(AppTheme.Colors.accent)
+                    Text(lang.scaleLoadingNearbyLabel)
+                        .font(.system(size: 13))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+            } else if nearbyTargets.count <= 1 {
+                HStack(spacing: 10) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .foregroundColor(AppTheme.Colors.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activeTarget.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(2)
+                        if let meters = activeTarget.distanceMeters {
+                            Text(formatDistance(meters))
+                                .font(.system(size: 12))
+                                .foregroundColor(AppTheme.Colors.textSecondary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(12)
+                .background(AppTheme.Colors.backgroundCard)
+                .cornerRadius(AppTheme.Radius.md)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(nearbyTargets.prefix(12)) { target in
+                        stationTargetRow(target)
+                    }
+                }
+            }
+        }
+    }
+
+    private func stationTargetRow(_ target: WeighStationReportTarget) -> some View {
+        let selected = selectedTargetId == target.id
+        return Button {
+            selectedTargetId = target.id
+            selectedStatus = nil
+            selectedOutcome = nil
+            submitted = false
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(selected ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(target.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
+                        if let meters = target.distanceMeters {
+                            Text(formatDistance(meters))
+                                .font(.system(size: 11))
+                                .foregroundColor(AppTheme.Colors.textSecondary)
+                        }
+                        if let code = target.countryCode, !code.isEmpty {
+                            Text(code.uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(AppTheme.Colors.textSecondary.opacity(0.8))
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(selected ? AppTheme.Colors.accent.opacity(0.1) : AppTheme.Colors.backgroundCard)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(selected ? AppTheme.Colors.accent.opacity(0.45) : Color.clear, lineWidth: 1.5)
+            )
+        }
+    }
 
     private var currentStatusBanner: some View {
         HStack(spacing: 14) {
@@ -532,12 +925,107 @@ struct WeighStationStatusSheet: View {
 
     private func submitReport() {
         guard let status = selectedStatus else { return }
+        let target = activeTarget
         service.submit(
             status: status,
             outcome: status == .open ? selectedOutcome : nil,
-            for: stationName
+            for: target.name,
+            latitude: target.latitude,
+            longitude: target.longitude,
+            poiPlaceId: target.poiPlaceId
         )
         withAnimation { submitted = true }
+    }
+
+    private func loadNearbyStations() async {
+        await MainActor.run { isLoadingStations = true }
+        defer { Task { @MainActor in isLoadingStations = false } }
+
+        var targets: [WeighStationReportTarget] = []
+        if let location = driverLocation {
+            if let rows = try? await PoiPlacesService.shared.fetchWeighStationsNear(
+                location: location,
+                radiusMeters: 120_000,
+                limit: 50
+            ) {
+                targets = rows.map { WeighStationReportTarget.from($0) }
+            }
+            if targets.isEmpty {
+                targets = await mapKitWeighTargets(near: location)
+            }
+            await service.fetchRemoteReports(near: location.coordinate, radiusKm: 150)
+        } else {
+            await service.fetchRemoteReports()
+        }
+
+        await MainActor.run {
+            if let prefilled = prefilledTarget,
+               !targets.contains(where: { $0.id == prefilled.id }) {
+                targets.insert(prefilled, at: 0)
+            }
+            if targets.isEmpty, let coord = driverLocation?.coordinate {
+                targets = [
+                    WeighStationReportTarget.fallback(
+                        at: coord,
+                        name: lang.horizonGenericWeighStation
+                    )
+                ]
+            }
+            nearbyTargets = targets
+            if selectedTargetId == nil {
+                selectedTargetId = prefilledTarget?.id ?? targets.first?.id
+            }
+        }
+    }
+
+    private func mapKitWeighTargets(near location: CLLocation) async -> [WeighStationReportTarget] {
+        let queries = await MainActor.run { CountryComplianceManager.shared.weighQueries }
+        let region = MKCoordinateRegion(
+            center: location.coordinate,
+            latitudinalMeters: 120_000,
+            longitudinalMeters: 120_000
+        )
+        var allItems: [MKMapItem] = []
+        for query in queries {
+            let req = MKLocalSearch.Request()
+            req.naturalLanguageQuery = query
+            req.region = region
+            let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
+            allItems.append(contentsOf: items)
+        }
+        var deduped: [MKMapItem] = []
+        for item in allItems {
+            let itemLoc = CLLocation(
+                latitude: item.placemark.coordinate.latitude,
+                longitude: item.placemark.coordinate.longitude
+            )
+            if !deduped.contains(where: {
+                CLLocation(
+                    latitude: $0.placemark.coordinate.latitude,
+                    longitude: $0.placemark.coordinate.longitude
+                ).distance(from: itemLoc) < 500
+            }) {
+                deduped.append(item)
+            }
+        }
+        return deduped.map { item in
+            let coord = item.placemark.coordinate
+            let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            return WeighStationReportTarget(
+                id: UUID(),
+                name: item.name ?? lang.horizonGenericWeighStation,
+                latitude: coord.latitude,
+                longitude: coord.longitude,
+                poiPlaceId: nil,
+                distanceMeters: location.distance(from: itemLoc),
+                govStatus: nil,
+                govSource: nil,
+                countryCode: item.placemark.isoCountryCode
+            )
+        }
+        .sorted { ($0.distanceMeters ?? .greatestFiniteMagnitude) < ($1.distanceMeters ?? .greatestFiniteMagnitude) }
+        .prefix(25)
+        .map { $0 }
     }
 }
 
@@ -1237,16 +1725,24 @@ final class LogisticsNewsService {
 
     private func resolveCountry(for coordinate: CLLocationCoordinate2D) async -> String {
         let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        guard let request = MKReverseGeocodingRequest(location: location) else { return "US" }
-        return await withCheckedContinuation { continuation in
-            request.getMapItems { mapItems, _ in
-                // Try addressRepresentations first (iOS 26+), then fall back to region
-                if let repr = mapItems?.first?.addressRepresentations,
-                   let region = repr.region {
-                    continuation.resume(returning: region.identifier.uppercased().prefix(2).description)
-                } else {
-                    continuation.resume(returning: "US")
+        if #available(iOS 26, *) {
+            guard let request = MKReverseGeocodingRequest(location: location) else { return "US" }
+            return await withCheckedContinuation { continuation in
+                request.getMapItems { mapItems, _ in
+                    if let repr = mapItems?.first?.addressRepresentations,
+                       let region = repr.region {
+                        continuation.resume(returning: region.identifier.uppercased().prefix(2).description)
+                    } else {
+                        continuation.resume(returning: "US")
+                    }
                 }
+            }
+        } else {
+            do {
+                let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
+                return placemarks.first?.isoCountryCode?.uppercased() ?? "US"
+            } catch {
+                return "US"
             }
         }
     }

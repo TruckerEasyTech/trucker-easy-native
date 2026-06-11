@@ -39,21 +39,27 @@ class HapticFeedbackManager {
     func success() {
         guard isEnabled else { return }
         notificationGenerator.notificationOccurred(.success)
+        #if DEBUG
         print("📳 [Haptic] Success")
+        #endif
     }
     
     /// Warning feedback (truck restriction ahead)
     func warning() {
         guard isEnabled else { return }
         notificationGenerator.notificationOccurred(.warning)
+        #if DEBUG
         print("📳 [Haptic] Warning")
+        #endif
     }
     
     /// Error feedback (route calculation failed, GPS lost)
     func error() {
         guard isEnabled else { return }
         notificationGenerator.notificationOccurred(.error)
+        #if DEBUG
         print("📳 [Haptic] Error")
+        #endif
     }
     
     // MARK: - Impact Feedback
@@ -63,14 +69,18 @@ class HapticFeedbackManager {
         guard isEnabled else { return }
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
+        #if DEBUG
         print("📳 [Haptic] Light impact")
+        #endif
     }
     
     /// Medium impact (navigation started, warning dismissed)
     func mediumImpact() {
         guard isEnabled else { return }
         impactGenerator.impactOccurred()
+        #if DEBUG
         print("📳 [Haptic] Medium impact")
+        #endif
     }
     
     /// Heavy impact (critical warning, immediate action needed)
@@ -78,7 +88,9 @@ class HapticFeedbackManager {
         guard isEnabled else { return }
         let generator = UIImpactFeedbackGenerator(style: .heavy)
         generator.impactOccurred()
+        #if DEBUG
         print("📳 [Haptic] Heavy impact")
+        #endif
     }
     
     /// Rigid impact (error, obstacle detected)
@@ -86,7 +98,9 @@ class HapticFeedbackManager {
         guard isEnabled else { return }
         let generator = UIImpactFeedbackGenerator(style: .rigid)
         generator.impactOccurred()
+        #if DEBUG
         print("📳 [Haptic] Rigid impact")
+        #endif
     }
     
     /// Soft impact (info notification)
@@ -94,7 +108,9 @@ class HapticFeedbackManager {
         guard isEnabled else { return }
         let generator = UIImpactFeedbackGenerator(style: .soft)
         generator.impactOccurred()
+        #if DEBUG
         print("📳 [Haptic] Soft impact")
+        #endif
     }
     
     // MARK: - Selection Feedback
@@ -103,7 +119,9 @@ class HapticFeedbackManager {
     func selection() {
         guard isEnabled else { return }
         selectionGenerator.selectionChanged()
+        #if DEBUG
         print("📳 [Haptic] Selection")
+        #endif
     }
     
     // MARK: - Custom Patterns
@@ -115,7 +133,9 @@ class HapticFeedbackManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.heavyImpact()
         }
+        #if DEBUG
         print("📳 [Haptic] Critical warning pattern")
+        #endif
     }
     
     /// Approaching restriction pattern (1km - 3km)
@@ -125,7 +145,9 @@ class HapticFeedbackManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             self.lightImpact()
         }
+        #if DEBUG
         print("📳 [Haptic] Approaching restriction pattern")
+        #endif
     }
     
     /// Navigation started pattern
@@ -135,7 +157,9 @@ class HapticFeedbackManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.mediumImpact()
         }
+        #if DEBUG
         print("📳 [Haptic] Navigation started pattern")
+        #endif
     }
     
     /// Navigation ended pattern (arrival)
@@ -145,7 +169,9 @@ class HapticFeedbackManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.success()
         }
+        #if DEBUG
         print("📳 [Haptic] Navigation ended pattern")
+        #endif
     }
     
     /// Rerouting pattern
@@ -155,14 +181,18 @@ class HapticFeedbackManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             self.mediumImpact()
         }
+        #if DEBUG
         print("📳 [Haptic] Rerouting pattern")
+        #endif
     }
     
     // MARK: - Enable/Disable
     
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
+        #if DEBUG
         print("📳 [Haptic] \(enabled ? "Enabled" : "Disabled")")
+        #endif
     }
 }
 

@@ -53,7 +53,9 @@ class TruckLocationManager: NSObject {
         
         authorizationStatus = manager.authorizationStatus
         
+        #if DEBUG
         print("📍 [Location] Manager initialized")
+        #endif
     }
     
     // MARK: - Authorization
@@ -64,13 +66,19 @@ class TruckLocationManager: NSObject {
             manager.requestWhenInUseAuthorization()
             // For background navigation, also request:
             // manager.requestAlwaysAuthorization()
+            #if DEBUG
             print("📍 [Location] Requesting authorization")
+            #endif
             
         case .restricted, .denied:
+            #if DEBUG
             print("⚠️ [Location] Access denied or restricted")
+            #endif
             
         case .authorizedWhenInUse, .authorizedAlways:
+            #if DEBUG
             print("✅ [Location] Already authorized")
+            #endif
             
         @unknown default:
             break
@@ -83,20 +91,26 @@ class TruckLocationManager: NSObject {
         requestAuthorization()
         manager.startUpdatingLocation()
         manager.startUpdatingHeading()
+        #if DEBUG
         print("✅ [Location] Started updating location and heading")
+        #endif
     }
     
     func stopUpdating() {
         manager.stopUpdatingLocation()
         manager.stopUpdatingHeading()
+        #if DEBUG
         print("⏸️ [Location] Stopped updating")
+        #endif
     }
     
     // MARK: - One-time Location
     
     func requestCurrentLocation() {
         manager.requestLocation()
+        #if DEBUG
         print("📍 [Location] Requesting one-time location")
+        #endif
     }
     
     // MARK: - Helpers
@@ -135,8 +149,12 @@ extension TruckLocationManager: CLLocationManagerDelegate {
             
             locationPublisher.send(location)
             
+            #if DEBUG
             print("📍 [Location] Updated: \(location.coordinate.latitude), \(location.coordinate.longitude)")
+            #endif
+            #if DEBUG
             print("   Speed: \(String(format: "%.1f", speedMPH)) mph, Moving: \(isMoving)")
+            #endif
         }
     }
     
@@ -144,13 +162,17 @@ extension TruckLocationManager: CLLocationManagerDelegate {
         Task { @MainActor in
             heading = newHeading
             headingPublisher.send(newHeading)
+            #if DEBUG
             print("🧭 [Location] Heading: \(Int(newHeading.trueHeading))°")
+            #endif
         }
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         Task { @MainActor in
+            #if DEBUG
             print("❌ [Location] Error: \(error.localizedDescription)")
+            #endif
         }
     }
     
@@ -160,16 +182,26 @@ extension TruckLocationManager: CLLocationManagerDelegate {
             
             switch authorizationStatus {
             case .notDetermined:
+                #if DEBUG
                 print("📍 [Location] Authorization not determined")
+                #endif
             case .restricted:
+                #if DEBUG
                 print("⚠️ [Location] Authorization restricted")
+                #endif
             case .denied:
+                #if DEBUG
                 print("❌ [Location] Authorization denied")
+                #endif
             case .authorizedWhenInUse:
+                #if DEBUG
                 print("✅ [Location] Authorized when in use")
+                #endif
                 startUpdating()
             case .authorizedAlways:
+                #if DEBUG
                 print("✅ [Location] Authorized always")
+                #endif
                 startUpdating()
             @unknown default:
                 break
@@ -201,13 +233,17 @@ extension TruckLocationManager {
                 self.updateMovingStatus()
                 self.locationPublisher.send(location)
                 
+                #if DEBUG
                 print("🎮 [Simulation] Location: \(coord.latitude), \(coord.longitude)")
+                #endif
             }
             
             index += 1
         }
         
+        #if DEBUG
         print("🎮 [Simulation] Started route simulation")
+        #endif
     }
 }
 

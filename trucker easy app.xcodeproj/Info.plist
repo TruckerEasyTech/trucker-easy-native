@@ -4,12 +4,6 @@
 <dict>
 	<key>AgoraAppID</key>
 	<string>$(AgoraAppID)</string>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
-	<key>CFBundleDisplayName</key>
-	<string>Trucker Easy</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
@@ -17,8 +11,6 @@
 		<string>pt-BR</string>
 		<string>fr-CA</string>
 	</array>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -32,8 +24,8 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleVersion</key>
-	<string>1</string>
+	<key>DoctorsHeroAPIKey</key>
+	<string>$(DoctorsHeroAPIKey)</string>
 	<key>ELDProviderAPIKey</key>
 	<string>$(ELDProviderAPIKey)</string>
 	<key>ELDProviderBaseURL</key>
@@ -44,10 +36,10 @@
 	<string>$(JurisdictionPolicyAPIBaseURL)</string>
 	<key>JurisdictionPolicyAPIKey</key>
 	<string>$(JurisdictionPolicyAPIKey)</string>
-	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.navigation</string>
 	<key>MBXAccessToken</key>
 	<string>$(MBXAccessToken)</string>
+	<key>NewsAPIKey</key>
+	<string>$(NewsAPIKey)</string>
 	<key>MKDirectionsApplicationSupportedModes</key>
 	<array>
 		<string>MKDirectionsModeTruck</string>
@@ -58,6 +50,13 @@
 		<false/>
 		<key>NSExceptionDomains</key>
 		<dict>
+			<key>newsapi.org</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+			</dict>
 			<key>router.hereapi.com</key>
 			<dict>
 				<key>NSIncludesSubdomains</key>
@@ -65,7 +64,14 @@
 				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
 				<false/>
 			</dict>
-			<key>newsapi.org</key>
+			<key>lotus.ai</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<false/>
+			</dict>
+			<key>api.lotus.ai</key>
 			<dict>
 				<key>NSIncludesSubdomains</key>
 				<true/>
@@ -74,20 +80,14 @@
 			</dict>
 		</dict>
 	</dict>
-	<key>NSCameraUsageDescription</key>
-	<string>Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Trucker Easy needs your location for truck navigation and real-time community alerts on the road.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Trucker Easy needs photo access to upload document images to your secure digital vault.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.</string>
 	<key>OBD2BLEDeviceName</key>
 	<string>$(OBD2BLEDeviceName)</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.</string>
+	<key>OSRMServerURL</key>
+	<string>$(OSRM_SERVER_URL)</string>
 	<key>OpenRouterAPIKey</key>
 	<string>$(OpenRouterAPIKey)</string>
 	<key>OpenWeatherMapAPIKey</key>
@@ -98,12 +98,14 @@
 	<string>$(OperationalFeedAPIKey)</string>
 	<key>OperationalFeedProviderURLs</key>
 	<string>$(OperationalFeedProviderURLs)</string>
-	<key>OSRMServerURL</key>
-	<string>$(OSRM_SERVER_URL)</string>
+	<key>RouteOptimizationAPIBaseURL</key>
+	<string>$(ROUTE_OPTIMIZATION_API_BASE_URL)</string>
+	<key>RouteOptimizationAPIKey</key>
+	<string>$(ROUTE_OPTIMIZATION_API_KEY)</string>
 	<key>SupabaseAnonKey</key>
-	<string>$(SupabaseAnonKey)</string>
+	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>SupabaseURL</key>
-	<string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+	<string>$(SUPABASE_URL)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
@@ -112,20 +114,18 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>
-		<key>UIImageName</key>
-		<string>LaunchIcon</string>
 		<key>UIColorName</key>
 		<string>LaunchScreenBackground</string>
 	</dict>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UIUserInterfaceStyle</key>
-	<string>Automatic</string>
 	<key>ValhallaServerURL</key>
 	<string>$(VALHALLA_SERVER_URL)</string>
+	<key>ValhallaServerURLs</key>
+	<string>$(VALHALLA_SERVER_URLS)</string>
+	<key>AppStoreURL</key>
+	<string>$(APP_STORE_URL)</string>
+	<key>TestFlightURL</key>
+	<string>$(TESTFLIGHT_URL)</string>
+	<key>LotusCortexWebBaseURL</key>
+	<string>$(LOTUS_CORTEX_WEB_BASE_URL)</string>
 </dict>
 </plist>

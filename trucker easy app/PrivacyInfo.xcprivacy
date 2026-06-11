@@ -14,8 +14,8 @@
 
     <!-- ============================================================ -->
     <!-- REQUIRED API REASONS                                         -->
-    <!-- Declared for APIs used by app code and embedded SDKs         -->
-    <!-- (Agora RTC, Mapbox, Supabase)                                -->
+    <!-- Declared for APIs used by app code / linked SDKs (Mapbox).   -->
+    <!-- Agora RTC is optional (#if canImport); not linked in Podfile. -->
     <!-- ============================================================ -->
     <key>NSPrivacyAccessedAPITypes</key>
     <array>
@@ -30,7 +30,7 @@
             </array>
         </dict>
 
-        <!-- File timestamps: used by Mapbox and Agora for cache mgmt -->
+        <!-- File timestamps: used by Mapbox (tile/cache metadata) -->
         <dict>
             <key>NSPrivacyAccessedAPIType</key>
             <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
@@ -40,17 +40,7 @@
             </array>
         </dict>
 
-        <!-- System boot time: used by Agora RTC for audio timing -->
-        <dict>
-            <key>NSPrivacyAccessedAPIType</key>
-            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
-            <key>NSPrivacyAccessedAPITypeReasons</key>
-            <array>
-                <string>35F9.1</string>
-            </array>
-        </dict>
-
-        <!-- Disk space: used by Agora and Mapbox tile cache -->
+        <!-- Disk space: used by Mapbox tile cache -->
         <dict>
             <key>NSPrivacyAccessedAPIType</key>
             <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
@@ -110,7 +100,7 @@
             </array>
         </dict>
 
-        <!-- Audio: PTT voice transmission via Agora RTC -->
+        <!-- Audio: microphone / voice (PTT when RTC is integrated; voice assistant) -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypeAudioData</string>

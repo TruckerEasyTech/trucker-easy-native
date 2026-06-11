@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Sistema de Roteamento para Caminhões - Versão Inicial'
+
+Parameters:
+  ValhallaPrimaryEndpoint:
+    Type: String
+    Default: "https://valhalla.yourdomain.com"
+    Description: "URL do seu servidor Valhalla"
+
+Resources:
+  # Amazon Location Service - Calculadora de Rotas
+  TruckRouteCalculator:
+    Type: AWS::Location::RouteCalculator
+    Properties:
+      CalculatorName: !Sub "${AWS::StackName}-truck-calculator"
+      DataSource: "Here"
+      Description: "Calculadora de rotas otimizada para caminhões"
+      Tags:
+        - Key: "Environment"
+          Value: "Production"
+        - Key: "Service"
+          Value: "TruckRouting"
+
+  # Função Lambda para Roteamento Híbrido
+  TruckRoutingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-truck-routing"
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt TruckRoutingRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          ROUTE_CALCULATOR_NAME: !Ref TruckRouteCalculator
+          VALHALLA_PRIMARY: !Ref ValhallaPrimaryEndpoint
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*'
+                  },
+                  'body': json.dumps({
+                      'message': 'Sistema de roteamento para caminhões funcionando!',
+                      'calculator': os.environ.get('ROUTE_CALCULATOR_NAME'),
+                      'valhalla': os.environ.get('VALHALLA_PRIMARY')
+                  })
+              }
+
+  # Role IAM para a Lambda
+  TruckRoutingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LocationServiceAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - geo:CalculateRoute
+                  - geo:GetPlace
+                Resource: !GetAtt TruckRouteCalculator.Arn
+
+Outputs:
+  RouteCalculatorName:
+    Description: "Nome da calculadora de rotas criada"
+    Value: !Ref TruckRouteCalculator
+    Export:
+      Name: !Sub "${AWS::StackName}-calculator-name"
+
+  LambdaFunctionName:
+    Description: "Nome da função Lambda criada"
+    Value: !Ref TruckRoutingFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-lambda-name"

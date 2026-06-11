@@ -1,4 +1,4 @@
-// © 2024–2025 TruckerEasy LLC. All rights reserved.
+// © 2024–2026 TruckerEasy LLC. All rights reserved.
 // Proprietary and confidential. Unauthorized reproduction or distribution
 // of this file or any portion thereof is strictly prohibited.
 
@@ -537,7 +537,7 @@ private struct OnboardingFeatureRow: View {
 }
 
 // MARK: - Privacy Policy View
-// © 2024–2025 TruckerEasy LLC — All rights reserved.
+// © 2024–2026 TruckerEasy LLC — All rights reserved.
 
 struct PrivacyPolicyView: View {
     @Environment(\.dismiss) private var dismiss
@@ -554,7 +554,7 @@ struct PrivacyPolicyView: View {
                             Text("Privacy Policy")
                                 .font(.system(size: 26, weight: .black, design: .rounded))
                                 .foregroundColor(.white)
-                            Text("TruckerEasy LLC · Effective: January 1, 2025")
+                            Text("TruckerEasy LLC · Effective: January 1, 2026")
                                 .font(.system(size: 12))
                                 .foregroundColor(Color(hex: "#a8adbc"))
                         }
@@ -594,7 +594,7 @@ struct PrivacyPolicyView: View {
                         privacySection("4. Third-Party Services",
                         """
                         TruckerEasy uses:
-                        • Apple MapKit / HERE SDK — for navigation (subject to Apple/HERE privacy policies)
+                        • Apple MapKit — for navigation (subject to Apple privacy policies)
                         • Apple HealthKit — for wellness features (opt-in only)
                         • Apple Push Notifications — for dispatch and reminders
 
@@ -617,7 +617,7 @@ struct PrivacyPolicyView: View {
 
                         privacySection("7. Copyright & Intellectual Property",
                         """
-                        © 2024–2025 TruckerEasy LLC. All rights reserved.
+                        © 2024–2026 TruckerEasy LLC. All rights reserved.
 
                         The TruckerEasy application, its source code, design, graphics, trademarks, trade dress and all content are the exclusive intellectual property of TruckerEasy LLC.
 
@@ -688,7 +688,7 @@ struct TermsOfServiceView: View {
                             Text("Terms of Service")
                                 .font(.system(size: 26, weight: .black, design: .rounded))
                                 .foregroundColor(.white)
-                            Text("TruckerEasy LLC · Effective: January 1, 2025")
+                            Text("TruckerEasy LLC · Effective: January 1, 2026")
                                 .font(.system(size: 12))
                                 .foregroundColor(Color(hex: "#a8adbc"))
                         }
@@ -721,7 +721,7 @@ struct TermsOfServiceView: View {
 
                         termsSection("4. Intellectual Property",
                         """
-                        © 2024–2025 TruckerEasy LLC. All rights reserved.
+                        © 2024–2026 TruckerEasy LLC. All rights reserved.
 
                         All content, code, design, graphics and trademarks are the exclusive property of TruckerEasy LLC. Unauthorized use is strictly prohibited.
                         """)

@@ -123,7 +123,9 @@ public final class VoiceInputService {
       let byteSize = buffer.audioBufferList.pointee.mBuffers.mDataByteSize
       guard byteSize > 0 else {
         // #region agent log
+        #if DEBUG
         print("[DBG][VOICE][H-audio-2] skip empty AVAudioBuffer byteSize=0")
+        #endif
         // #endregion
         return
       }
@@ -131,7 +133,9 @@ public final class VoiceInputService {
     }
     isAudioTapInstalled = true
     // #region agent log
+    #if DEBUG
     print("[DBG][VOICE][H-v1] installTap success")
+    #endif
     // #endregion
     
     do {
@@ -182,7 +186,9 @@ public final class VoiceInputService {
       audioEngine.inputNode.removeTap(onBus: 0)
       isAudioTapInstalled = false
       // #region agent log
+      #if DEBUG
       print("[DBG][VOICE][H-v1] removeTap success on stop")
+      #endif
       // #endregion
     }
     
@@ -218,7 +224,9 @@ public final class VoiceInputService {
       audioEngine.inputNode.removeTap(onBus: 0)
       isAudioTapInstalled = false
       // #region agent log
+      #if DEBUG
       print("[DBG][VOICE][H-v1] removeTap success on cleanup")
+      #endif
       // #endregion
     }
     recognitionRequest?.endAudio()

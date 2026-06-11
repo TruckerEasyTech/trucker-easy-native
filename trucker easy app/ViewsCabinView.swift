@@ -174,6 +174,34 @@ struct CabinView: View {
                         })
                         .padding(.horizontal, AppTheme.Spacing.md)
 
+                        // MARK: IFTA Fuel Tax
+                        NavigationLink {
+                            IFTAView()
+                                .preferredColorScheme(.dark)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "fuelpump.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(AppTheme.Colors.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("IFTA Fuel Tax")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text("Quarterly reports & state mileage")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(AppTheme.Colors.textSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(AppTheme.Colors.textSecondary)
+                            }
+                            .padding(AppTheme.Spacing.md)
+                            .background(AppTheme.Colors.backgroundCard)
+                            .cornerRadius(AppTheme.Radius.md)
+                        }
+                        .padding(.horizontal, AppTheme.Spacing.md)
+
                         // MARK: Tools Section — Truck Signs
                         TruckSignsShortcutCard()
                             .padding(.horizontal, AppTheme.Spacing.md)

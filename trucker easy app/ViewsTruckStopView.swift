@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import UIKit
 
 // MARK: - Truck Stop Network Detection
 
@@ -80,6 +81,20 @@ enum TruckStopNetwork: String, CaseIterable {
         if lower.contains("road ranger") { return .roadsRangers }
         if lower.contains("kwik trip") || lower.contains("kwiktrip") { return .kwikTrip }
         return .independent
+    }
+
+    /// Maps ingest script `network` slug → UI brand.
+    static func from(databaseNetwork: String?, name: String, brand: String?) -> TruckStopNetwork {
+        switch databaseNetwork?.lowercased() {
+        case "pilot": return .pilotFlyingJ
+        case "loves": return .loves
+        case "ta", "petro": return .taPetro
+        case "sapp": return .sappBros
+        default:
+            break
+        }
+        let label = [name, brand].compactMap { $0 }.joined(separator: " ")
+        return detect(from: label.isEmpty ? (brand ?? name) : label)
     }
 }
 
@@ -171,15 +186,40 @@ struct TruckStopAmenities {
 // MARK: - Enriched Truck Stop Item
 
 struct TruckStopItem: Identifiable {
-    let id = UUID()
+    let id: UUID
     let name: String
     let address: String
     let coordinate: CLLocationCoordinate2D
     let distanceMeters: Double
     let phone: String?
     let network: TruckStopNetwork
+    let dataSource: PoiPlacesDataSource
     var amenities: TruckStopAmenities
     var crowdsourceReports: [CrowdsourceReport] = []
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        address: String,
+        coordinate: CLLocationCoordinate2D,
+        distanceMeters: Double,
+        phone: String? = nil,
+        network: TruckStopNetwork,
+        dataSource: PoiPlacesDataSource = .mapKit,
+        amenities: TruckStopAmenities,
+        crowdsourceReports: [CrowdsourceReport] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.address = address
+        self.coordinate = coordinate
+        self.distanceMeters = distanceMeters
+        self.phone = phone
+        self.network = network
+        self.dataSource = dataSource
+        self.amenities = amenities
+        self.crowdsourceReports = crowdsourceReports
+    }
 
     var distanceText: String {
         if distanceMeters < 1609 {
@@ -195,14 +235,17 @@ struct TruckStopItem: Identifiable {
         return stopMiles <= maxMiles
     }
 
-    /// Posto / travel plaza — sugestão alimentar só quando parado neste tipo de paragem.
+    /// Posto / travel plaza — sugestão alimentar só quando parado neste tipo de parada.
     var qualifiesAsFuelStopForFood: Bool {
         if amenities.dieselPrice != nil { return true }
+        if amenities.showerCount != nil && (amenities.showerCount ?? 0) > 0 { return true }
         if network != .independent { return true }
         let n = name.lowercased()
         return n.contains("fuel") || n.contains("diesel") || n.contains("travel")
             || n.contains("truck") || n.contains("pilot") || n.contains("loves")
-            || n.contains("ta ") || n.contains("petro") || n.contains("flying j")
+            || n.contains("love's") || n.contains("ta ") || n.contains("petro")
+            || n.contains("flying j") || n.contains("petro") || n.contains("kwik trip")
+            || n.contains("road ranger") || n.contains("sapp")
     }
 
     /// Wellness score 0-100 based on food quality + shower + parking availability
@@ -264,7 +307,7 @@ struct CrowdsourceReport: Identifiable {
     }
 }
 
-private extension CrowdsourceReport.ReportType {
+extension CrowdsourceReport.ReportType {
     var backendKey: String {
         switch self {
         case .dieselPriceWrong: return "dieselPriceWrong"
@@ -335,13 +378,160 @@ final class TruckStopService {
 
     var nearbyStops: [TruckStopItem] = []
     var isLoading = false
+    /// Where the last successful `searchNearby` loaded POIs from.
+    private(set) var lastDataSource: PoiPlacesDataSource = .mapKit
     var hos = HOSState.mock
+
+    private var lastSearchAt: Date = .distantPast
+    private var lastSearchLocation: CLLocation?
 
     private init() {}
 
-    func searchNearby(location: CLLocation, radiusMeters: Double = 80467) async { // 50mi
-        isLoading = true
+    /// Collapse duplicate OSM ingest rows (same lat/lon/network) — keeps richest amenity row.
+    private static func dedupePlacesRows(_ rows: [PlacesNearRow]) -> [PlacesNearRow] {
+        var bestByKey: [String: PlacesNearRow] = [:]
+        for row in rows {
+            let latKey = Int((row.lat * 10_000).rounded())
+            let lonKey = Int((row.lon * 10_000).rounded())
+            let net = (row.network ?? row.brand ?? row.poi_type).lowercased()
+            let key = "\(latKey):\(lonKey):\(net)"
+            if let existing = bestByKey[key] {
+                if placesRowRichness(row) > placesRowRichness(existing) {
+                    bestByKey[key] = row
+                }
+            } else {
+                bestByKey[key] = row
+            }
+        }
+        return bestByKey.values.sorted {
+            ($0.distance_m ?? .greatestFiniteMagnitude) < ($1.distance_m ?? .greatestFiniteMagnitude)
+        }
+    }
 
+    private static func placesRowRichness(_ row: PlacesNearRow) -> Int {
+        var score = 0
+        if row.diesel_price_usd != nil { score += 12 }
+        if row.poi_type == "truck_stop" { score += 8 }
+        if row.gov_parking_available != nil || row.parking_available != nil { score += 6 }
+        if row.gov_weigh_status != nil { score += 4 }
+        if row.has_shower { score += 2 }
+        if row.rating != nil { score += 1 }
+        return score
+    }
+
+    /// Map pins: smaller radius + fewer types so `places_near` stays under Supabase statement timeout.
+    func searchNearby(
+        location: CLLocation,
+        radiusMeters: Double = 40_233,
+        limit: Int = 30
+    ) async {
+        let now = Date()
+        if let prev = lastSearchLocation,
+           location.distance(from: prev) < 400,
+           now.timeIntervalSince(lastSearchAt) < 20 {
+            return
+        }
+        lastSearchLocation = location
+        lastSearchAt = now
+
+        isLoading = true
+        defer { isLoading = false }
+
+        if SupabaseConfig.isConfigured {
+            do {
+                let rows = try await PoiPlacesService.shared.fetchPlacesNear(
+                    location: location,
+                    radiusMeters: radiusMeters,
+                    poiTypes: ["truck_stop", "fuel", "weigh_station", "rest_area"],
+                    limit: limit
+                )
+                if !rows.isEmpty {
+                    let deduped = Self.dedupePlacesRows(rows)
+                    nearbyStops = deduped.map { item(from: $0, origin: location) }
+                    lastDataSource = .supabase
+                    return
+                }
+            } catch {
+                #if DEBUG
+                print("[TruckStop] Supabase places_near failed, MapKit fallback: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        await searchNearbyMapKit(location: location, radiusMeters: radiusMeters)
+        lastDataSource = .mapKit
+    }
+
+    private func item(from row: PlacesNearRow, origin: CLLocation) -> TruckStopItem {
+        let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
+        let dist = row.distance_m ?? origin.distance(from: CLLocation(latitude: row.lat, longitude: row.lon))
+        let displayName = row.name ?? row.brand ?? row.poi_type.replacingOccurrences(of: "_", with: " ").capitalized
+        let network = TruckStopNetwork.from(databaseNetwork: row.network, name: displayName, brand: row.brand)
+        var amenities = amenitiesFromOsmRow(row, network: network)
+        if let diesel = row.diesel_price_usd {
+            amenities.dieselPrice = diesel
+            amenities.dieselUpdatedAt = row.diesel_scraped_at.flatMap { ISO8601DateFormatter().date(from: $0) }
+        }
+        let address = [row.brand, row.operator_name, row.country_code]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+
+        return TruckStopItem(
+            id: row.id,
+            name: displayName,
+            address: address.isEmpty ? displayName : address,
+            coordinate: coord,
+            distanceMeters: dist,
+            phone: nil,
+            network: network,
+            dataSource: .supabase,
+            amenities: amenities
+        )
+    }
+
+    private func amenitiesFromOsmRow(_ row: PlacesNearRow, network: TruckStopNetwork) -> TruckStopAmenities {
+        let foodLikely = row.poi_type == "truck_stop" || row.poi_type == "services" || row.has_hgv_fuel
+        let parkingTotal = row.gov_parking_total ?? row.parking_total
+        let parkingAvailable: Int? = {
+            if let gov = row.gov_parking_available { return gov }
+            if let reported = row.parking_available { return reported }
+            switch row.parking_status?.lowercased() {
+            case "many": return parkingTotal.map { max(1, Int(Double($0) * 0.65)) }
+            case "some": return parkingTotal.map { max(1, Int(Double($0) * 0.20)) }
+            case "full": return 0
+            default: return nil
+            }
+        }()
+        return TruckStopAmenities(
+            rating: row.rating,
+            reviewCount: row.review_count,
+            parkingSlots: parkingTotal,
+            parkingAvailable: parkingAvailable,
+            hasReservableParking: false,
+            parkingUpdatedAt: row.parking_reported_at.flatMap { ISO8601DateFormatter().date(from: $0) },
+            showerCount: row.has_shower ? 1 : nil,
+            showerWaitMinutes: nil,
+            hasLaundry: false,
+            hasLounge: row.poi_type == "truck_stop",
+            hasWifi: false,
+            foodType: (row.has_healthy_options ?? false) ? .freshDeli : (foodLikely ? .fastFood : .none),
+            hasHealthyOptions: row.has_healthy_options ?? false,
+            restaurantNames: row.restaurant_names ?? [],
+            hasCATScale: row.has_weigh_station || row.poi_type == "weigh_station",
+            hasTireService: network == .loves,
+            hasMechanic: row.poi_type == "services",
+            hasDEF: row.has_hgv_fuel,
+            defPrice: nil,
+            defUpdatedAt: nil,
+            dieselPrice: nil,
+            dieselUpdatedAt: nil,
+            acceptsTruckCard: row.has_hgv_fuel
+        )
+    }
+
+    /// MapKit fallback when Supabase is empty or unavailable.
+    private func searchNearbyMapKit(location: CLLocation, radiusMeters: Double) async {
         // Multi-query strategy: cover all major truck-stop brand names and generic terms.
         // Parallel searches then de-duplicate, giving significantly better coverage than
         // a single generic query.
@@ -379,20 +569,27 @@ final class TruckStopService {
         // De-duplicate by proximity (< 300m apart = same stop)
         var deduped: [MKMapItem] = []
         for item in allItems {
-            let loc = item.location
-            let isDup = deduped.contains { $0.location.distance(from: loc) < 300 }
+            let loc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
+            let isDup = deduped.contains {
+                let dedupLoc = CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)
+                return dedupLoc.distance(from: loc) < 300
+            }
             if !isDup { deduped.append(item) }
         }
 
         // Filter to stops within the search radius and convert
-        let results = deduped.filter { location.distance(from: $0.location) <= radiusMeters }
+        let results = deduped.filter {
+            let stopLoc = CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)
+            return location.distance(from: stopLoc) <= radiusMeters
+        }
 
         nearbyStops = results.prefix(20).compactMap { item -> TruckStopItem? in
-            let loc = item.location
+            let loc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
             let dist = location.distance(from: loc)
             let name = item.name ?? "Truck Stop"
             let network = TruckStopNetwork.detect(from: name)
-            let addr = item.address?.fullAddress ?? ""
+            let addrParts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea].compactMap { $0 }
+            let addr = addrParts.isEmpty ? (item.placemark.title ?? "") : addrParts.joined(separator: ", ")
 
             // Real-data baseline: only infer fields available from map metadata / crowdsource.
             let amenities = amenitiesFromMapItem(item, network: network)
@@ -408,8 +605,6 @@ final class TruckStopService {
             )
         }
         .sorted { $0.distanceMeters < $1.distanceMeters }
-
-        isLoading = false
     }
 
     /// Stops reachable given current HOS
@@ -1569,7 +1764,9 @@ struct TruckStopDetailSheet: View {
                 )
             }
         } catch {
+            #if DEBUG
             print("TruckStopDetailSheet: failed to load remote reports — \(error.localizedDescription)")
+            #endif
         }
     }
 
@@ -1585,7 +1782,9 @@ struct TruckStopDetailSheet: View {
             try await SupabaseClient.shared.submitRoadReport(payload)
             await loadRemoteReports()
         } catch {
+            #if DEBUG
             print("TruckStopDetailSheet: failed to sync truck stop report — \(error.localizedDescription)")
+            #endif
         }
     }
 }
@@ -1825,56 +2024,83 @@ struct HOSSettingsSheet: View {
 // MARK: - Scale Alert Banner (shown on map overlay when weigh station is ahead)
 
 struct ScaleAlertBanner: View {
-    enum ScaleStatus { case open, closed, unknown }
+    enum ScaleStatus { case open, closed, monitoring, unknown }
 
     let stationName: String
     let distanceMiles: Double
     let status: ScaleStatus
     let lang: AppLanguage
     let onDismiss: () -> Void
+    var provenance: WeighStationStatusProvenance = .locationOnly
+    var communityHint: WeighStationStatus? = nil
+    var onReport: ((WeighStationStatus) -> Void)? = nil
+    var onMoreDetails: (() -> Void)? = nil
 
     @State private var pulse = false
+    @State private var reportAcknowledged = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Pulsing icon
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(pulse ? 0.35 : 0.15))
-                    .frame(width: 40, height: 40)
-                    .animation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true), value: pulse)
-                Image(systemName: "scalemass.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(statusColor)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                // Distance + name — always in English (road safety)
-                HStack(spacing: 5) {
-                    Text(String(format: "%.1f mi", distanceMiles))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(AppTheme.Colors.textSecondary)
-                    Text("—")
-                        .foregroundColor(AppTheme.Colors.textSecondary)
-                        .font(.system(size: 11))
-                    Text(stationName)
-                        .font(.system(size: 11))
-                        .foregroundColor(AppTheme.Colors.textSecondary)
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(statusColor.opacity(pulse ? 0.35 : 0.15))
+                        .frame(width: 40, height: 40)
+                        .animation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true), value: pulse)
+                    Image(systemName: "scalemass.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(statusColor)
                 }
 
-                // Status in chosen language
-                Text(statusLabel)
-                    .font(.system(size: 15, weight: .black))
-                    .foregroundColor(statusColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(String(format: "%.1f mi", distanceMiles))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(AppTheme.Colors.textSecondary)
+                        Text("—")
+                            .foregroundColor(AppTheme.Colors.textSecondary)
+                            .font(.system(size: 11))
+                        Text(stationName)
+                            .font(.system(size: 11))
+                            .foregroundColor(AppTheme.Colors.textSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Text(statusLabel)
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundColor(statusColor)
+
+                    Text(provenanceSubtitle)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(provenanceColor)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                }
             }
 
-            Spacer()
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(AppTheme.Colors.textSecondary)
+            if onReport != nil {
+                scaleReportRow
+                if onMoreDetails != nil {
+                    Button(action: { onMoreDetails?() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(lang.scaleMoreDetailsLabel)
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -1889,19 +2115,123 @@ struct ScaleAlertBanner: View {
         .onAppear { pulse = true }
     }
 
+    @ViewBuilder
+    private var scaleReportRow: some View {
+        if reportAcknowledged {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(AppTheme.Colors.success)
+                Text(lang.scaleReportThanksLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(AppTheme.Colors.success)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 4)
+        } else {
+            Text(lang.scaleReportPromptLabel)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(AppTheme.Colors.textSecondary)
+                .tracking(0.4)
+
+            HStack(spacing: 8) {
+                scaleReportButton(.closed)
+                scaleReportButton(.open)
+                scaleReportButton(.monitoring)
+            }
+        }
+    }
+
+    private func scaleReportButton(_ weighStatus: WeighStationStatus) -> some View {
+        Button {
+            onReport?(weighStatus)
+            reportAcknowledged = true
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: weighStatus.icon)
+                    .font(.system(size: 16, weight: .bold))
+                Text(reportButtonLabel(for: weighStatus))
+                    .font(.system(size: 10, weight: .black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundColor(weighStatus.color)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(weighStatus.color.opacity(0.12))
+            .cornerRadius(AppTheme.Radius.sm)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                    .stroke(weighStatus.color.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func reportButtonLabel(for weighStatus: WeighStationStatus) -> String {
+        switch weighStatus {
+        case .open:
+            return lang.scaleOpenLabel.split(separator: " ").last.map(String.init) ?? "OPEN"
+        case .closed:
+            return lang.scaleClosedLabel.split(separator: " ").last.map(String.init) ?? "CLOSED"
+        case .monitoring:
+            return lang.scaleMonitoringLabel.split(separator: " ").last.map(String.init) ?? "MONITOR"
+        }
+    }
+
     private var statusColor: Color {
-        switch status {
-        case .open:    return AppTheme.Colors.danger    // open = trucks must stop
-        case .closed:  return AppTheme.Colors.success   // closed = bypass
-        case .unknown: return AppTheme.Colors.warning
+        switch provenance {
+        case .official:
+            switch status {
+            case .open:       return AppTheme.Colors.danger
+            case .closed:     return AppTheme.Colors.success
+            case .monitoring: return AppTheme.Colors.warning
+            case .unknown:    return AppTheme.Colors.warning
+            }
+        case .community, .locationOnly:
+            return AppTheme.Colors.warning
         }
     }
 
     private var statusLabel: String {
-        switch status {
-        case .open:    return lang.scaleOpenLabel
-        case .closed:  return lang.scaleClosedLabel
-        case .unknown: return lang.scaleAheadLabel
+        switch provenance {
+        case .official:
+            switch status {
+            case .open:       return lang.scaleOpenLabel
+            case .closed:     return lang.scaleClosedLabel
+            case .monitoring: return lang.scaleMonitoringLabel
+            case .unknown:    return lang.scaleAheadLabel
+            }
+        case .community, .locationOnly:
+            return lang.scaleStatusUnconfirmedLabel
+        }
+    }
+
+    private var provenanceSubtitle: String {
+        switch provenance {
+        case .official(let source):
+            return "\(lang.scaleOfficialSourceLabel) · \(source)"
+        case .community:
+            if let hint = communityHint {
+                let word: String
+                switch hint {
+                case .open: word = lang.scaleOpenLabel.split(separator: " ").last.map(String.init) ?? "OPEN"
+                case .closed: word = lang.scaleClosedLabel.split(separator: " ").last.map(String.init) ?? "CLOSED"
+                case .monitoring: word = lang.scaleMonitoringLabel.split(separator: " ").last.map(String.init) ?? "MONITOR"
+                }
+                return "\(lang.scaleCommunityAdvisoryLabel) · \(word)"
+            }
+            return lang.scaleCommunityAdvisoryLabel
+        case .locationOnly:
+            return lang.scaleLocationOnlyHintLabel
+        }
+    }
+
+    private var provenanceColor: Color {
+        switch provenance {
+        case .official: return AppTheme.Colors.success
+        case .community: return Color(hex: "#f59e0b")
+        case .locationOnly: return AppTheme.Colors.textSecondary
         }
     }
 }
@@ -2199,14 +2529,15 @@ struct StopReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let stop: TruckStopItem
-    let onSubmit: (StopReview) -> Void
+    let onSubmit: (StopReview) async throws -> Void
 
     @State private var serviceRating: Int = 0
     @State private var showerRating: Int = 0
-    @State private var overallRating: Int = 0
-    @State private var restaurantInput: String = ""
+    @State private var foodRating: Int = 0
     @State private var notes: String = ""
     @State private var submitted = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -2254,74 +2585,26 @@ struct StopReviewSheet: View {
                         ReviewRatingRow(
                             icon: "shower.fill",
                             color: Color(hex: "#6366f1"),
-                            title: "Banheiros / Showers",
-                            subtitle: "How clean were the showers?",
+                            title: "Banheiro / Shower",
+                            subtitle: "Clean and available?",
                             rating: $showerRating
                         )
                         .padding(.horizontal, AppTheme.Spacing.md)
 
-                        // Overall
                         ReviewRatingRow(
-                            icon: "star.fill",
+                            icon: "fork.knife",
                             color: Color(hex: "#f59e0b"),
-                            title: "Geral / Overall",
-                            subtitle: "How was the stop overall?",
-                            rating: $overallRating
+                            title: "Comida",
+                            subtitle: "Food quality and options?",
+                            rating: $foodRating
                         )
                         .padding(.horizontal, AppTheme.Spacing.md)
 
-                        Divider().background(AppTheme.Colors.backgroundCard)
-
-                        // Restaurants
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Restaurantes / Food", systemImage: "fork.knife")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-                            Text("Which restaurants are here?")
-                                .font(.system(size: 11))
-                                .foregroundColor(AppTheme.Colors.textSecondary)
-
-                            // Quick-tap common names
-                            let common = ["Denny's", "Subway", "Arby's", "McDonald's", "Pizza Hut", "Taco Bell", "Cinnabon", "Popeyes"]
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                ForEach(common, id: \.self) { name in
-                                    let selected = restaurantInput.contains(name)
-                                    Button(action: {
-                                        if selected {
-                                            restaurantInput = restaurantInput
-                                                .replacingOccurrences(of: name + ", ", with: "")
-                                                .replacingOccurrences(of: ", " + name, with: "")
-                                                .replacingOccurrences(of: name, with: "")
-                                        } else {
-                                            restaurantInput = restaurantInput.isEmpty ? name : restaurantInput + ", " + name
-                                        }
-                                    }) {
-                                        Text(name)
-                                            .font(.system(size: 12, weight: .semibold))
-                                            .foregroundColor(selected ? .white : AppTheme.Colors.textSecondary)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                            .background(selected ? Color(hex: "#f59e0b").opacity(0.8) : AppTheme.Colors.backgroundCard)
-                                            .cornerRadius(8)
-                                    }
-                                }
-                            }
-
-                            TextField("Other restaurants...", text: $restaurantInput)
-                                .font(.system(size: 13))
-                                .foregroundColor(.white)
-                                .padding(10)
-                                .background(AppTheme.Colors.backgroundInput)
-                                .cornerRadius(AppTheme.Radius.sm)
-                        }
-                        .padding(.horizontal, AppTheme.Spacing.md)
-
-                        // Notes
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Notes / Observações", systemImage: "pencil")
+                            Label("Observações (opcional)", systemImage: "pencil")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(.white)
-                            TextField("Anything else drivers should know?", text: $notes, axis: .vertical)
+                            TextField("Algo que outros motoristas devem saber...", text: $notes, axis: .vertical)
                                 .font(.system(size: 13))
                                 .foregroundColor(.white)
                                 .lineLimit(3, reservesSpace: true)
@@ -2331,9 +2614,9 @@ struct StopReviewSheet: View {
                         }
                         .padding(.horizontal, AppTheme.Spacing.md)
 
-                        // Submit
                         Button(action: submit) {
                             HStack(spacing: 10) {
+                                if isSubmitting { ProgressView().tint(.white) }
                                 Image(systemName: submitted ? "checkmark.circle.fill" : "paperplane.fill")
                                 Text(submitted ? "Enviado!" : "Submit Review")
                                     .font(.system(size: 17, weight: .bold))
@@ -2344,9 +2627,18 @@ struct StopReviewSheet: View {
                             .background(submitted ? AppTheme.Colors.success : AppTheme.Colors.accent)
                             .cornerRadius(AppTheme.Radius.md)
                         }
-                        .disabled(submitted || (serviceRating == 0 && showerRating == 0 && overallRating == 0))
+                        .disabled(isSubmitting || submitted || (serviceRating == 0 && showerRating == 0 && foodRating == 0))
                         .padding(.horizontal, AppTheme.Spacing.md)
-                        .padding(.bottom, AppTheme.Spacing.xl)
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AppTheme.Colors.warning)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, AppTheme.Spacing.md)
+                        }
+
+                        Spacer(minLength: AppTheme.Spacing.xl)
                     }
                 }
             }
@@ -2363,18 +2655,31 @@ struct StopReviewSheet: View {
     }
 
     private func submit() {
+        isSubmitting = true
+        errorMessage = nil
         let review = StopReview(
             stopId: stop.id,
             stopName: stop.name,
             serviceRating: serviceRating,
             showerRating: showerRating,
-            overallRating: overallRating,
-            restaurants: restaurantInput.trimmingCharacters(in: .whitespacesAndNewlines),
+            foodRating: foodRating,
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        onSubmit(review)
-        submitted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismiss() }
+        Task {
+            do {
+                try await onSubmit(review)
+                await MainActor.run {
+                    isSubmitting = false
+                    submitted = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismiss() }
+                }
+            } catch {
+                await MainActor.run {
+                    isSubmitting = false
+                    errorMessage = "Não foi possível enviar. Faça login novamente e tente de novo."
+                }
+            }
+        }
     }
 }
 
@@ -2445,11 +2750,14 @@ enum FacilityReviewType {
 struct FacilityReview {
     let loadNumber: String
     let companyName: String?
+    let companyId: String?
     let type: FacilityReviewType
-    let treatmentRating: Int    // atendimento da empresa (1–5)
-    let safetyRating: Int       // segurança do local (1–5)
-    let accessRating: Int       // facilidade de acesso (1–5)
-    let waitMinutes: Int?       // espera em minutos
+    let coordinate: CLLocationCoordinate2D
+    let treatmentRating: Int
+    let bathroomRating: Int
+    let foodAccessRating: Int
+    let accessRating: Int
+    let waitMinutes: Int?
     let notes: String
     let submittedAt: Date = Date()
 }
@@ -2459,11 +2767,13 @@ struct FacilityReviewSheet: View {
 
     let load: DispatchedLoad
     let type: FacilityReviewType
+    let visitCoordinate: CLLocationCoordinate2D
     let onSubmit: (FacilityReview) -> Void
     let onSkip: () -> Void
 
     @State private var treatmentRating: Int = 0
-    @State private var safetyRating: Int = 0
+    @State private var bathroomRating: Int = 0
+    @State private var foodAccessRating: Int = 0
     @State private var accessRating: Int = 0
     @State private var waitText: String = ""
     @State private var notes: String = ""
@@ -2506,28 +2816,35 @@ struct FacilityReviewSheet: View {
                         ReviewRatingRow(
                             icon: "person.2.fill",
                             color: type.color,
-                            title: "Atendimento da Empresa",
-                            subtitle: "The company treated you well?",
+                            title: "Atendimento",
+                            subtitle: "A empresa tratou você bem?",
                             rating: $treatmentRating
                         )
                         .padding(.horizontal, AppTheme.Spacing.md)
 
-                        // Segurança / Safety
                         ReviewRatingRow(
-                            icon: "shield.fill",
+                            icon: "toilet.fill",
                             color: Color(hex: "#6366f1"),
-                            title: "Segurança do Local",
-                            subtitle: "Was the facility safe?",
-                            rating: $safetyRating
+                            title: "Banheiro",
+                            subtitle: "Tinha banheiro limpo e acessível?",
+                            rating: $bathroomRating
                         )
                         .padding(.horizontal, AppTheme.Spacing.md)
 
-                        // Acesso / Access
+                        ReviewRatingRow(
+                            icon: "cup.and.saucer.fill",
+                            color: Color(hex: "#f59e0b"),
+                            title: "Comida / Lanche",
+                            subtitle: "Indicaram onde comer ou máquina de snacks?",
+                            rating: $foodAccessRating
+                        )
+                        .padding(.horizontal, AppTheme.Spacing.md)
+
                         ReviewRatingRow(
                             icon: "truck.box.badge.clock.fill",
                             color: Color(hex: "#0ea5e9"),
-                            title: "Facilidade de Acesso",
-                            subtitle: "Easy access for your truck?",
+                            title: "Acesso caminhão",
+                            subtitle: "Fácil entrar, carregar e sair?",
                             rating: $accessRating
                         )
                         .padding(.horizontal, AppTheme.Spacing.md)
@@ -2624,12 +2941,16 @@ struct FacilityReviewSheet: View {
     }
 
     private func submit() {
+        guard treatmentRating > 0 || bathroomRating > 0 || foodAccessRating > 0 || accessRating > 0 else { return }
         let review = FacilityReview(
             loadNumber: load.loadNumber,
             companyName: load.companyName,
+            companyId: load.companyId,
             type: type,
+            coordinate: visitCoordinate,
             treatmentRating: treatmentRating,
-            safetyRating: safetyRating,
+            bathroomRating: bathroomRating,
+            foodAccessRating: foodAccessRating,
             accessRating: accessRating,
             waitMinutes: Int(waitText),
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2647,10 +2968,9 @@ struct FacilityReviewSheet: View {
 struct StopReview {
     let stopId: UUID
     let stopName: String
-    let serviceRating: Int      // 0 = not rated, 1-5
+    let serviceRating: Int
     let showerRating: Int
-    let overallRating: Int
-    let restaurants: String
+    let foodRating: Int
     let notes: String
     let submittedAt: Date = Date()
 }

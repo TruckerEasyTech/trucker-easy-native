@@ -88,6 +88,7 @@ struct MainTabView: View {
             MedicationNotificationScheduler.syncAll(medications: medications, modelContext: modelContext)
         }
         .environment(regionalSettings)
+        .environment(\.layoutDirection, regionalSettings.currentLanguage.isRTL ? .rightToLeft : .leftToRight)
         // Compact flag language picker — keep off map tab to prevent overlap with navigation HUD
         .overlay(alignment: .topTrailing) {
             if selectedTab != 0 {
@@ -565,104 +566,72 @@ struct LaunchWellnessCheckIn: View {
 
     @Environment(\.modelContext) private var modelContext
 
-    // Quick feelings (5 options, emoji-based)
-    @State private var selectedMood: Int = 0       // 1–5
+    @State private var selectedMood: Int = 0
     @State private var sleepHours: Double = 7
     @State private var hadBreakfast = false
     @State private var feltRested = false
-    @State private var step = 0   // 0=greeting, 1=mood, 2=sleep, 3=confirm
 
     var body: some View {
         ZStack {
-            // Background gradient
             LinearGradient(
                 colors: [AppTheme.Colors.backgroundInput, AppTheme.Colors.background],
                 startPoint: .top, endPoint: .bottom
             ).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top decorative header
-                ZStack {
-                    Circle()
-                        .fill(AppTheme.Colors.accent.opacity(0.08))
-                        .frame(width: 240, height: 240)
-                        .offset(y: -60)
-                    Circle()
-                        .fill(AppTheme.Colors.cta.opacity(0.06))
-                        .frame(width: 160, height: 160)
-                        .offset(x: 80, y: -30)
-
-                    VStack(spacing: 10) {
-                        Image(systemName: "sun.horizon.fill")
-                            .font(.system(size: 52, weight: .light))
-                            .foregroundStyle(
-                                LinearGradient(colors: [AppTheme.Colors.ctaGlow, AppTheme.Colors.cta], startPoint: .top, endPoint: .bottom)
-                            )
-
-                        Text(lang.goodMorningDriver)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-
-                        Text(lang.dailyCheckInTitle)
-                            .font(.system(size: 13))
-                            .foregroundColor(AppTheme.Colors.textSecondary)
-                    }
-                    .padding(.top, 60)
+                VStack(spacing: 6) {
+                    Text(lang.goodMorningDriver)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(lang.dailyCheckInTitle)
+                        .font(.system(size: 13))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
                 }
-                .frame(height: 200)
+                .padding(.top, 52)
+                .padding(.bottom, 20)
 
-                // Step content
                 ScrollView {
-                    VStack(spacing: AppTheme.Spacing.lg) {
-                        stepContent
+                    VStack(spacing: AppTheme.Spacing.md) {
+                        MoodCheckCard(
+                            moodRating: $selectedMood,
+                            saved: false,
+                            onSave: { },
+                            howAreYouText: lang.howAreYouFeeling,
+                            tapStarText: lang.tapStarMoodLabel
+                        )
+
+                        sleepCard
+                        preCheckCard
                     }
                     .padding(AppTheme.Spacing.md)
-                    .padding(.bottom, AppTheme.Spacing.xxl)
+                    .padding(.bottom, AppTheme.Spacing.lg)
                 }
 
-                // Action buttons
                 VStack(spacing: 10) {
-                    if step < 2 {
-                        Button(action: { withAnimation(.spring()) { step += 1 } }) {
-                            Text(step == 0 ? lang.startDrivingLabel : "Next →")
+                    Button(action: saveAndComplete) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 18, weight: .bold))
+                            Text(lang.readyToDriveLabel)
                                 .font(.system(size: 17, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    LinearGradient(
-                                        colors: [AppTheme.Colors.cta, Color(hex: "#E65100")],
-                                        startPoint: .leading, endPoint: .trailing
-                                    )
-                                )
-                                .cornerRadius(AppTheme.Radius.md)
-                                .shadow(color: AppTheme.Colors.cta.opacity(0.5), radius: 8, y: 3)
                         }
-                    } else {
-                        Button(action: saveAndComplete) {
-                            HStack(spacing: 10) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 18, weight: .bold))
-                                Text(lang.readyToDriveLabel)
-                                    .font(.system(size: 17, weight: .bold))
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                LinearGradient(
-                                    colors: moodSafetyColors,
-                                    startPoint: .leading, endPoint: .trailing
-                                )
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            LinearGradient(
+                                colors: selectedMood > 0
+                                    ? [AppTheme.Colors.cta, Color(hex: "#E65100")]
+                                    : [Color.gray.opacity(0.35), Color.gray.opacity(0.25)],
+                                startPoint: .leading, endPoint: .trailing
                             )
-                            .cornerRadius(AppTheme.Radius.md)
-                            .shadow(color: moodSafetyColors[0].opacity(0.5), radius: 8, y: 3)
-                        }
+                        )
+                        .cornerRadius(AppTheme.Radius.md)
                     }
+                    .disabled(selectedMood == 0)
 
                     Button(action: onComplete) {
-                        Text("Skip for now")
+                        Text(lang.skipForNowLabel)
                             .font(.system(size: 13))
                             .foregroundColor(AppTheme.Colors.textSecondary)
                     }
@@ -674,14 +643,12 @@ struct LaunchWellnessCheckIn: View {
         .preferredColorScheme(.dark)
     }
 
-    // MARK: - Save check-in data to SwiftData then dismiss
-
     private func saveAndComplete() {
         let now = Date()
         if selectedMood > 0 {
             let moodLog = WellnessLog(category: .mental, date: now)
-            moodLog.stressLevel = 6 - selectedMood   // 5 stars → stressLevel 1
-            moodLog.notes = selectedMood <= moodOptions.count ? moodOptions[selectedMood - 1].label : ""
+            moodLog.stressLevel = 6 - selectedMood
+            moodLog.notes = "Mood \(selectedMood)/5"
             modelContext.insert(moodLog)
         }
         if sleepHours > 0 {
@@ -695,66 +662,44 @@ struct LaunchWellnessCheckIn: View {
             mealLog.notes = "Had breakfast before driving"
             modelContext.insert(mealLog)
         }
+        try? modelContext.save()
+
+        if selectedMood > 0 {
+            WellnessCloudSync.pushDailyCheckin(
+                moodStars: selectedMood,
+                sleepHours: sleepHours > 0 ? sleepHours : nil,
+                hadMeal: hadBreakfast,
+                feltRested: feltRested,
+                source: .launch
+            )
+        }
         onComplete()
     }
 
-    @ViewBuilder
-    private var stepContent: some View {
-        switch step {
-        case 0:
-            // Greeting step
-            VStack(spacing: AppTheme.Spacing.md) {
-                safetyReminderCard
-                preCheckCard
-            }
-
-        case 1:
-            // Mood & feeling step
-            moodStep
-
-        default:
-            // Sleep & confirm step
-            sleepConfirmStep
-        }
-    }
-
-    // MARK: Safety Reminder
-    private var safetyReminderCard: some View {
+    private var sleepCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "shield.checkered")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(AppTheme.Colors.accent)
-                Text("BEFORE YOU DRIVE")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(AppTheme.Colors.textSecondary)
-                    .kerning(1.1)
+            HStack {
+                Label("Hours slept last night", systemImage: "bed.double.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                Text(String(format: "%.1fh", sleepHours))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(sleepHours >= 7 ? AppTheme.Colors.success : AppTheme.Colors.warning)
             }
-
-            ForEach([
-                ("checkmark.circle.fill", AppTheme.Colors.success, "Pre-trip inspection complete"),
-                ("eye.fill", AppTheme.Colors.accent, "Eyes feel rested and clear"),
-                ("brain.head.profile", Color(hex: "#8b5cf6"), "Mentally focused and alert"),
-                ("pills.fill", AppTheme.Colors.warning, "Medications taken (if applicable)")
-            ], id: \.2) { icon, color, text in
-                HStack(spacing: 10) {
-                    Image(systemName: icon)
-                        .font(.system(size: 13))
-                        .foregroundColor(color)
-                        .frame(width: 20)
-                    Text(text)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white)
-                }
+            Slider(value: $sleepHours, in: 1...12, step: 0.5)
+                .accentColor(sleepHours >= 7 ? AppTheme.Colors.success : AppTheme.Colors.warning)
+            HStack {
+                Text("1h").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
+                Spacer()
+                Text("7h (min recommended)").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
+                Spacer()
+                Text("12h").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
             }
         }
         .padding(14)
         .background(AppTheme.Colors.backgroundSecond)
         .cornerRadius(AppTheme.Radius.md)
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                .stroke(AppTheme.Colors.accent.opacity(0.2), lineWidth: 1)
-        )
     }
 
     // MARK: Pre-check toggles
@@ -776,167 +721,6 @@ struct LaunchWellnessCheckIn: View {
                 .foregroundColor(.white)
         }
         .toggleStyle(SwitchToggleStyle(tint: AppTheme.Colors.success))
-    }
-
-    // MARK: Mood Step
-    private var moodStep: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            VStack(spacing: 8) {
-                Text(lang.howAreYouFeeling)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-                Text("Tap your current state")
-                    .font(.system(size: 12))
-                    .foregroundColor(AppTheme.Colors.textSecondary)
-            }
-
-            // 5-mood selector
-            HStack(spacing: 0) {
-                ForEach(moodOptions.indices, id: \.self) { i in
-                    let opt = moodOptions[i]
-                    Button(action: { withAnimation(.spring(response: 0.25)) { selectedMood = i + 1 } }) {
-                        VStack(spacing: 6) {
-                            Text(opt.emoji)
-                                .font(.system(size: selectedMood == i + 1 ? 36 : 28))
-                                .te_uniformScale(selectedMood == i + 1 ? 1.2 : 1)
-                                .animation(.spring(response: 0.25), value: selectedMood)
-                            Text(opt.label)
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(selectedMood == i + 1 ? opt.color : AppTheme.Colors.textSecondary)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(selectedMood == i + 1 ? opt.color.opacity(0.15) : Color.clear)
-                        .cornerRadius(AppTheme.Radius.sm)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
-                                .stroke(selectedMood == i + 1 ? opt.color : Color.clear, lineWidth: 1.5)
-                        )
-                    }
-                }
-            }
-            .background(AppTheme.Colors.backgroundSecond)
-            .cornerRadius(AppTheme.Radius.md)
-
-            // Safety warning if low mood
-            if selectedMood > 0 && selectedMood <= 2 {
-                HStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(AppTheme.Colors.warning)
-                        .font(.system(size: 16))
-                    Text(lang.fatigueWarning)
-                        .font(.system(size: 12))
-                        .foregroundColor(AppTheme.Colors.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(12)
-                .background(AppTheme.Colors.warning.opacity(0.08))
-                .cornerRadius(AppTheme.Radius.md)
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                        .stroke(AppTheme.Colors.warning.opacity(0.4), lineWidth: 1)
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-    }
-
-    private var moodOptions: [(emoji: String, label: String, color: Color)] {
-        [
-            ("😴", "Exhausted", AppTheme.Colors.danger),
-            ("😕", "Tired", AppTheme.Colors.warning),
-            ("😐", "OK", AppTheme.Colors.textSecondary),
-            ("😊", "Good", AppTheme.Colors.accent),
-            ("🤩", "Great!", AppTheme.Colors.success)
-        ]
-    }
-
-    // MARK: Sleep Confirm Step
-    private var sleepConfirmStep: some View {
-        VStack(spacing: AppTheme.Spacing.md) {
-            // Sleep hours
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("Hours slept last night", systemImage: "bed.double.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Text(String(format: "%.1fh", sleepHours))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(sleepHours >= 7 ? AppTheme.Colors.success : AppTheme.Colors.warning)
-                }
-                Slider(value: $sleepHours, in: 1...12, step: 0.5)
-                    .accentColor(sleepHours >= 7 ? AppTheme.Colors.success : AppTheme.Colors.warning)
-                HStack {
-                    Text("1h").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
-                    Spacer()
-                    Text("7h (min recommended)").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
-                    Spacer()
-                    Text("12h").font(.system(size: 10)).foregroundColor(AppTheme.Colors.textSecondary)
-                }
-            }
-            .padding(14)
-            .background(AppTheme.Colors.backgroundSecond)
-            .cornerRadius(AppTheme.Radius.md)
-
-            // Summary card
-            VStack(spacing: 8) {
-                HStack {
-                    Text("YOUR WELLNESS SUMMARY")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(AppTheme.Colors.textSecondary)
-                        .kerning(1.1)
-                    Spacer()
-                }
-
-                HStack(spacing: 16) {
-                    summaryPill(
-                        icon: selectedMood > 0 ? moodOptions[min(selectedMood-1, 4)].emoji : "😐",
-                        label: "Mood",
-                        value: selectedMood > 0 ? moodOptions[min(selectedMood-1, 4)].label : "Not set",
-                        color: selectedMood > 0 ? moodOptions[min(selectedMood-1, 4)].color : AppTheme.Colors.textSecondary
-                    )
-                    summaryPill(
-                        icon: "💤",
-                        label: "Sleep",
-                        value: String(format: "%.1fh", sleepHours),
-                        color: sleepHours >= 7 ? AppTheme.Colors.success : AppTheme.Colors.warning
-                    )
-                    summaryPill(
-                        icon: "🍽️",
-                        label: "Meal",
-                        value: hadBreakfast ? "Done" : "Skipped",
-                        color: hadBreakfast ? AppTheme.Colors.success : AppTheme.Colors.textSecondary
-                    )
-                }
-            }
-            .padding(14)
-            .background(AppTheme.Colors.backgroundSecond)
-            .cornerRadius(AppTheme.Radius.md)
-        }
-    }
-
-    private func summaryPill(icon: String, label: String, value: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(icon).font(.system(size: 20))
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundColor(AppTheme.Colors.textSecondary)
-            Text(value)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(color)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(color.opacity(0.08))
-        .cornerRadius(AppTheme.Radius.sm)
-    }
-
-    private var moodSafetyColors: [Color] {
-        if selectedMood <= 2 { return [AppTheme.Colors.warning, Color(hex: "#c05621")] }
-        if selectedMood == 3 { return [AppTheme.Colors.accent, Color(hex: "#0099bb")] }
-        return [AppTheme.Colors.success, Color(hex: "#00a86b")]
     }
 }
 

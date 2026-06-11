@@ -244,7 +244,11 @@ class TruckRestrictionWarningManager {
     
     /// Last geocoded ISO-3166-1 alpha-2 country code; avoids redundant reverse-geocoding calls
     private var lastDetectedISOCode: String?
-    
+
+    /// Limits expensive `RouteWarningEngine.evaluate` while driving — GPS updates can be very frequent.
+    private var lastWarningEvalAt: Date = .distantPast
+    private var lastWarningEvalLocation: CLLocation?
+
     // MARK: - Load Warnings from TruckRoute (with smart engine)
     
     /// Carrega warnings de um TruckRoute usando o RouteWarningEngine
@@ -271,9 +275,8 @@ class TruckRestrictionWarningManager {
             // Auto-detect from route start coordinate via reverse geocoding
             if let startCoord = route.coordinates.first {
                 let location = CLLocation(latitude: startCoord.latitude, longitude: startCoord.longitude)
-                if let request = MKReverseGeocodingRequest(location: location),
-                   let item = try? await request.mapItems.first,
-                   let isoCode = item.addressRepresentations?.region?.identifier.uppercased() {
+                let detected = await Self.reverseGeocodeISOCode(location: location)
+                if let isoCode = detected {
                     self.currentRegulations = RegulationProfile.profile(forISOCode: isoCode)
                     self.lastDetectedISOCode = isoCode
                 } else {
@@ -282,7 +285,9 @@ class TruckRestrictionWarningManager {
                 }
                 self.lastRegulationRefreshDate = Date()
                 self.lastRegulationRefreshCoordinate = startCoord
-                print("[Restrictions] 📍 Auto-detected regulations: \(currentRegulations.country.displayName)")
+                #if DEBUG
+                print("[Restrictions] 📍 Auto-detected regulations: \(currentRegulations.country.displayName(for: AppLanguage.persistedDriverChoice))")
+                #endif
             }
         }
         
@@ -291,19 +296,27 @@ class TruckRestrictionWarningManager {
             route: route,
             userLocation: userLocation,
             specs: specs,
-            regulations: currentRegulations
+            regulations: currentRegulations,
+            language: AppLanguage.persistedDriverChoice
         )
         
         self.activeWarnings = warnings
         self.dismissedWarningIds.removeAll()
         self.lastAnnouncedId = nil
         
+        #if DEBUG
         print("[Restrictions] ✅ Loaded \(warnings.count) smart warnings from TruckRoute")
+        #endif
     }
     
     // MARK: - Update Location (with smart re-evaluation)
     
     func updateLocation(_ location: CLLocation) {
+        let now = Date()
+        let dt = now.timeIntervalSince(lastWarningEvalAt)
+        let moved = lastWarningEvalLocation.map { location.distance(from: $0) >= 40 } ?? true
+        let shouldRunHeavyEval = dt >= 0.45 || moved
+
         // Re-evaluate warnings if we have route and specs
         if let route = currentRoute, let specs = currentSpecs {
             if shouldRefreshRegulations(for: location.coordinate) {
@@ -316,17 +329,22 @@ class TruckRestrictionWarningManager {
                 }
             }
 
-            let updatedWarnings = RouteWarningEngine.evaluate(
-                route: route,
-                userLocation: location,
-                specs: specs,
-                regulations: currentRegulations
-            )
-            
-            // Preserve dismissed IDs
-            self.activeWarnings = updatedWarnings
+            if shouldRunHeavyEval {
+                lastWarningEvalAt = now
+                lastWarningEvalLocation = location
+                let updatedWarnings = RouteWarningEngine.evaluate(
+                    route: route,
+                    userLocation: location,
+                    specs: specs,
+                    regulations: currentRegulations,
+                    language: AppLanguage.persistedDriverChoice
+                )
+
+                // Preserve dismissed IDs
+                self.activeWarnings = updatedWarnings
+            }
         }
-        
+
         // Legacy behavior: filter by distance
         guard !activeWarnings.isEmpty else { return }
         
@@ -352,7 +370,9 @@ class TruckRestrictionWarningManager {
                 lastAnnouncedId = closest.id
                 // Announce restriction via voice with smart deduplication
                 voiceManager.announceWarning(closest, distance: distance)
+                #if DEBUG
                 print("[Restrictions] 🔊 Voice triggered: \(closest.type.rawValue) at \(Int(distance))m")
+                #endif
             }
         }
     }
@@ -389,13 +409,9 @@ class TruckRestrictionWarningManager {
         specs: TruckSpecifications,
         userLocation: CLLocation
     ) async {
-        // Geocode once to get the ISO country code (MKReverseGeocodingRequest — iOS 26+)
         let location = CLLocation(latitude: userLocation.coordinate.latitude,
                                   longitude: userLocation.coordinate.longitude)
-        guard let request = MKReverseGeocodingRequest(location: location),
-              let item = try? await request.mapItems.first,
-              let isoCode = item.addressRepresentations?.region?.identifier.uppercased() else {
-            // Record attempt to avoid rapid retries even on failure
+        guard let isoCode = await Self.reverseGeocodeISOCode(location: location) else {
             lastRegulationRefreshDate = Date()
             lastRegulationRefreshCoordinate = userLocation.coordinate
             return
@@ -407,7 +423,9 @@ class TruckRestrictionWarningManager {
 
         // ISO cache hit: skip profile lookup and warning re-evaluation
         guard isoCode != lastDetectedISOCode else {
+            #if DEBUG
             print("[Restrictions] 📍 ISO unchanged (\(isoCode)) — skipping regulation refresh")
+            #endif
             return
         }
         lastDetectedISOCode = isoCode
@@ -420,9 +438,32 @@ class TruckRestrictionWarningManager {
             route: route,
             userLocation: userLocation,
             specs: specs,
-            regulations: currentRegulations
+            regulations: currentRegulations,
+            language: AppLanguage.persistedDriverChoice
         )
-        print("[Restrictions] 🌍 Regulation profile updated: \(currentRegulations.country.displayName)")
+        #if DEBUG
+        print("[Restrictions] 🌍 Regulation profile updated: \(currentRegulations.country.displayName(for: AppLanguage.persistedDriverChoice))")
+        #endif
+    }
+
+    /// Reverse geocode a location to ISO-3166-1 alpha-2 country code.
+    /// Uses MKReverseGeocodingRequest on iOS 26+, CLGeocoder on earlier versions.
+    private static func reverseGeocodeISOCode(location: CLLocation) async -> String? {
+        if #available(iOS 26, *) {
+            guard let request = MKReverseGeocodingRequest(location: location),
+                  let item = try? await request.mapItems.first,
+                  let code = item.addressRepresentations?.region?.identifier.uppercased() else {
+                return nil
+            }
+            return code
+        } else {
+            do {
+                let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
+                return placemarks.first?.isoCountryCode?.uppercased()
+            } catch {
+                return nil
+            }
+        }
     }
 
     /// Maps Country enum to ISO-3166-1 alpha-2 string for cache comparisons

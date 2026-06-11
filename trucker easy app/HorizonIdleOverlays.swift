@@ -28,11 +28,19 @@ struct HorizonTopHUD: View {
             VStack(spacing: 8) {
                 Menu {
                     ForEach(MapStyleOption.allCases, id: \.self) { style in
-                        Button(style.rawValue) { selectedMapStyle = style }
+                        Button {
+                            selectedMapStyle = style
+                        } label: {
+                            Label(style.rawValue, systemImage: style.icon)
+                        }
                     }
                 } label: {
-                    hudButton(icon: "map.fill")
+                    hudButton(
+                        icon: selectedMapStyle == .globe ? "globe.americas.fill" : selectedMapStyle.icon,
+                        tint: selectedMapStyle == .globe ? AppTheme.Colors.accent : nil
+                    )
                 }
+                .accessibilityLabel("Map style: \(selectedMapStyle.rawValue)")
 
                 Menu {
                     ForEach(MapAlert.AlertType.allCases, id: \.self) { type in
@@ -67,10 +75,14 @@ struct HorizonTopHUD: View {
     private func hudButton(icon: String, tint: Color? = nil) -> some View {
         Image(systemName: icon)
             .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(tint ?? .white)
-            .frame(width: 38, height: 38)
-            .background(Color(hex: "#1a1d23"))
-            .cornerRadius(10)
+            .foregroundColor(tint ?? GPSDesignSystem.Colors.textPrimary)
+            .frame(width: GPSDesignSystem.Metrics.floatingIconSize, height: GPSDesignSystem.Metrics.floatingIconSize)
+            .background(GPSDesignSystem.Colors.panelElevated)
+            .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerSmall, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerSmall, style: .continuous)
+                    .stroke(GPSDesignSystem.Colors.border, lineWidth: 0.5)
+            )
             .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
     }
 }
@@ -84,30 +96,37 @@ struct HorizonMapControlsPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            mapControlButton(icon: "plus", action: onZoomIn)
-            Divider().frame(width: 44).background(Color.white.opacity(0.1))
-            mapControlButton(icon: "minus", action: onZoomOut)
-            Divider().frame(width: 44).background(Color.white.opacity(0.1)).padding(.vertical, 2)
+            mapControlButton(title: "+", action: onZoomIn)
+            Divider().frame(width: GPSDesignSystem.Metrics.zoomButtonSize + 14).background(GPSDesignSystem.Colors.border)
+            mapControlButton(title: "−", action: onZoomOut)
+            Divider().frame(width: GPSDesignSystem.Metrics.zoomButtonSize + 14).background(GPSDesignSystem.Colors.border).padding(.vertical, 2)
             mapControlButton(icon: "location.fill", action: onRecenter, isAccent: true)
         }
-        .background(Color(hex: "#1a1d23"))
+        .background(GPSDesignSystem.Colors.panelElevated)
         .environment(\.colorScheme, .dark)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: GPSDesignSystem.Metrics.cornerMedium, style: .continuous)
+                .stroke(GPSDesignSystem.Colors.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
     }
 
     @ViewBuilder
-    private func mapControlButton(icon: String, action: @escaping () -> Void, isAccent: Bool = false) -> some View {
+    private func mapControlButton(title: String? = nil, icon: String? = nil, action: @escaping () -> Void, isAccent: Bool = false) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(isAccent ? Color(hex: "#c9a84c") : .white)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            Group {
+                if let title {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                } else if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .bold))
+                }
+            }
+            .foregroundColor(isAccent ? GPSDesignSystem.Colors.primaryAction : GPSDesignSystem.Colors.textPrimary)
+            .frame(width: GPSDesignSystem.Metrics.zoomButtonSize + 14, height: GPSDesignSystem.Metrics.zoomButtonSize + 14)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

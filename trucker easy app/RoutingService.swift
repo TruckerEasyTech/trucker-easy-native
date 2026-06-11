@@ -1,8 +1,13 @@
 // RoutingService.swift
 // trucker easy app
 //
-// Clean routing service — Valhalla (truck costing, if configured) → MapKit → OSRM → offline cache.
-// Provider stack is Mapbox visualization + Valhalla/MapKit/OSRM routing.
+// Infra real necessária para camião com restrições:
+// - **Valhalla** (único motor integrado com costing `truck`: altura, peso, comprimento, hazmat, pedágios).
+// - **OSRM / MapKit**: só geometria estilo automóvel — usados só como fallback (avisos `non_truck_routing` na rota).
+// - **GPS** (Core Location): posição em tempo real — independente deste ficheiro; sem cobertura sem rede satélite/Wi‑Fi/cellular não há milagre no telefone.
+//
+// Deploy global: HTTPS público (ex. `backend/valhalla-production/`) + opcional LAN em `VALHALLA_SERVER_URLS` (HTTPS tentado primeiro).
+// Cadeia: Valhalla (priorizado HTTPS → HTTP, ordem estável) → OSRM → MapKit → cache offline.
 
 import Foundation
 import MapKit
@@ -27,6 +32,13 @@ final class RoutingService {
         }
     }
 
+    enum RoutingAccessMode {
+        /// Free tier: conventional automobile route only (MapKit), no truck restrictions.
+        case automobileOnly
+        /// Standard/Premium: Valhalla truck routing first, then existing fallbacks.
+        case truckAware
+    }
+
     // MARK: - State
     var isCalculating = false
     var lastError: String?
@@ -38,14 +50,47 @@ final class RoutingService {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 12
         config.timeoutIntervalForResource = 20
-        config.waitsForConnectivity = true
+        // `true` can stall well past `timeoutIntervalForRequest` while the OS probes dead hosts (e.g. *.local on device).
+        config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
 
     private init() {}
 
+    // MARK: - Self-hosted routing reachability
+    //
+    // xcconfig often uses `https:||host` because `//` starts a comment — Swift replaces `||` with `//` when reading URLs.
+    /// On a physical device, hosts like `*.local`, `localhost`, and `127.*` from a Mac-only `/etc/hosts` setup are not
+    /// routable. Skipping them avoids long timeouts before MapKit fallback.
+    private static func shouldAttemptSelfHostedRoutingURL(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "||", with: "//")
+        guard let url = URL(string: trimmed), let host = url.host?.lowercased(), !host.isEmpty else {
+            return !trimmed.isEmpty
+        }
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        if host == "localhost" || host.hasPrefix("127.") || host.hasSuffix(".local") {
+            return false
+        }
+        return true
+        #endif
+    }
+
+    private static var enforceTruckSafeRouting: Bool {
+        AppAccessPolicy.enforceTruckOnlyRouting
+            || UserDefaults.standard.bool(forKey: "truckSafeOnlyMode")
+    }
+
     // MARK: - Provider availability
-    var isAvailable: Bool { ValhallaRoutingService.shared.isAvailable }
+    /// True when Valhalla is configured and at least one base URL is reachable on this runtime (not LAN-only on device).
+    var isAvailable: Bool {
+        guard ValhallaRoutingService.shared.isAvailable else { return false }
+        return ValhallaRoutingService.shared.serverBaseURLs.contains {
+            Self.shouldAttemptSelfHostedRoutingURL($0)
+        }
+    }
 
     // #region agent log
     private func agentLogRouting(
@@ -81,7 +126,8 @@ final class RoutingService {
         to destination: CLLocationCoordinate2D,
         destinationName: String,
         profile: TruckProfile,
-        avoidTolls: Bool = false
+        avoidTolls: Bool = false,
+        accessMode: RoutingAccessMode = .truckAware
     ) async throws -> TruckRoute {
         let startedAt = Date()
         isCalculating = true
@@ -90,90 +136,158 @@ final class RoutingService {
 
         var failureReasons: [String] = []
 
+        #if DEBUG
         print("[Routing] Starting route: \(origin.coordinate.latitude),\(origin.coordinate.longitude) → \(destination.latitude),\(destination.longitude)")
+        #endif
 
-        // === Provider 2: Valhalla (truck costing: height/weight/length/axle; self-hosted or demo URL) ===
+        /// Records which engine produced the on-map polyline while preserving quantum flags merged in from Horizon.
+        func routeTaggedWithGeometry(_ route: TruckRoute) -> TruckRoute {
+            route.taggingGeometry(provider: lastProvider)
+        }
+
+        if accessMode == .automobileOnly {
+            let mkRoute = try await fallbackMKDirections(
+                from: origin,
+                to: destination,
+                destinationName: destinationName,
+                avoidTolls: avoidTolls
+            )
+            lastProvider = .mapKit
+            let tagged = addNonTruckAwareNotice(to: mkRoute, provider: "MapKit")
+            cacheRoute(tagged, from: origin.coordinate, to: destination, sourceProvider: .mapKit)
+            recordEvent(
+                provider: .mapKit,
+                stage: .fallbackUsed,
+                destinationName: destinationName,
+                startedAt: startedAt,
+                detail: "free-tier automobile routing"
+            )
+            return routeTaggedWithGeometry(tagged)
+        }
+
+        // === Provider 1: Valhalla — truck-aware (height/weight/length/hazmat/tolls). HTTPS URLs tried before HTTP when listed together.
+        let valhallaBases = ValhallaRoutingService.shared.prioritizedServerBaseURLs.filter {
+            Self.shouldAttemptSelfHostedRoutingURL($0)
+        }
         if ValhallaRoutingService.shared.isAvailable {
+            if valhallaBases.isEmpty {
+                #if DEBUG
+                print("[Routing] Valhalla skipped — host is .local/localhost on physical device (use LAN IP or HTTPS tunnel in xcconfig).")
+                #endif
+                failureReasons.append("Valhalla: skipped (LAN-only host on device)")
+            } else {
+                let macro = LogisticsMacroRegion.regionAlongRoute(from: origin.coordinate, to: destination)
+                #if DEBUG
+                print("[Routing] macroRegion=\(macro.rawValue) valhallaCandidates=\(valhallaBases.count)")
+                #endif
+                for base in valhallaBases {
+                    do {
+                        let valRoute = try await ValhallaRoutingService.shared.calculateTruckRoute(
+                            from: origin,
+                            to: destination,
+                            destinationName: destinationName,
+                            profile: profile,
+                            avoidTolls: avoidTolls,
+                            serverBaseURL: base
+                        )
+                        guard Self.isRoutePlausible(origin: origin, destination: destination, route: valRoute) else {
+                            failureReasons.append("Valhalla: implausible route rejected")
+                            agentLogRouting(
+                                runId: "baseline",
+                                hypothesisId: "H8",
+                                location: "RoutingService.swift:calculateTruckRoute",
+                                message: "Rejected implausible Valhalla route",
+                                data: [
+                                    "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
+                                    "routeMeters": Int(valRoute.distanceMeters),
+                                    "destinationName": destinationName
+                                ]
+                            )
+                            throw RoutingServiceError.noRoute
+                        }
+                        lastProvider = .valhalla
+                        cacheRoute(valRoute, from: origin.coordinate, to: destination, sourceProvider: .valhalla)
+                        #if DEBUG
+                        print("[Routing] ✅ Valhalla OK (truck costing)")
+                        #endif
+                        recordEvent(
+                            provider: .valhalla,
+                            stage: .success,
+                            destinationName: destinationName,
+                            startedAt: startedAt,
+                            detail: "Valhalla truck-aware route"
+                        )
+                        return routeTaggedWithGeometry(valRoute)
+                    } catch {
+                        failureReasons.append("Valhalla(\(base)): \(error.localizedDescription)")
+                        #if DEBUG
+                        print("[Routing] Valhalla failed for base \(base.prefix(48))…: \(error.localizedDescription)")
+                        #endif
+                    }
+                }
+            }
+        }
+
+        // Truck-safe only: never use OSRM/MapKit when Valhalla was configured but failed or timed out.
+        if Self.enforceTruckSafeRouting, accessMode == .truckAware {
+            throw RoutingServiceError.allProvidersFailed(failureReasons.joined(separator: " · "))
+        }
+
+        // === Provider 3: OSRM (driving profile; NOT truck-aware unless your server is) ===
+        let osrmBaseForReachability = Self.osrmServerBaseURL()
+        if Self.shouldAttemptSelfHostedRoutingURL(osrmBaseForReachability) {
             do {
-                let valRoute = try await ValhallaRoutingService.shared.calculateTruckRoute(
-                    from: origin,
-                    to: destination,
-                    destinationName: destinationName,
-                    profile: profile,
-                    avoidTolls: avoidTolls
+                let osrmRoute = try await requestRouteFromOSRM(
+                    from: origin, to: destination, destinationName: destinationName
                 )
-                guard Self.isRoutePlausible(origin: origin, destination: destination, route: valRoute) else {
-                    failureReasons.append("Valhalla: implausible route rejected")
+                guard Self.isRoutePlausible(origin: origin, destination: destination, route: osrmRoute) else {
+                    failureReasons.append("OSRM: implausible route rejected")
                     agentLogRouting(
                         runId: "baseline",
                         hypothesisId: "H8",
                         location: "RoutingService.swift:calculateTruckRoute",
-                        message: "Rejected implausible Valhalla route",
+                        message: "Rejected implausible OSRM route",
                         data: [
                             "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                            "routeMeters": Int(valRoute.distanceMeters),
+                            "routeMeters": Int(osrmRoute.distanceMeters),
                             "destinationName": destinationName
                         ]
                     )
                     throw RoutingServiceError.noRoute
                 }
-                lastProvider = .valhalla
-                cacheRoute(valRoute, from: origin.coordinate, to: destination)
-                print("[Routing] ✅ Valhalla OK (truck costing)")
+                lastProvider = .osrm
+                var taggedRoute = osrmRoute
+                taggedRoute = addNonTruckAwareNotice(to: taggedRoute, provider: "OSRM")
+                cacheRoute(taggedRoute, from: origin.coordinate, to: destination, sourceProvider: .osrm)
+                #if DEBUG
+                print("[Routing] ✅ OSRM OK")
+                #endif
                 recordEvent(
-                    provider: .valhalla,
+                    provider: .osrm,
                     stage: .fallbackUsed,
                     destinationName: destinationName,
                     startedAt: startedAt,
-                    detail: "truck-aware fallback after primary provider unavailable"
+                    detail: "fallback after Valhalla unavailable or failed"
                 )
-                return valRoute
+                return routeTaggedWithGeometry(taggedRoute)
             } catch {
-                failureReasons.append("Valhalla: \(error.localizedDescription)")
-                print("[Routing] Valhalla failed: \(error.localizedDescription)")
+                failureReasons.append("OSRM: \(error.localizedDescription)")
+                #if DEBUG
+                print("[Routing] OSRM failed: \(error.localizedDescription)")
+                #endif
             }
+        } else {
+            #if DEBUG
+            print("[Routing] OSRM skipped — host is .local/localhost on physical device (public demo: leave OSRM_SERVER_URL empty).")
+            #endif
+            failureReasons.append("OSRM: skipped (LAN-only host on device)")
         }
 
-        // === Provider 3: OSRM (driving profile; NOT truck-aware unless your server is) ===
-        do {
-            let osrmRoute = try await requestRouteFromOSRM(
-                from: origin, to: destination, destinationName: destinationName
-            )
-            guard Self.isRoutePlausible(origin: origin, destination: destination, route: osrmRoute) else {
-                failureReasons.append("OSRM: implausible route rejected")
-                agentLogRouting(
-                    runId: "baseline",
-                    hypothesisId: "H8",
-                    location: "RoutingService.swift:calculateTruckRoute",
-                    message: "Rejected implausible OSRM route",
-                    data: [
-                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                        "routeMeters": Int(osrmRoute.distanceMeters),
-                        "destinationName": destinationName
-                    ]
-                )
-                throw RoutingServiceError.noRoute
-            }
-            lastProvider = .osrm
-            cacheRoute(osrmRoute, from: origin.coordinate, to: destination)
-            print("[Routing] ✅ OSRM OK")
-            recordEvent(
-                provider: .osrm,
-                stage: .fallbackUsed,
-                destinationName: destinationName,
-                startedAt: startedAt,
-                detail: "fallback after Valhalla unavailable or failed"
-            )
-            return osrmRoute
-        } catch {
-            failureReasons.append("OSRM: \(error.localizedDescription)")
-            print("[Routing] OSRM failed: \(error.localizedDescription)")
-        }
-
-        // === Provider 4: MapKit (car-only, most reliable in US) ===
+        // === Provider 4: MapKit (driving / automobile; toll avoidance when requested — no truck dimensions in MapKit) ===
         do {
             let mkRoute = try await fallbackMKDirections(
-                from: origin, to: destination, destinationName: destinationName
+                from: origin, to: destination, destinationName: destinationName,
+                avoidTolls: avoidTolls
             )
             guard Self.isRoutePlausible(origin: origin, destination: destination, route: mkRoute) else {
                 failureReasons.append("MapKit: implausible route rejected")
@@ -191,30 +305,47 @@ final class RoutingService {
                 throw RoutingServiceError.noRoute
             }
             lastProvider = .mapKit
-            cacheRoute(mkRoute, from: origin.coordinate, to: destination)
-            print("[Routing] ✅ MapKit OK (car-only)")
-            return mkRoute
+            var taggedMk = mkRoute
+            taggedMk = addNonTruckAwareNotice(to: taggedMk, provider: "MapKit")
+            cacheRoute(taggedMk, from: origin.coordinate, to: destination, sourceProvider: .mapKit)
+            recordEvent(
+                provider: .mapKit,
+                stage: .fallbackUsed,
+                destinationName: destinationName,
+                startedAt: startedAt,
+                detail: "fallback automobile routing — truck restrictions not validated"
+            )
+            #if DEBUG
+            print("[Routing] ✅ MapKit OK (driving; avoidTolls=\(avoidTolls))")
+            #endif
+            return routeTaggedWithGeometry(taggedMk)
         } catch {
             failureReasons.append("MapKit: \(error.localizedDescription)")
+            #if DEBUG
             print("[Routing] MapKit failed: \(error.localizedDescription)")
+            #endif
         }
 
         // === Fallback 5: Cached route ===
         if let cached = loadCachedRoute(origin: origin.coordinate, destination: destination) {
+            #if DEBUG
             print("[Routing] ✅ Using cached offline route")
-            lastProvider = .cached
+            #endif
+            lastProvider = cached.geometryProvider
             recordEvent(
                 provider: .cached,
                 stage: .cacheHit,
                 destinationName: destinationName,
                 startedAt: startedAt,
-                detail: "loaded offline cached route"
+                detail: "offline cache · geometry source: \(cached.geometryProvider.rawValue)"
             )
-            return cached
+            return routeTaggedWithGeometry(cached.route)
         }
 
         // === Hard fail in production nav: never auto-apply straight-line emergency route ===
+        #if DEBUG
         print("[Routing] ❌ ALL providers failed — refusing unsafe direct-line navigation")
+        #endif
         let detail = failureReasons.joined(separator: " | ")
         lastProvider = .unknown
         lastError = detail
@@ -398,263 +529,388 @@ final class RoutingService {
         return total
     }
 
-    private static func isRoutePlausible(
-        origin: CLLocation,
-        destination: CLLocationCoordinate2D,
-        route: TruckRoute
-    ) -> Bool {
-        let crow = crowDistanceMeters(from: origin, to: destination)
-        let routeMeters = route.distanceMeters
-        let polyMeters = polylineLengthMeters(route.coordinates)
+        private static func isRoutePlausible(
+            origin: CLLocation,
+            destination: CLLocationCoordinate2D,
+            route: TruckRoute
+        ) -> Bool {
+            let crow = crowDistanceMeters(from: origin, to: destination)
+            let routeMeters = route.distanceMeters
+            let polyMeters = polylineLengthMeters(route.coordinates)
 
-        guard routeMeters > 0, routeMeters.isFinite else { return false }
-        if crow < 1_000 && routeMeters > 80_000 { return false }
-        if crow < 15_000 && routeMeters > 500_000 { return false }
-        if crow < 120_000 && routeMeters > 2_400_000 { return false }
-        if polyMeters > 1_000 && routeMeters > polyMeters * 6 { return false }
-        return true
-    }
-
-    private static func osrmCoordinateString(_ coordinate: CLLocationCoordinate2D) -> String {
-        String(format: "%.6f,%.6f", coordinate.longitude, coordinate.latitude)
-    }
-
-    // MARK: - Nuclear Fallback: Direct Route (NEVER fails)
-
-    private func generateDirectRoute(
-        from origin: CLLocationCoordinate2D,
-        to destination: CLLocationCoordinate2D,
-        destinationName: String
-    ) -> TruckRoute {
-        let originLoc = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
-        let destLoc = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-        let distanceMeters = originLoc.distance(from: destLoc)
-        let durationSeconds = distanceMeters / 22.352 // assume ~50mph average
-
-        // Create polyline with intermediate points (great circle)
-        let pointCount = max(10, Int(distanceMeters / 1000)) // 1 point per km, min 10
-        var coordinates: [CLLocationCoordinate2D] = []
-        for i in 0...pointCount {
-            let fraction = Double(i) / Double(pointCount)
-            let lat = origin.latitude + fraction * (destination.latitude - origin.latitude)
-            let lon = origin.longitude + fraction * (destination.longitude - origin.longitude)
-            coordinates.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            guard routeMeters > 0, routeMeters.isFinite else { return false }
+            if crow < 1_000 && routeMeters > 80_000 { return false }
+            if crow < 15_000 && routeMeters > 500_000 { return false }
+            if crow < 120_000 && routeMeters > 2_400_000 { return false }
+            if polyMeters > 1_000 && routeMeters > polyMeters * 6 { return false }
+            return true
         }
 
-        let steps = generateSyntheticSteps(from: coordinates, totalDistance: distanceMeters, totalDuration: durationSeconds, destinationName: destinationName)
-
-        print("[Routing] Direct route: \(Int(distanceMeters / 1000)) km | \(Int(durationSeconds / 60)) min | \(steps.count) steps")
-        return TruckRoute(
-            coordinates: coordinates,
-            steps: steps,
-            distanceMeters: distanceMeters,
-            durationSeconds: durationSeconds,
-            destinationName: destinationName,
-            truckNotices: [TruckRouteNotice(code: "DIRECT", title: "Direct route", details: "Road data unavailable. Drive with caution.")]
-        )
-    }
-
-    // MARK: - Geocode + Route (address string)
-
-    func calculateTruckRoute(
-        from origin: CLLocation,
-        toAddress address: String,
-        profile: TruckProfile,
-        avoidTolls: Bool = false
-    ) async throws -> TruckRoute {
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = address
-        let search = MKLocalSearch(request: searchRequest)
-        guard let result = try? await search.start(),
-              let item = result.mapItems.first else {
-            throw RoutingServiceError.geocodeFailed(address)
+        private static func osrmCoordinateString(_ coordinate: CLLocationCoordinate2D) -> String {
+            String(format: "%.6f,%.6f", coordinate.longitude, coordinate.latitude)
         }
 
-        return try await calculateTruckRoute(
-            from: origin,
-            to: item.location.coordinate,
-            destinationName: item.name ?? address,
-            profile: profile,
-            avoidTolls: avoidTolls
-        )
-    }
+        // MARK: - Nuclear Fallback: Direct Route (NEVER fails)
 
-    // MARK: - MKDirections Fallback
+        private func generateDirectRoute(
+            from origin: CLLocationCoordinate2D,
+            to destination: CLLocationCoordinate2D,
+            destinationName: String
+        ) -> TruckRoute {
+            let originLoc = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
+            let destLoc = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
+            let distanceMeters = originLoc.distance(from: destLoc)
+            let durationSeconds = distanceMeters / 22.352 // assume ~50mph average
 
-    private func fallbackMKDirections(
-        from origin: CLLocation,
-        to destination: CLLocationCoordinate2D,
-        destinationName: String
-    ) async throws -> TruckRoute {
-        let destItem = MKMapItem(
-            location: CLLocation(latitude: destination.latitude, longitude: destination.longitude),
-            address: nil
-        )
-        destItem.name = destinationName
+            // Create polyline with intermediate points (great circle)
+            let pointCount = max(10, Int(distanceMeters / 1000)) // 1 point per km, min 10
+            var coordinates: [CLLocationCoordinate2D] = []
+            for i in 0...pointCount {
+                let fraction = Double(i) / Double(pointCount)
+                let lat = origin.latitude + fraction * (destination.latitude - origin.latitude)
+                let lon = origin.longitude + fraction * (destination.longitude - origin.longitude)
+                coordinates.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
+            }
 
-        let request = MKDirections.Request()
-        request.source = MKMapItem(location: origin, address: nil)
-        request.destination = destItem
-        request.transportType = .automobile
+            let steps = generateSyntheticSteps(from: coordinates, totalDistance: distanceMeters, totalDuration: durationSeconds, destinationName: destinationName)
 
-        let response = try await MKDirections(request: request).calculate()
-        guard let mkRoute = response.routes.first else {
-            throw RoutingServiceError.noRoute
-        }
-
-        let count = mkRoute.polyline.pointCount
-        var coords = [CLLocationCoordinate2D](repeating: .init(), count: count)
-        mkRoute.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: count))
-
-        let steps: [RouteStep] = mkRoute.steps.compactMap { step in
-            guard !step.instructions.isEmpty else { return nil }
-            return RouteStep(
-                instruction: step.instructions,
-                distanceMeters: step.distance,
-                durationSeconds: 0,
-                maneuver: step.instructions
+            #if DEBUG
+            print("[Routing] Direct route: \(Int(distanceMeters / 1000)) km | \(Int(durationSeconds / 60)) min | \(steps.count) steps")
+            #endif
+            return TruckRoute(
+                coordinates: coordinates,
+                steps: steps,
+                distanceMeters: distanceMeters,
+                durationSeconds: durationSeconds,
+                destinationName: destinationName,
+                truckNotices: [TruckRouteNotice(code: "DIRECT", title: "Direct route", details: "Road data unavailable. Drive with caution.")]
             )
         }
 
-        return TruckRoute(
-            coordinates: coords,
-            steps: steps,
-            distanceMeters: mkRoute.distance,
-            durationSeconds: mkRoute.expectedTravelTime,
-            destinationName: destinationName,
-            truckNotices: []
-        )
-    }
+        // MARK: - Geocode + Route (address string)
 
-    // MARK: - Offline Route Cache (up to 10 recent routes, 7-day expiry)
-
-    private static let maxCachedRoutes = 10
-    private static let cacheExpirySeconds: TimeInterval = 7 * 24 * 3600
-    private static let cacheKey = "offlineRouteCache_v3"
-
-    private func cacheRoute(_ route: TruckRoute, from origin: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D) {
-        let payload = CachedRoutePayload(
-            originLatitude: origin.latitude,
-            originLongitude: origin.longitude,
-            destinationLatitude: destination.latitude,
-            destinationLongitude: destination.longitude,
-            destinationName: route.destinationName,
-            distanceMeters: route.distanceMeters,
-            durationSeconds: route.durationSeconds,
-            coordinates: route.coordinates.map {
-                CachedCoordinate(latitude: $0.latitude, longitude: $0.longitude)
-            },
-            steps: route.steps.map {
-                CachedStep(
-                    instruction: $0.instruction,
-                    distanceMeters: $0.distanceMeters,
-                    durationSeconds: $0.durationSeconds,
-                    maneuver: $0.maneuver
-                )
-            },
-            cachedAt: Date().timeIntervalSince1970
-        )
-
-        var cached = loadAllCachedRoutes()
-
-        let now = Date().timeIntervalSince1970
-        cached.removeAll { now - $0.cachedAt > Self.cacheExpirySeconds }
-
-        cached.removeAll { existing in
-            let existingDest = CLLocation(latitude: existing.destinationLatitude, longitude: existing.destinationLongitude)
-            let newDest = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-            return existingDest.distance(from: newDest) < 5_000
-        }
-
-        cached.insert(payload, at: 0)
-
-        if cached.count > Self.maxCachedRoutes {
-            cached = Array(cached.prefix(Self.maxCachedRoutes))
-        }
-
-        guard let data = try? JSONEncoder().encode(cached) else { return }
-        UserDefaults.standard.set(data, forKey: Self.cacheKey)
-        print("[Routing] ✅ Cached route to '\(route.destinationName)' (\(cached.count) routes stored)")
-    }
-
-    private func loadAllCachedRoutes() -> [CachedRoutePayload] {
-        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
-              let routes = try? JSONDecoder().decode([CachedRoutePayload].self, from: data) else {
-            if let oldData = UserDefaults.standard.data(forKey: "lastOfflineRoute"),
-               let old = try? JSONDecoder().decode(CachedRoutePayload.self, from: oldData) {
-                UserDefaults.standard.removeObject(forKey: "lastOfflineRoute")
-                return [old]
+        func calculateTruckRoute(
+            from origin: CLLocation,
+            toAddress address: String,
+            profile: TruckProfile,
+            avoidTolls: Bool = false,
+            accessMode: RoutingAccessMode = .truckAware
+        ) async throws -> TruckRoute {
+            let searchRequest = MKLocalSearch.Request()
+            searchRequest.naturalLanguageQuery = address
+            let search = MKLocalSearch(request: searchRequest)
+            guard let result = try? await search.start(),
+                  let item = result.mapItems.first else {
+                throw RoutingServiceError.geocodeFailed(address)
             }
-            return []
-        }
-        return routes
-    }
 
-    private func loadCachedRoute(origin: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) -> TruckRoute? {
-        let cached = loadAllCachedRoutes()
-        let currentOrigin = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
-        let currentDestination = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-
-        let match = cached.first { payload in
-            let cachedOrigin = CLLocation(latitude: payload.originLatitude, longitude: payload.originLongitude)
-            let cachedDestination = CLLocation(latitude: payload.destinationLatitude, longitude: payload.destinationLongitude)
-            let originDist = currentOrigin.distance(from: cachedOrigin)
-            let destDist = currentDestination.distance(from: cachedDestination)
-            let age = Date().timeIntervalSince1970 - payload.cachedAt
-            return originDist < 3_000 && destDist < 3_000 && age < Self.cacheExpirySeconds
+            return try await calculateTruckRoute(
+                from: origin,
+                to: item.placemark.coordinate,
+                destinationName: item.name ?? address,
+                profile: profile,
+                avoidTolls: avoidTolls,
+                accessMode: accessMode
+            )
         }
 
-        guard let payload = match else { return nil }
+        // MARK: - MKDirections Fallback
 
-        return TruckRoute(
-            coordinates: payload.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) },
-            steps: payload.steps.map {
-                RouteStep(
-                    instruction: $0.instruction,
-                    distanceMeters: $0.distanceMeters,
-                    durationSeconds: $0.durationSeconds,
-                    maneuver: $0.maneuver
+        /// MapKit does not model height/weight/GVW. We honour **toll avoidance** via `MKDirectionsRoutePreference` (iOS 16+).
+        private func applyMapKitDrivingPreferences(_ request: MKDirections.Request, avoidTolls: Bool) {
+            request.transportType = .automobile
+            request.tollPreference = avoidTolls ? .avoid : .any
+            request.highwayPreference = .any
+        }
+
+        private func fallbackMKDirections(
+            from origin: CLLocation,
+            to destination: CLLocationCoordinate2D,
+            destinationName: String,
+            avoidTolls: Bool = false
+        ) async throws -> TruckRoute {
+            let destPlacemark = MKPlacemark(coordinate: destination)
+            let destItem = MKMapItem(placemark: destPlacemark)
+            destItem.name = destinationName
+
+            let originPlacemark = MKPlacemark(coordinate: origin.coordinate)
+            let originItem = MKMapItem(placemark: originPlacemark)
+
+            let request = MKDirections.Request()
+            request.source = originItem
+            request.destination = destItem
+            applyMapKitDrivingPreferences(request, avoidTolls: avoidTolls)
+
+            let response = try await MKDirections(request: request).calculate()
+            guard let mkRoute = response.routes.first else {
+                throw RoutingServiceError.noRoute
+            }
+
+            let count = mkRoute.polyline.pointCount
+            var coords = [CLLocationCoordinate2D](repeating: .init(), count: count)
+            mkRoute.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: count))
+
+            let steps: [RouteStep] = mkRoute.steps.compactMap { step in
+                guard !step.instructions.isEmpty else { return nil }
+                return RouteStep(
+                    instruction: step.instructions,
+                    distanceMeters: step.distance,
+                    durationSeconds: 0,
+                    maneuver: step.instructions
                 )
-            },
-            distanceMeters: payload.distanceMeters,
-            durationSeconds: payload.durationSeconds,
-            destinationName: payload.destinationName,
-            truckNotices: []
-        )
-    }
+            }
 
-    private func fetchDataWithRetry(
-        from url: URL,
-        provider: String
-    ) async throws -> (Data, URLResponse) {
-        var lastThrownError: Error?
+            return TruckRoute(
+                coordinates: coords,
+                steps: steps,
+                distanceMeters: mkRoute.distance,
+                durationSeconds: mkRoute.expectedTravelTime,
+                destinationName: destinationName,
+                truckNotices: []
+            )
+        }
 
-        for attempt in 1...maxNetworkAttempts {
-            do {
-                let result = try await networkSession.data(from: url)
-                if let http = result.1 as? HTTPURLResponse, (500...599).contains(http.statusCode), attempt < maxNetworkAttempts {
-                    try? await Task.sleep(nanoseconds: 400_000_000)
-                    continue
+        /// Encadeia **MKDirections** entre coordenadas consecutivas (ex.: ordem devolvida pelo middleware de otimização).
+        /// Produz um único `TruckRoute` navegável no MapKit (automobile + mesmas preferências de portagem que `fallbackMKDirections`).
+        func buildTruckRouteFromMapKitDirectionsChain(
+            from origin: CLLocation,
+            waypointSequence: [(coordinate: CLLocationCoordinate2D, name: String)],
+            avoidTolls: Bool = false
+        ) async throws -> TruckRoute {
+            guard !waypointSequence.isEmpty else { throw RoutingServiceError.noRoute }
+
+            var mergedCoords: [CLLocationCoordinate2D] = []
+            var mergedSteps: [RouteStep] = []
+            var totalDistance: Double = 0
+            var totalDuration: Double = 0
+            var current = origin
+
+            for wp in waypointSequence {
+                let destPlacemark = MKPlacemark(coordinate: wp.coordinate)
+                let destItem = MKMapItem(placemark: destPlacemark)
+                destItem.name = wp.name
+
+                let currentPlacemark = MKPlacemark(coordinate: current.coordinate)
+                let currentItem = MKMapItem(placemark: currentPlacemark)
+
+                let request = MKDirections.Request()
+                request.source = currentItem
+                request.destination = destItem
+                applyMapKitDrivingPreferences(request, avoidTolls: avoidTolls)
+
+                let response = try await MKDirections(request: request).calculate()
+                guard let mkRoute = response.routes.first else { throw RoutingServiceError.noRoute }
+
+                let count = mkRoute.polyline.pointCount
+                var segCoords = [CLLocationCoordinate2D](repeating: .init(), count: count)
+                mkRoute.polyline.getCoordinates(&segCoords, range: NSRange(location: 0, length: count))
+
+                if mergedCoords.isEmpty {
+                    mergedCoords.append(contentsOf: segCoords)
+                } else if let first = segCoords.first, let last = mergedCoords.last, !Self.coordinatesNearlyEqual(first, last) {
+                    mergedCoords.append(contentsOf: segCoords)
+                } else {
+                    mergedCoords.append(contentsOf: segCoords.dropFirst())
                 }
-                return result
-            } catch {
-                lastThrownError = error
-                if attempt < maxNetworkAttempts {
-                    print("[Routing] \(provider) attempt \(attempt) failed: \(error.localizedDescription). Retrying...")
-                    try? await Task.sleep(nanoseconds: 400_000_000)
-                    continue
+
+                let segSteps: [RouteStep] = mkRoute.steps.compactMap { step in
+                    guard !step.instructions.isEmpty else { return nil }
+                    return RouteStep(
+                        instruction: step.instructions,
+                        distanceMeters: step.distance,
+                        durationSeconds: 0,
+                        maneuver: step.instructions
+                    )
+                }
+                mergedSteps.append(contentsOf: segSteps)
+
+                totalDistance += mkRoute.distance
+                totalDuration += mkRoute.expectedTravelTime
+                current = CLLocation(latitude: wp.coordinate.latitude, longitude: wp.coordinate.longitude)
+            }
+
+            let finalName = waypointSequence.last?.name ?? "Destination"
+            lastProvider = .mapKit
+            return TruckRoute(
+                coordinates: mergedCoords,
+                steps: mergedSteps,
+                distanceMeters: totalDistance,
+                durationSeconds: totalDuration,
+                destinationName: finalName,
+                truckNotices: []
+            )
+        }
+
+        private static func coordinatesNearlyEqual(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
+            let la = CLLocation(latitude: a.latitude, longitude: a.longitude)
+            let lb = CLLocation(latitude: b.latitude, longitude: b.longitude)
+            return la.distance(from: lb) < 4.0
+        }
+
+        // MARK: - Offline Route Cache (up to 10 recent routes, 7-day expiry)
+
+        private static let maxCachedRoutes = 10
+        private static let cacheExpirySeconds: TimeInterval = 7 * 24 * 3600
+        private static let cacheKey = "offlineRouteCache_v3"
+
+        private func cacheRoute(
+            _ route: TruckRoute,
+            from origin: CLLocationCoordinate2D,
+            to destination: CLLocationCoordinate2D,
+            sourceProvider: RoutingProvider
+        ) {
+            let payload = CachedRoutePayload(
+                originLatitude: origin.latitude,
+                originLongitude: origin.longitude,
+                destinationLatitude: destination.latitude,
+                destinationLongitude: destination.longitude,
+                destinationName: route.destinationName,
+                distanceMeters: route.distanceMeters,
+                durationSeconds: route.durationSeconds,
+                coordinates: route.coordinates.map {
+                    CachedCoordinate(latitude: $0.latitude, longitude: $0.longitude)
+                },
+                steps: route.steps.map {
+                    CachedStep(
+                        instruction: $0.instruction,
+                        distanceMeters: $0.distanceMeters,
+                        durationSeconds: $0.durationSeconds,
+                        maneuver: $0.maneuver
+                    )
+                },
+                cachedAt: Date().timeIntervalSince1970,
+                originalRoutingProvider: sourceProvider.rawValue
+            )
+
+            var cached = loadAllCachedRoutes()
+
+            let now = Date().timeIntervalSince1970
+            cached.removeAll { now - $0.cachedAt > Self.cacheExpirySeconds }
+
+            cached.removeAll { existing in
+                let existingDest = CLLocation(latitude: existing.destinationLatitude, longitude: existing.destinationLongitude)
+                let newDest = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
+                return existingDest.distance(from: newDest) < 5_000
+            }
+
+            cached.insert(payload, at: 0)
+
+            if cached.count > Self.maxCachedRoutes {
+                cached = Array(cached.prefix(Self.maxCachedRoutes))
+            }
+
+            guard let data = try? JSONEncoder().encode(cached) else { return }
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+            #if DEBUG
+            print("[Routing] ✅ Cached route to '\(route.destinationName)' (\(cached.count) routes stored)")
+            #endif
+        }
+
+        private func loadAllCachedRoutes() -> [CachedRoutePayload] {
+            guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+                  let routes = try? JSONDecoder().decode([CachedRoutePayload].self, from: data) else {
+                if let oldData = UserDefaults.standard.data(forKey: "lastOfflineRoute"),
+                   let old = try? JSONDecoder().decode(CachedRoutePayload.self, from: oldData) {
+                    UserDefaults.standard.removeObject(forKey: "lastOfflineRoute")
+                    return [old]
+                }
+                return []
+            }
+            return routes
+        }
+
+        private struct LoadedCachedRoute {
+            let route: TruckRoute
+            /// Provider that originally computed the geometry (`.cached` if legacy payload had no provenance).
+            let geometryProvider: RoutingProvider
+        }
+
+        private func loadCachedRoute(origin: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) -> LoadedCachedRoute? {
+            let cached = loadAllCachedRoutes()
+            let currentOrigin = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
+            let currentDestination = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
+
+            let match = cached.first { payload in
+                let cachedOrigin = CLLocation(latitude: payload.originLatitude, longitude: payload.originLongitude)
+                let cachedDestination = CLLocation(latitude: payload.destinationLatitude, longitude: payload.destinationLongitude)
+                let originDist = currentOrigin.distance(from: cachedOrigin)
+                let destDist = currentDestination.distance(from: cachedDestination)
+                let age = Date().timeIntervalSince1970 - payload.cachedAt
+                return originDist < 3_000 && destDist < 3_000 && age < Self.cacheExpirySeconds
+            }
+
+            guard let payload = match else { return nil }
+
+            let geometryProvider: RoutingProvider = {
+                guard let raw = payload.originalRoutingProvider,
+                      let p = RoutingProvider(rawValue: raw),
+                      p != .cached, p != .unknown
+                else { return .cached }
+                return p
+            }()
+
+            let route = TruckRoute(
+                coordinates: payload.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) },
+                steps: payload.steps.map {
+                    RouteStep(
+                        instruction: $0.instruction,
+                        distanceMeters: $0.distanceMeters,
+                        durationSeconds: $0.durationSeconds,
+                        maneuver: $0.maneuver
+                    )
+                },
+                distanceMeters: payload.distanceMeters,
+                durationSeconds: payload.durationSeconds,
+                destinationName: payload.destinationName,
+                truckNotices: []
+            )
+            return LoadedCachedRoute(route: route, geometryProvider: geometryProvider)
+        }
+
+        private func fetchDataWithRetry(
+            from url: URL,
+            provider: String
+        ) async throws -> (Data, URLResponse) {
+            var lastThrownError: Error?
+
+            for attempt in 1...maxNetworkAttempts {
+                do {
+                    let result = try await networkSession.data(from: url)
+                    if let http = result.1 as? HTTPURLResponse, (500...599).contains(http.statusCode), attempt < maxNetworkAttempts {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        continue
+                    }
+                    return result
+                } catch {
+                    lastThrownError = error
+                    if attempt < maxNetworkAttempts {
+                        #if DEBUG
+                        print("[Routing] \(provider) attempt \(attempt) failed: \(error.localizedDescription). Retrying...")
+                        #endif
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        continue
+                    }
                 }
             }
+
+            throw lastThrownError ?? RoutingServiceError.networkError("\(provider) request failed")
         }
 
-        throw lastThrownError ?? RoutingServiceError.networkError("\(provider) request failed")
-    }
+        private func addNonTruckAwareNotice(to route: TruckRoute, provider: String) -> TruckRoute {
+            var r = route
+            r.truckNotices.append(TruckRouteNotice(
+                code: "non_truck_routing",
+                title: "Car-grade route — not truck-legal verified",
+                details: "Provider: \(provider). This path does not enforce bridge height, GVW/axle limits, length, tunnel clearance, or hazmat exclusions. Use only when truck-aware Valhalla is unavailable; verify signage and regulations."
+            ))
+            return r
+        }
 
-    private func recordEvent(
-        provider: RoutingProvider,
-        stage: RoutingStage,
-        destinationName: String,
-        startedAt: Date,
+        private func recordEvent(
+            provider: RoutingProvider,
+            stage: RoutingStage,
+            destinationName: String,
+            startedAt: Date,
         detail: String
     ) {
         let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -673,7 +929,9 @@ final class RoutingService {
         if let data = try? JSONEncoder().encode(recentEvents) {
             UserDefaults.standard.set(data, forKey: "routing_events_v1")
         }
+        #if DEBUG
         print("[Routing][\(stage.rawValue)] provider=\(provider.rawValue) elapsed=\(elapsedMs)ms dest='\(destinationName)' detail='\(detail)'")
+        #endif
     }
 
     enum RoutingStage: String, Codable {
@@ -702,7 +960,10 @@ struct TruckRoute: Equatable {
     let distanceMeters: Double
     let durationSeconds: Double
     let destinationName: String
-    let truckNotices: [TruckRouteNotice]
+    var truckNotices: [TruckRouteNotice]
+
+    /// Geometry source + optional quantum **stop-order** metadata from `POST /v1/optimize`.
+    var provenance: TruckRouteProvenance? = nil
 
     // Toll data — populated from routing response
     var tollCostUSD: Double = 0
@@ -719,7 +980,8 @@ struct TruckRoute: Equatable {
     static func == (lhs: TruckRoute, rhs: TruckRoute) -> Bool {
         lhs.distanceMeters == rhs.distanceMeters &&
         lhs.durationSeconds == rhs.durationSeconds &&
-        lhs.destinationName == rhs.destinationName
+        lhs.destinationName == rhs.destinationName &&
+        lhs.provenance == rhs.provenance
     }
 }
 
@@ -740,6 +1002,16 @@ struct TruckRouteNotice: Equatable {
     let code: String
     let title: String
     let details: String?
+    /// Map position along the route (Valhalla `begin_shape_index` → polyline point).
+    var coordinate: CLLocationCoordinate2D? = nil
+
+    static func == (lhs: TruckRouteNotice, rhs: TruckRouteNotice) -> Bool {
+        lhs.code == rhs.code &&
+        lhs.title == rhs.title &&
+        lhs.details == rhs.details &&
+        lhs.coordinate?.latitude == rhs.coordinate?.latitude &&
+        lhs.coordinate?.longitude == rhs.coordinate?.longitude
+    }
 }
 
 // MARK: - Routing Errors
@@ -979,6 +1251,8 @@ private struct CachedRoutePayload: Codable {
     let coordinates: [CachedCoordinate]
     let steps: [CachedStep]
     let cachedAt: TimeInterval
+    /// Raw value of `RoutingProvider` when the route was first stored (`Valhalla` / `OSRM` / `MapKit`). Absent in legacy cache JSON.
+    let originalRoutingProvider: String?
 }
 
 private struct CachedCoordinate: Codable {

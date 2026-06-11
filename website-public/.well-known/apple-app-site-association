@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "5K8B4JY4WT.com.thais.truckereasy.trucker-easy-app",
+        "paths": [
+          "/dispatch/open",
+          "/dispatch/open/*",
+          "/dispatch/*",
+          "/app/dispatch",
+          "/app/dispatch/*"
+        ]
+      }
+    ]
+  }
+}

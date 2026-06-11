@@ -195,7 +195,7 @@ struct TruckNavigationMapView: View {
             
             Spacer()
             
-            // HERE API status indicator
+            // Route provider status indicator
             if RoutingService.shared.isAvailable {
                 Label("Truck-Safe", systemImage: "checkmark.shield.fill")
                     .font(.caption)
@@ -324,7 +324,9 @@ struct TruckNavigationMapView: View {
         defer { isCalculating = false }
         
         do {
+            #if DEBUG
             print("🚛 [Navigation] Calculating route to \(destName)...")
+            #endif
             
             // Calculate route with warnings
             let (route, warnings) = try await truckProfile.calculateRouteWithWarnings(
@@ -374,12 +376,18 @@ struct TruckNavigationMapView: View {
                 hapticFeedback.success()
             }
             
+            #if DEBUG
             print("✅ [Navigation] Route calculated: \(route.distanceMiles) miles")
+            #endif
+            #if DEBUG
             print("✅ [Navigation] Warnings: \(warnings.count)")
+            #endif
             
         } catch {
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("❌ [Navigation] Error: \(error)")
+            #endif
             
             if hapticEnabled {
                 hapticFeedback.error()

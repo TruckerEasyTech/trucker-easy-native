@@ -2,7 +2,9 @@ import SwiftUI
 import SwiftData
 import CoreLocation
 import MapKit
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 // MARK: - News Article Model
 struct NewsArticle: Identifiable, Codable {
@@ -314,9 +316,19 @@ struct RoadReportPanel: View {
                                 .tint(AppTheme.Colors.accent)
                                 .padding(.vertical, AppTheme.Spacing.md)
                         } else if recentReports.isEmpty {
-                            ForEach(mockReports) { report in
-                                MockReportRow(report: report, lang: lang)
+                            VStack(spacing: 10) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(AppTheme.Colors.textSecondary)
+                                Text("No recent reports in your area")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(AppTheme.Colors.textSecondary)
+                                Text("Be the first to report!")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(AppTheme.Colors.textSecondary.opacity(0.7))
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, AppTheme.Spacing.lg)
                         } else {
                             ForEach(recentReports) { report in
                                 RemoteReportRow(record: report, lang: lang)
@@ -361,7 +373,9 @@ struct RoadReportPanel: View {
                 try await SupabaseClient.shared.submitRoadReport(payload)
                 await loadRecentReports()
             } catch {
+                #if DEBUG
                 print("RoadReportPanel: failed to submit report — \(error.localizedDescription)")
+                #endif
             }
         }
     }
@@ -378,7 +392,9 @@ struct RoadReportPanel: View {
                 radiusKm: 160
             )
         } catch {
+            #if DEBUG
             print("RoadReportPanel: failed to fetch recent reports — \(error.localizedDescription)")
+            #endif
         }
     }
 }
@@ -866,15 +882,24 @@ struct TruckingNewsView: View {
 
     private func resolveCountryCode() async -> String {
         guard let location = locationManager.currentLocation else { return "US" }
-        guard let request = MKReverseGeocodingRequest(location: location) else { return "US" }
-        return await withCheckedContinuation { continuation in
-            request.getMapItems { mapItems, _ in
-                if let repr = mapItems?.first?.addressRepresentations,
-                   let region = repr.region {
-                    continuation.resume(returning: region.identifier.uppercased().prefix(2).description)
-                } else {
-                    continuation.resume(returning: "US")
+        if #available(iOS 26, *) {
+            guard let request = MKReverseGeocodingRequest(location: location) else { return "US" }
+            return await withCheckedContinuation { continuation in
+                request.getMapItems { mapItems, _ in
+                    if let repr = mapItems?.first?.addressRepresentations,
+                       let region = repr.region {
+                        continuation.resume(returning: region.identifier.uppercased().prefix(2).description)
+                    } else {
+                        continuation.resume(returning: "US")
+                    }
                 }
+            }
+        } else {
+            do {
+                let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
+                return placemarks.first?.isoCountryCode?.uppercased() ?? "US"
+            } catch {
+                return "US"
             }
         }
     }
@@ -1146,7 +1171,7 @@ private struct EasyAIChatKeyword: View {
         (["parking", "rest", "stop", "truck stop"],
          "Use the My Horizon map to find nearby truck stops. Tap 'Find Truck Stop' for parking, fuel, and amenities. Report parking availability in Road Talk → Report!"),
         (["subscription", "price", "plan", "pay"],
-         "TruckerEasy plans:\n• Monthly: $19.99/mo\n• Annual: $169.90/yr (save $69.98!)\n• Free Trial: 3 days\n\nGo to Settings → Manage Plan to subscribe."),
+         "TruckerEasy plans:\n• Monthly: \(AppDistributionConfig.MarketingPrice.monthlyUSD)/mo\n• Annual: \(AppDistributionConfig.MarketingPrice.annualUSD)/yr (save \(AppDistributionConfig.MarketingPrice.annualSavingsUSD)!)\n• Free Trial: \(AppDistributionConfig.MarketingPrice.trialDays) days\n\nGo to Settings → Manage Plan to subscribe."),
     ]
 
     var body: some View {

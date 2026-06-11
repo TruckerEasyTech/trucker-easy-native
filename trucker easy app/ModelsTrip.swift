@@ -20,7 +20,20 @@ final class Trip {
     var truckNumber: String
     var notes: String
     var isActive: Bool
-    
+
+    /// Último `request_id` enviado ao middleware de otimização de rota (auditoria / métricas).
+    var lastRouteOptimizeRequestId: String?
+    /// ID da carga (`DispatchedLoad.id`) associada a essa otimização.
+    var lastRouteOptimizeLoadId: String?
+    var lastRouteOptimizeAt: Date?
+
+    /// Poupança aproximada (km) — `approx_km_saved` do middleware (Haversine, ver `lastRouteOptimizeMetricsMethodology`).
+    var lastRouteOptimizeKmSavedApprox: Double?
+    var lastRouteOptimizeKmBaselineApprox: Double?
+    var lastRouteOptimizeKmOptimizedApprox: Double?
+    /// Valor de `solver_used` no JSON (ex.: `dwave_neal_sa`, `amazon_braket_dwave`, `leap_hybrid_cqm`).
+    var lastRouteOptimizeSolverUsed: String?
+
     @Relationship(deleteRule: .cascade, inverse: \FuelPurchase.trip)
     var fuelPurchases: [FuelPurchase]
     
@@ -52,6 +65,13 @@ final class Trip {
         self.truckNumber = truckNumber
         self.notes = notes
         self.isActive = true
+        self.lastRouteOptimizeRequestId = nil
+        self.lastRouteOptimizeLoadId = nil
+        self.lastRouteOptimizeAt = nil
+        self.lastRouteOptimizeKmSavedApprox = nil
+        self.lastRouteOptimizeKmBaselineApprox = nil
+        self.lastRouteOptimizeKmOptimizedApprox = nil
+        self.lastRouteOptimizeSolverUsed = nil
         self.fuelPurchases = []
         self.expenses = []
     }

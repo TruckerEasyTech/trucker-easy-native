@@ -1,6 +1,6 @@
 // ViewsDriverProfileView.swift
 // TruckerEasy — Driver Profile Tab
-// © 2024–2025 TruckerEasy. All rights reserved. Unauthorized copying or redistribution prohibited.
+// © 2024–2026 TruckerEasy. All rights reserved. Unauthorized copying or redistribution prohibited.
 
 import SwiftUI
 import PhotosUI
@@ -39,8 +39,10 @@ struct DriverProfileView: View {
     @State private var showingSubscription   = false
     @State private var showingFindDMV        = false
     @State private var showingDrugTest       = false
+    @State private var showingFleetAccount   = false
     @State private var avatarItem: PhotosPickerItem? = nil
     @State private var avatarImageData: Data? = nil
+    @State private var fleetAuth = DriverAuthManager.shared
 
     var lang: AppLanguage { regionalSettings.currentLanguage }
 
@@ -73,6 +75,9 @@ struct DriverProfileView: View {
                             foodSection
                             bypassRatingsSection
                             documentsSection
+                            if AppAccessPolicy.driverDispatchEnabled {
+                                fleetAccountSection
+                            }
                             myTruckSection
                             settingsSection
                             logoutButton
@@ -103,11 +108,14 @@ struct DriverProfileView: View {
         .sheet(isPresented: $showingSubscription)    { SubscriptionView() }
         .sheet(isPresented: $showingFindDMV)         { FindDMVSheet() }
         .sheet(isPresented: $showingDrugTest)        { DrugTestSheet() }
+        .sheet(isPresented: $showingFleetAccount) {
+            DriverFleetAccountSheet(auth: fleetAuth)
+        }
         .sheet(isPresented: $showingEditName) {
             EditDriverNameSheet(driverName: $driverName)
         }
         .alert(lang.logOutConfirmTitle, isPresented: $showingLogOutAlert) {
-            Button(lang.logOutConfirmTitle, role: .destructive) { /* handle logout */ }
+            Button(lang.logOutConfirmTitle, role: .destructive) { performLogout() }
             Button(lang.cancelLabel, role: .cancel) {}
         } message: {
             Text(lang.logOutConfirmMessage)
@@ -119,7 +127,36 @@ struct DriverProfileView: View {
                 }
             }
         }
+        .task {
+            guard AppAccessPolicy.driverDispatchEnabled else { return }
+            fleetAuth.syncFromClient()
+            if fleetAuth.isSignedIn {
+                await fleetAuth.refreshPendingLoads(pushFirstToHorizon: false)
+            }
+        }
         .preferredColorScheme(colorSchemeFromSetting)
+    }
+
+    // MARK: - Logout
+
+    private func performLogout() {
+        Task { await fleetAuth.signOut() }
+        let keysToReset = [
+            "driverName", "driverSinceYear", "driverReports",
+            "driverReviews", "driverMessages", "avatarImageData",
+            "healthProfile", "driverRatings", "favoriteMeals",
+            "hasSeenWelcome"
+        ]
+        for key in keysToReset {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        driverName = "Driver"
+        driverSinceYear = 2025
+        driverReports = 0
+        driverReviews = 0
+        driverMessages = 0
+        notificationsEnabled = true
+        appearanceMode = 0
     }
 
     // MARK: - Header
@@ -374,6 +411,43 @@ struct DriverProfileView: View {
         case .tanker:       return "fuelpump.fill"
         case .flatbed:      return "shippingbox.fill"
         case .refrigerated: return "snowflake"
+        }
+    }
+
+    // MARK: - Fleet / Dispatch
+
+    private var fleetAccountSection: some View {
+        ProfileSectionCard(title: "Fleet & Dispatch") {
+            VStack(spacing: 0) {
+                Button(action: { showingFleetAccount = true }) {
+                    ProfileRow(
+                        icon: "shippingbox.fill",
+                        iconColor: AppTheme.Colors.cta,
+                        title: fleetAuth.isSignedIn ? "Fleet account connected" : "Connect fleet account",
+                        subtitle: fleetAuth.isSignedIn
+                            ? (fleetAuth.email ?? "Signed in") + (fleetAuth.pendingLoadCount.map { " · \($0) pending" } ?? "")
+                            : "Receive loads from truckereasy.com dispatch"
+                    )
+                }
+                if fleetAuth.isSignedIn {
+                    Divider().background(AppTheme.Colors.backgroundCard)
+                    Button {
+                        Task { await fleetAuth.refreshPendingLoads(pushFirstToHorizon: true) }
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(AppTheme.Colors.accent)
+                                .frame(width: 32)
+                            Text("Refresh pending loads")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                    }
+                }
+            }
         }
     }
 
@@ -1161,7 +1235,7 @@ struct PrivacyPolicySheet: View {
                             PolicySection(title: "How We Use Your Data", text: "Your data is used to power navigation, wellness tracking, document reminders, and personalized food suggestions. All processing happens on-device where possible.")
                             PolicySection(title: "Data Storage", text: "Data is stored locally on your device using Apple's SwiftData framework. Any cloud sync is encrypted end-to-end.")
                             PolicySection(title: "Your Rights", text: "You may export or delete all your data at any time from Settings → Data. You may opt out of analytics at any time.")
-                            PolicySection(title: "Contact", text: "Privacy concerns: privacy@truckereasy.app\n© 2024–2025 TruckerEasy. All rights reserved.")
+                            PolicySection(title: "Contact", text: "Privacy concerns: privacy@truckereasy.app\n© 2024–2026 TruckerEasy. All rights reserved.")
                         }
                     }
                     .padding(20)
@@ -1228,21 +1302,72 @@ struct HelpSupportSheet: View {
 
 struct BypassHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var records: [WeighStationReportRecord] = []
+    @State private var isLoading = true
+
+    private var bypassRecords: [WeighStationReportRecord] {
+        records.filter { $0.outcome == "bypass" }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
-                VStack(spacing: 20) {
-                    Image(systemName: "checkmark.shield.fill")
-                        .font(.system(size: 52)).foregroundColor(AppTheme.Colors.accent)
-                        .padding(.top, 40)
-                    Text("Bypass History")
-                        .font(.system(size: 22, weight: .bold)).foregroundColor(.white)
-                    Text("Your weigh station bypass records will appear here once you start using PrePass or similar bypass services.")
-                        .font(.system(size: 15)).foregroundColor(AppTheme.Colors.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                    Spacer()
+                if isLoading {
+                    ProgressView().tint(AppTheme.Colors.accent)
+                } else if bypassRecords.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 52)).foregroundColor(AppTheme.Colors.accent)
+                            .padding(.top, 40)
+                        Text("Bypass History")
+                            .font(.system(size: 22, weight: .bold)).foregroundColor(.white)
+                        Text("No bypass records yet. Your weigh station bypass records will appear here automatically.")
+                            .font(.system(size: 15)).foregroundColor(AppTheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        Spacer()
+                    }
+                } else {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Text("\(bypassRecords.count) bypass\(bypassRecords.count == 1 ? "" : "es")")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(AppTheme.Colors.accent)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16).padding(.top, 12)
+
+                            ForEach(bypassRecords, id: \.id) { record in
+                                HStack(spacing: 12) {
+                                    Image(systemName: "checkmark.shield.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(AppTheme.Colors.success)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(record.station_name)
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundColor(.white)
+                                        Text(Self.formatDate(record.reported_at))
+                                            .font(.system(size: 12))
+                                            .foregroundColor(AppTheme.Colors.textSecondary)
+                                    }
+                                    Spacer()
+                                    Text("BYPASS")
+                                        .font(.system(size: 11, weight: .black))
+                                        .foregroundColor(AppTheme.Colors.success)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(AppTheme.Colors.success.opacity(0.15))
+                                        .clipShape(Capsule())
+                                }
+                                .padding(12)
+                                .background(AppTheme.Colors.backgroundCard)
+                                .cornerRadius(AppTheme.Radius.md)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
                 }
             }
             .navigationTitle("Bypass History")
@@ -1250,6 +1375,28 @@ struct BypassHistorySheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.foregroundColor(AppTheme.Colors.accent) } }
         }
         .preferredColorScheme(.dark)
+        .task {
+            do {
+                records = try await SupabaseClient.shared.fetchWeighStationReports()
+            } catch {
+                #if DEBUG
+                print("[BypassHistory] fetch failed: \(error.localizedDescription)")
+                #endif
+            }
+            isLoading = false
+        }
+    }
+
+    private static func formatDate(_ iso: String) -> String {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fmt.date(from: iso) {
+            let df = DateFormatter()
+            df.dateStyle = .medium
+            df.timeStyle = .short
+            return df.string(from: date)
+        }
+        return iso
     }
 }
 
@@ -1788,13 +1935,11 @@ struct PlaceResultRow: View {
     let accentColor: Color
 
     private var address: String {
-        if let addr = item.address?.shortAddress ?? item.addressRepresentations?.cityWithContext {
-            return addr
+        let parts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea].compactMap { $0 }
+        if !parts.isEmpty {
+            return parts.joined(separator: ", ")
         }
-        if let full = item.addressRepresentations?.fullAddress(includingRegion: false, singleLine: true) {
-            return full
-        }
-        return item.address?.fullAddress ?? item.name ?? ""
+        return item.placemark.title ?? item.name ?? ""
     }
 
     private var phone: String { item.phoneNumber ?? "" }

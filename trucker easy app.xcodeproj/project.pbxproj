@@ -8,13 +8,67 @@
 
 /* Begin PBXBuildFile section */
 		54054F4B2F7B76E8002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh in Resources */ = {isa = PBXBuildFile; fileRef = 54054F4A2F7B76E7002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh */; };
-		5498D2172F57A255007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
-		5498D2182F57A255007240ED /* heresdk.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		5498D21A2F57A3EE007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
-		5498D21B2F57A3FF007240ED /* heresdk.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5498D2162F57A255007240ED /* heresdk.xcframework */; };
 		5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 5498D4AB2F527E73007240ED /* MapboxMaps */; };
 		6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXBuildRule section */
+		54DF13FA2FB2777600F67D66 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = pattern.proxy;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+		54DF13FB2FB2777900F67D66 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = pattern.proxy;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+		54DF13FC2FB2777C00F67D66 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = pattern.proxy;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+		54DF13FD2FB2778300F67D66 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = pattern.proxy;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+		54DF13FE2FB277B000F67D66 /* PBXBuildRule */ = {
+			isa = PBXBuildRule;
+			compilerSpec = com.apple.compilers.proxy.script;
+			fileType = pattern.proxy;
+			inputFiles = (
+			);
+			isEditable = 1;
+			outputFiles = (
+			);
+			script = "# Type a script or drag a script file from your workspace to insert its path.\n";
+		};
+/* End PBXBuildRule section */
 
 /* Begin PBXContainerItemProxy section */
 		CP020202020202020202020202 /* PBXContainerItemProxy */ = {
@@ -33,7 +87,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				5498D2182F57A255007240ED /* heresdk.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -60,7 +113,6 @@
 		54819BEE2F7CD52B0073DAD8 /* ServicesJurisdictionPolicyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesJurisdictionPolicyService.swift; sourceTree = "<group>"; };
 		54819BF02F7CD52B0073DAD8 /* ServicesOperationalFeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServicesOperationalFeedService.swift; sourceTree = "<group>"; };
 		5498CBE32F527E73007240ED /* trucker easy app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "trucker easy app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		5498D2162F57A255007240ED /* heresdk.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = heresdk.xcframework; path = ../heresdk.xcframework; sourceTree = "<group>"; };
 		5498D5A02F527E73007240ED /* TruckerEasy.debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TruckerEasy.debug.xcconfig; sourceTree = "<group>"; };
 		5498D5A12F527E73007240ED /* TruckerEasy.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TruckerEasy.release.xcconfig; sourceTree = "<group>"; };
 		7D152D24639292788573B949 /* Pods-trucker easy app.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-trucker easy app.release.xcconfig"; path = "Target Support Files/Pods-trucker easy app/Pods-trucker easy app.release.xcconfig"; sourceTree = "<group>"; };
@@ -93,9 +145,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5498D21B2F57A3FF007240ED /* heresdk.xcframework in Frameworks */,
-				5498D2172F57A255007240ED /* heresdk.xcframework in Frameworks */,
-				5498D21A2F57A3EE007240ED /* heresdk.xcframework in Frameworks */,
 				6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */,
 				5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */,
 			);
@@ -143,7 +192,6 @@
 		5498D2142F57A04B007240ED /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				5498D2162F57A255007240ED /* heresdk.xcframework */,
 				5498D2152F57A04C007240ED /* frameworks */,
 				24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */,
 			);
@@ -196,6 +244,11 @@
 				5498D2192F57A255007240ED /* Embed Frameworks */,
 			);
 			buildRules = (
+				54DF13FE2FB277B000F67D66 /* PBXBuildRule */,
+				54DF13FD2FB2778300F67D66 /* PBXBuildRule */,
+				54DF13FC2FB2777C00F67D66 /* PBXBuildRule */,
+				54DF13FB2FB2777900F67D66 /* PBXBuildRule */,
+				54DF13FA2FB2777600F67D66 /* PBXBuildRule */,
 			);
 			dependencies = (
 				CP030303030303030303030303 /* PBXTargetDependency */,
@@ -236,7 +289,6 @@
 			mainGroup = 5498CBDA2F527E73007240ED;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				54001A992F72F20200AF51DC /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -345,10 +397,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = V28A2H52N2;
+				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -363,7 +415,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -408,11 +460,11 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = V28A2H52N2;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -421,7 +473,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -439,7 +491,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy app.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -447,23 +499,26 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy uses the camera to scan receipts and truck documents.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trucker Easy can read Apple Health data to estimate fatigue and suggest safer rest timing.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trucker Easy can write wellness records to Apple Health when you enable this option.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy needs background location to track trips, monitor HOS, and issue route safety alerts while driving.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.";
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Trucker Easy needs location access to keep truck trip and compliance tracking active.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location to show your position on the map, calculate truck routes with restrictions, and guide navigation safely.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy uses the microphone for hands-free voice commands while driving.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location for truck navigation and real-time community alerts on the road.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Trucker Easy uses motion sensors to improve trip detection and driving status.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Trucker Easy saves captured receipt and document images to your library when requested.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy uses your photo library to attach receipts and documents.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition for voice navigation commands.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy needs photo access to upload document images to your secure digital vault.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arm64 gps location-services";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -489,7 +544,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy appRelease.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 13;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -497,23 +553,26 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Trucker Easy";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy uses the camera to scan receipts and truck documents.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "Trucker Easy uses Bluetooth to connect optional OBD-II or ELD adapters for engine diagnostics and fleet telemetry when you enable that feature.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Trucker Easy needs camera access to quickly scan and securely store your CDL, DOT, and insurance documents.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Trucker Easy can read Apple Health data to estimate fatigue and suggest safer rest timing.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Trucker Easy can write wellness records to Apple Health when you enable this option.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy needs background location to track trips, monitor HOS, and issue route safety alerts while driving.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Trucker Easy uses your location to notify you 15 minutes before rest stops with healthy meal suggestions based on your profile.";
 				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Trucker Easy needs location access to keep truck trip and compliance tracking active.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location to show your position on the map, calculate truck routes with restrictions, and guide navigation safely.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy uses the microphone for hands-free voice commands while driving.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Trucker Easy needs your location for truck navigation and real-time community alerts on the road.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Trucker Easy needs microphone access so you can use voice commands with Easy, your AI assistant.";
 				INFOPLIST_KEY_NSMotionUsageDescription = "Trucker Easy uses motion sensors to improve trip detection and driving status.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Trucker Easy saves captured receipt and document images to your library when requested.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy uses your photo library to attach receipts and documents.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition for voice navigation commands.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Trucker Easy needs photo access to upload document images to your secure digital vault.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Trucker Easy uses speech recognition to transcribe your voice messages to Easy for safer hands-free operation.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arm64 gps location-services";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -556,20 +615,12 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		54001A992F72F20200AF51DC /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/supabase-community/supabase-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.5.1;
-			};
-		};
 		5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git";
+			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.22.1;
+				kind = exactVersion;
+				version = 11.23.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

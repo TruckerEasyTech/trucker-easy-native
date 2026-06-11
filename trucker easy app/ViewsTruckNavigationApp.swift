@@ -273,7 +273,9 @@ struct DestinationPickerView: View {
             let response = try await search.start()
             searchResults = response.mapItems
         } catch {
+            #if DEBUG
             print("Search error: \(error)")
+            #endif
             searchResults = []
         }
         
@@ -281,11 +283,7 @@ struct DestinationPickerView: View {
     }
     
     private func selectDestination(_ item: MKMapItem) {
-        if #available(iOS 26, *) {
-            destination = item.location.coordinate
-        } else {
-            destination = item.placemark.coordinate
-        }
+        destination = item.placemark.coordinate
         destinationName = item.name
         dismiss()
     }
@@ -606,9 +604,12 @@ struct LegacyTruckNavigationMapView: View {
             // Update camera to show full route
             updateCameraForRoute(route)
             
+            #if DEBUG
             print("✅ Route calculated: \(route.distanceMiles) mi, \(warnings.count) warnings")
+            #endif
             
         } catch {
+            #if DEBUG
             let emergency = emergencyDirectRoute(
                 from: origin.coordinate,
                 to: dest,
@@ -619,6 +620,11 @@ struct LegacyTruckNavigationMapView: View {
             routeError = nil
             hapticManager.warning()
             print("⚠️ Route providers failed, using emergency direct route: \(error.localizedDescription)")
+            #else
+            routeError = "Truck routing unavailable. Check Valhalla server and network."
+            currentRoute = nil
+            hapticManager.warning()
+            #endif
             // #region agent log
             agentLogLegacy(
                 runId: "baseline",
@@ -743,7 +749,9 @@ struct LegacyTruckNavigationMapView: View {
             // Haptic warning
             hapticManager.warning()
             
+            #if DEBUG
             print("⚠️ Warning: \(closestWarning.type.rawValue) at \(distanceText)")
+            #endif
         }
     }
     
@@ -841,7 +849,9 @@ class NavigationLocationManager: NSObject, CLLocationManagerDelegate {
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        #if DEBUG
         print("Location error: \(error.localizedDescription)")
+        #endif
     }
 }
 
@@ -1390,7 +1400,9 @@ func getCoverageForLocation(_ coordinate: CLLocationCoordinate2D) async -> Regio
                 )
             }
         } catch {
+            #if DEBUG
             print("Geocode error: \(error)")
+            #endif
         }
     }
     

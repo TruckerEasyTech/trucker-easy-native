@@ -1,4 +1,4 @@
-// © 2024–2025 TruckerEasy. All rights reserved.
+// © 2024–2026 TruckerEasy. All rights reserved.
 // Proprietary and confidential. Unauthorized copying, distribution or modification
 // of this file or any portion thereof via any medium is strictly prohibited.
 // "TruckerEasy" and the TruckerEasy logo are trademarks of TruckerEasy LLC.

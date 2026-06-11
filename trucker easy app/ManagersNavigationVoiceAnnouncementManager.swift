@@ -70,7 +70,9 @@ final class NavigationVoiceAnnouncementManager {
     func announce(_ message: String) async {
         guard isEnabled else { return }
         guard canAnnounce() else {
+            #if DEBUG
             print("[Voice] 🔇 Throttled: Too soon since last announcement")
+            #endif
             return
         }
         
@@ -88,20 +90,26 @@ final class NavigationVoiceAnnouncementManager {
     ) {
         guard isEnabled else { return }
         guard canAnnounce() else {
+            #if DEBUG
             print("[Voice] 🔇 Throttled: Too soon since last announcement")
+            #endif
             return
         }
         
         // Find which distance range this falls into
         guard let (rangeIndex, range) = findDistanceRange(for: distance) else {
+            #if DEBUG
             print("[Voice] ⏭️ Skipped: Distance \(Int(distance))m not in announcement ranges")
+            #endif
             return
         }
         
         // Check if we've already announced this warning at this range
         let deduplicationKey = "\(warning.id):\(rangeIndex)"
         if announcedWarnings.contains(deduplicationKey) {
+            #if DEBUG
             print("[Voice] ✋ Deduplicated: Already announced \(warning.type.rawValue) at \(range.label)")
+            #endif
             return
         }
         
@@ -115,7 +123,9 @@ final class NavigationVoiceAnnouncementManager {
         announcedWarnings.insert(deduplicationKey)
         lastAnnouncementTime = Date()
         
+        #if DEBUG
         print("[Voice] 🔊 Announced: \(warning.type.rawValue) at \(range.label) (\(Int(distance))m)")
+        #endif
     }
     
     /// Checks for nearby warnings and announces them intelligently
@@ -162,7 +172,9 @@ final class NavigationVoiceAnnouncementManager {
     /// Clears deduplication cache (e.g., when route changes)
     func resetDeduplication() {
         announcedWarnings.removeAll()
+        #if DEBUG
         print("[Voice] 🔄 Deduplication cache cleared")
+        #endif
     }
     
     // MARK: - Private Methods
@@ -178,7 +190,9 @@ final class NavigationVoiceAnnouncementManager {
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
+            #if DEBUG
             print("[Voice] ⚠️ Audio session setup failed: \(error)")
+            #endif
         }
     }
     

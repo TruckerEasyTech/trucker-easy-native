@@ -61,7 +61,9 @@ class VoiceAnnouncer {
         currentUtterance = utterance
         synthesizer.speak(utterance)
         
+        #if DEBUG
         print("🔊 [Voice] Announcing: \(message)")
+        #endif
     }
     
     /// Announce truck warning with appropriate priority
@@ -116,9 +118,13 @@ class VoiceAnnouncer {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            #if DEBUG
             print("✅ [Voice] Audio session category configured")
+            #endif
         } catch {
+            #if DEBUG
             print("❌ [Voice] Audio session category setup failed: \(error)")
+            #endif
         }
     }
 
@@ -127,7 +133,9 @@ class VoiceAnnouncer {
         do {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
+            #if DEBUG
             print("❌ [Voice] Audio session activation failed: \(error)")
+            #endif
         }
     }
     

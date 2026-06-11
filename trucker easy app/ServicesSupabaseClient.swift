@@ -1,28 +1,36 @@
 import Foundation
 import UIKit
+import CoreLocation
 
 // MARK: - Supabase Configuration
-// Project Ref: qhwuwiiwdzqkjzjqgpvx
-// Values also stored in Info.plist (SupabaseURL / SupabaseAnonKey)
+// Project ref default: usowafvqawbunyhmfscx (override via SupabaseURL / $(SUPABASE_URL))
+// Values from Info.plist; SUPABASE_URL in .xcconfig must use https:||host (// starts a comment in xcconfig).
 
 enum SupabaseConfig {
-    private static let defaultProjectRef = "qhwuwiiwdzqkjzjqgpvx"
-    private static let defaultProjectURL = "https://qhwuwiiwdzqkjzjqgpvx.supabase.co"
+    private static let defaultProjectRef = "usowafvqawbunyhmfscx"
+    private static let defaultProjectURL = "https://usowafvqawbunyhmfscx.supabase.co"
     private static let placeholderAnonKey = "YOUR_SUPABASE_ANON_KEY"
 
+    private static func plistSupabaseURLString() -> String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String else { return nil }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "||", with: "//")
+        guard !t.isEmpty, !t.contains("$(") else { return nil }
+        return t
+    }
+
     static var projectRef: String {
-        if let configuredURL = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String,
-           let host = URL(string: configuredURL)?.host,
-           let ref = host.split(separator: ".").first,
-           !ref.isEmpty {
-            return String(ref)
+        guard let configuredURL = plistSupabaseURLString(),
+              let host = URL(string: configuredURL)?.host,
+              let ref = host.split(separator: ".").first,
+              !ref.isEmpty else {
+            return defaultProjectRef
         }
-        return defaultProjectRef
+        return String(ref)
     }
 
     static var projectURL: String {
-        if let configured = Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String,
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let configured = plistSupabaseURLString() {
             return configured
         }
         return defaultProjectURL
@@ -55,6 +63,13 @@ enum SupabaseConfig {
         static let drivers           = "drivers"
         static let dispatchedLoads   = "dispatched_loads"
         static let fuelReports       = "fuel_reports"
+        static let fuelPriceReports  = "fuel_price_reports"
+        static let fuelReceipts      = "fuel_receipts"
+        static let truckStopParkingReports = "truck_stop_parking_reports"
+        static let truckStopReviews  = "truck_stop_reviews"
+        static let shipperFacilityReviews = "shipper_facility_reviews"
+        static let driverWellnessCheckins = "driver_wellness_checkins"
+        static let driverWellnessInsights = "driver_wellness_insights"
         static let routeOptimizations = "route_optimizations"
     }
 }
@@ -70,7 +85,7 @@ final class SupabaseClient {
     private var session: URLSession
 
     private init() {
-        self.baseURL = URL(string: SupabaseConfig.projectURL)!
+        self.baseURL = URL(string: SupabaseConfig.projectURL) ?? URL(string: "https://placeholder.supabase.co")!
         self.anonKey = SupabaseConfig.anonKey
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
@@ -160,12 +175,36 @@ final class SupabaseClient {
         return try JSONDecoder().decode(Response.self, from: data)
     }
 
+    // MARK: - PostgREST RPC
+
+    /// Calls a Postgres function exposed through Supabase PostgREST, e.g. `places_near`.
+    func rpc<Payload: Encodable, Response: Decodable>(
+        _ function: String,
+        params: Payload,
+        responseType: Response.Type = Response.self
+    ) async throws -> [Response] {
+        try validateConfiguration()
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/rpc/\(function)") else {
+            throw SupabaseError.invalidURL
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        var headers = commonHeaders
+        headers["Prefer"] = "return=representation"
+        headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.httpBody = try JSONEncoder().encode(params)
+
+        let (data, response) = try await session.data(for: req)
+        try validateResponse(response, data: data)
+        return try JSONDecoder().decode([Response].self, from: data)
+    }
+
     // MARK: - Generic INSERT
 
     @discardableResult
     func insert<T: Encodable & Decodable>(into table: String, value: T) async throws -> T {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         commonHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
@@ -185,7 +224,7 @@ final class SupabaseClient {
         returning type: Response.Type
     ) async throws -> Response {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         commonHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
@@ -198,11 +237,33 @@ final class SupabaseClient {
         return first
     }
 
+    func insertPayload<Payload: Encodable>(into table: String, value: Payload) async throws {
+        try validateConfiguration()
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)") else { throw SupabaseError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        var headers = commonHeaders
+        headers["Prefer"] = "return=minimal"
+        headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.httpBody = try JSONEncoder().encode(value)
+
+        let (data, response) = try await session.data(for: req)
+        try validateResponse(response, data: data)
+    }
+
     // MARK: - Generic UPSERT
 
     func upsert<T: Encodable>(into table: String, value: T) async throws {
+        try await upsert(into: table, value: value, onConflict: nil)
+    }
+
+    func upsert<T: Encodable>(into table: String, value: T, onConflict: String?) async throws {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)")!
+        var urlString = "\(SupabaseConfig.projectURL)/rest/v1/\(table)"
+        if let onConflict, !onConflict.isEmpty {
+            urlString += "?on_conflict=\(onConflict)"
+        }
+        guard let url = URL(string: urlString) else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         var headers = commonHeaders
@@ -218,7 +279,7 @@ final class SupabaseClient {
 
     func update(table: String, id: String, body: [String: Any]) async throws {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)?id=eq.\(id)")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)?id=eq.\(id)") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "PATCH"
         var headers = commonHeaders
@@ -234,7 +295,7 @@ final class SupabaseClient {
 
     func delete(from table: String, id: String) async throws {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)?id=eq.\(id)")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)?id=eq.\(id)") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
         commonHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
@@ -247,7 +308,7 @@ final class SupabaseClient {
 
     func signUp(email: String, password: String) async throws -> AuthResponse {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/signup")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/signup") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(anonKey, forHTTPHeaderField: "apikey")
@@ -265,7 +326,7 @@ final class SupabaseClient {
 
     func signIn(email: String, password: String) async throws -> AuthResponse {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/token?grant_type=password")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/token?grant_type=password") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(anonKey, forHTTPHeaderField: "apikey")
@@ -283,7 +344,7 @@ final class SupabaseClient {
 
     func signOut() async throws {
         try validateConfiguration()
-        let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/logout")!
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/auth/v1/logout") else { throw SupabaseError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(anonKey, forHTTPHeaderField: "apikey")
@@ -307,7 +368,9 @@ final class SupabaseClient {
         do {
             try await upsert(into: SupabaseConfig.Tables.deviceTokens, value: payload)
         } catch {
+            #if DEBUG
             print("SupabaseClient: Failed to register device token — \(error)")
+            #endif
         }
     }
 
@@ -315,6 +378,30 @@ final class SupabaseClient {
 
     func submitRoadReport(_ report: RoadReportPayload) async throws {
         try await upsert(into: SupabaseConfig.Tables.roadReports, value: report)
+    }
+
+    func submitTruckStopParkingReport(_ report: TruckStopParkingReportPayload) async throws {
+        try await upsert(into: SupabaseConfig.Tables.truckStopParkingReports, value: report)
+    }
+
+    func submitTruckStopReview(_ review: TruckStopReviewPayload) async throws {
+        try await upsert(into: SupabaseConfig.Tables.truckStopReviews, value: review)
+    }
+
+    func submitShipperFacilityReview(_ review: ShipperFacilityReviewPayload) async throws {
+        try await upsert(into: SupabaseConfig.Tables.shipperFacilityReviews, value: review)
+    }
+
+    func submitDriverWellnessCheckin(_ checkin: DriverWellnessCheckinPayload) async throws {
+        try await upsert(
+            into: SupabaseConfig.Tables.driverWellnessCheckins,
+            value: checkin,
+            onConflict: "driver_id,checkin_date"
+        )
+    }
+
+    func submitDriverWellnessInsight(_ insight: DriverWellnessInsightPayload) async throws {
+        try await insertPayload(into: SupabaseConfig.Tables.driverWellnessInsights, value: insight)
     }
 
     func fetchRecentRoadReports(latitude: Double, longitude: Double, radiusKm: Double = 100) async throws -> [RoadReportRecord] {
@@ -341,15 +428,30 @@ final class SupabaseClient {
     // MARK: - Weigh Station Reports
 
     func submitWeighStationReport(_ report: WeighStationReportPayload) async throws {
-        try await upsert(into: SupabaseConfig.Tables.weighStations, value: report)
+        try await insertPayload(into: SupabaseConfig.Tables.weighStations, value: report)
     }
 
-    func fetchWeighStationReports() async throws -> [WeighStationReportRecord] {
+    func fetchWeighStationReports(limit: Int = 500) async throws -> [WeighStationReportRecord] {
         return try await select(
             from: SupabaseConfig.Tables.weighStations,
-            orderBy: "reported_at.desc",
-            limit: 100
+            orderBy: "created_at.desc",
+            limit: limit
         )
+    }
+
+    func fetchWeighStationReportsNear(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double = 150
+    ) async throws -> [WeighStationReportRecord] {
+        let records = try await fetchWeighStationReports()
+        let here = CLLocation(latitude: latitude, longitude: longitude)
+        let radiusMeters = radiusKm * 1000
+        return records.filter { record in
+            guard let lat = record.latitude, let lon = record.longitude else { return false }
+            let dist = here.distance(from: CLLocation(latitude: lat, longitude: lon))
+            return dist <= radiusMeters
+        }
     }
 
     // MARK: - Logistics News
@@ -460,19 +562,41 @@ final class SupabaseClient {
     private func validateConfiguration() throws {
         guard SupabaseConfig.isConfigured else {
             throw SupabaseError.missingConfiguration(
-                "Set Info.plist key SupabaseAnonKey for project \(SupabaseConfig.projectRef)."
+                "Set SUPABASE_ANON_KEY in Config/TruckerEasy.secrets.xcconfig (Info.plist key SupabaseAnonKey) for project \(SupabaseConfig.projectRef)."
+            )
+        }
+        let key = SupabaseConfig.anonKey
+        if key.hasPrefix("sb_publishable_") {
+            throw SupabaseError.missingConfiguration(
+                "SUPABASE_ANON_KEY must be the JWT anon key (starts with eyJ…), not sb_publishable_…. Supabase → Project Settings → API → Project API keys (anon public)."
             )
         }
     }
 
     private func persistAuth(_ auth: AuthResponse) {
-        accessToken    = auth.access_token
+        accessToken = auth.access_token
         currentDriverId = auth.user?.id
+        if let mail = auth.user?.email {
+            UserDefaults.standard.set(mail, forKey: "supabase_driver_email")
+        }
     }
 
     private func clearAuth() {
         UserDefaults.standard.removeObject(forKey: "supabase_access_token")
         UserDefaults.standard.removeObject(forKey: "supabase_driver_id")
+        UserDefaults.standard.removeObject(forKey: "supabase_driver_email")
+    }
+
+    // MARK: - Driver profile row (fleet portal + app share `drivers` table)
+
+    func ensureDriverProfile(email: String, fullName: String?) async throws {
+        guard let id = currentDriverId else { return }
+        let payload = DriverProfilePayload(
+            id: id,
+            email: email,
+            full_name: fullName
+        )
+        try await upsert(into: SupabaseConfig.Tables.drivers, value: payload)
     }
 }
 
@@ -513,6 +637,12 @@ struct AuthUser: Decodable {
 
 // MARK: - Payload Models (Encodable → sent to Supabase)
 
+struct DriverProfilePayload: Encodable {
+    let id: String
+    let email: String?
+    let full_name: String?
+}
+
 struct DeviceTokenPayload: Encodable {
     let driver_id: String
     let apns_token: String
@@ -528,13 +658,95 @@ struct RoadReportPayload: Encodable {
     let location_name: String?
 }
 
+struct TruckStopParkingReportPayload: Encodable {
+    let poi_place_id: UUID?
+    let driver_id: String?
+    let location_name: String
+    let latitude: Double
+    let longitude: Double
+    let status: String          // "many", "some", "full"
+    let available_slots: Int?
+    let total_slots: Int?
+}
+
+struct TruckStopReviewPayload: Encodable {
+    let poi_place_id: UUID?
+    let driver_id: String?
+    let location_name: String
+    let latitude: Double
+    let longitude: Double
+    let easy_access_rating: Int?
+    let cleanliness_rating: Int?
+    let restaurants_rating: Int?
+    let friendly_service_rating: Int?
+    let price_rating: Int?
+    let overall_rating: Double
+    let restaurant_names: [String]
+    let has_healthy_options: Bool?
+    let comments: String?
+}
+
+struct ShipperFacilityReviewPayload: Encodable {
+    let driver_id: String?
+    let load_number: String
+    let company_id: String?
+    let company_name: String?
+    let review_type: String
+    let latitude: Double
+    let longitude: Double
+    let treatment_rating: Int?
+    let bathroom_rating: Int?
+    let food_access_rating: Int?
+    let access_rating: Int?
+    let wait_minutes: Int?
+    let overall_rating: Double
+    let notes: String?
+}
+
+struct DriverWellnessCheckinPayload: Encodable {
+    let driver_id: String
+    let checkin_date: String
+    let mood_stars: Int?
+    let stress_level: Int?
+    let sleep_hours: Double?
+    let had_meal: Bool?
+    let felt_rested: Bool?
+    let source: String
+}
+
+struct DriverWellnessInsightPayload: Encodable {
+    let driver_id: String
+    let visit_kind: String
+    let place_name: String
+    let mood_stars: Int?
+    let visit_avg_stars: Double?
+    let service_rating: Int?
+    let shower_rating: Int?
+    let food_rating: Int?
+    let treatment_rating: Int?
+    let bathroom_rating: Int?
+    let food_access_rating: Int?
+    let access_rating: Int?
+    let correlation_note: String?
+    let latitude: Double?
+    let longitude: Double?
+    let load_number: String?
+    let company_name: String?
+}
+
+struct WeighStationReportDetailsPayload: Encodable {
+    let outcome: String?
+    let source: String
+}
+
 struct WeighStationReportPayload: Encodable {
     let station_name: String
     let driver_id: String?
     let status: String           // "open", "closed", "monitoring"
-    let outcome: String?         // "bypass", "rollingAcross", "inspection"
     let latitude: Double?
     let longitude: Double?
+    let poi_place_id: String?
+    let details: WeighStationReportDetailsPayload?
 }
 
 struct CommunityPostPayload: Encodable {
@@ -564,16 +776,25 @@ struct RoadReportRecord: Decodable, Identifiable {
     let reported_at: String
 }
 
+struct WeighStationReportDetailsRecord: Decodable {
+    let outcome: String?
+    let confirmations: Int?
+    let source: String?
+}
+
 struct WeighStationReportRecord: Decodable, Identifiable {
     let id: String
     let station_name: String
     let driver_id: String?
     let status: String
-    let outcome: String?
     let latitude: Double?
     let longitude: Double?
-    let confirmations: Int?
-    let reported_at: String
+    let created_at: String
+    let details: WeighStationReportDetailsRecord?
+
+    var outcome: String? { details?.outcome }
+    var confirmations: Int? { details?.confirmations }
+    var reported_at: String { created_at }
 }
 
 struct LogisticsNewsRecord: Decodable, Identifiable {

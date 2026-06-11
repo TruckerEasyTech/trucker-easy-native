@@ -76,6 +76,8 @@ struct HorizonMapSurface: UIViewRepresentable {
     let mapAlerts: [MapAlert]
     let route: MKRoute?
     var truckRoute: TruckRoute? = nil     // truck-optimized route (preferred over MKRoute)
+    /// Purple accent when middleware used Neal / Leap / Braket — polyline is still road geometry from `geometryProvider`.
+    var routeQuantumLineAccent: Bool = false
     var isNavigating: Bool = false
     var onStyleChange: ((MapStyleOption) -> Void)? = nil
     /// Optional: provide callbacks for zoom in/out and recenter once MKMapView is ready
@@ -87,7 +89,7 @@ struct HorizonMapSurface: UIViewRepresentable {
     /// Called when user taps a truck stop pin
     var onTruckStopTapped: ((TruckStopItem) -> Void)? = nil
 
-    /// The active polyline — prefers HERE truck route, falls back to MKRoute
+    /// The active polyline — `TruckRoute` / `MKRoute` coordinates rendered on MapKit.
     private var activePolyline: MKPolyline? {
         truckRoute?.polyline ?? route?.polyline
     }
@@ -96,7 +98,9 @@ struct HorizonMapSurface: UIViewRepresentable {
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         // #region agent log
+        #if DEBUG
         print("[DBG][MAP][H-map-1] makeUIView start")
+        #endif
         // #endregion
         map.overrideUserInterfaceStyle = .light  // Force light map so it's always visible
         map.delegate = context.coordinator
@@ -147,7 +151,9 @@ struct HorizonMapSurface: UIViewRepresentable {
         ))
 
         // #region agent log
+        #if DEBUG
         print("[DBG][MAP][H-map-1] makeUIView ready")
+        #endif
         // #endregion
 
         return map
@@ -164,6 +170,12 @@ struct HorizonMapSurface: UIViewRepresentable {
             map.mapType = newType
         }
 
+        // Lead chevron on the route replaces the user arrow while navigating.
+        let shouldShowUserLocation = !isNavigating
+        if map.showsUserLocation != shouldShowUserLocation {
+            map.showsUserLocation = shouldShowUserLocation
+        }
+
         if map.showsCompass { map.showsCompass = false }
         if map.showsScale { map.showsScale = false }
 
@@ -172,7 +184,7 @@ struct HorizonMapSurface: UIViewRepresentable {
         // Idle:       TopHUD (~110pt top) + compact search bar (~120pt bottom)
         // Idle: reserve leading/trailing for vertical tool column + GPS / zoom stack (matches Horizon idle chrome).
         let targetMargins: UIEdgeInsets = isNavigating
-            ? UIEdgeInsets(top: 190, left: 0, bottom: 90, right: 0)
+            ? UIEdgeInsets(top: 188, left: 58, bottom: 118, right: 64)
             : UIEdgeInsets(top: 110, left: 58, bottom: 120, right: 64)
         if map.layoutMargins != targetMargins {
             map.layoutMargins = targetMargins
@@ -228,12 +240,18 @@ struct HorizonMapSurface: UIViewRepresentable {
             map.removeOverlays(oldRouteOverlays)
             coord.currentRoutePolyline = nil
 
+            if let ann = coord.routeLeadAnnotation {
+                map.removeAnnotation(ann)
+                coord.routeLeadAnnotation = nil
+            }
+            coord.lastLeadArrowPolyIndex = 0
+
             if let polyline = newPolyline {
                 coord.currentRoutePolyline = polyline
                 // Casing (shadow) — drawn first so it appears below
-                let casing = RouteOverlay(polyline: polyline, isCasing: true)
+                let casing = RouteOverlay(polyline: polyline, isCasing: true, isQuantumAccent: routeQuantumLineAccent)
                 // Main route line
-                let main = RouteOverlay(polyline: polyline, isCasing: false)
+                let main = RouteOverlay(polyline: polyline, isCasing: false, isQuantumAccent: routeQuantumLineAccent)
                 map.addOverlays([casing, main], level: .aboveRoads)
             }
         }
@@ -270,6 +288,51 @@ struct HorizonMapSurface: UIViewRepresentable {
             }
         }
 
+        updateRouteLeadArrow(map: map, coord: coord)
+    }
+
+    /// Single chevron on the route polyline (GPS snapped to corridor).
+    private func updateRouteLeadArrow(map: MKMapView, coord: Coordinator) {
+        guard isNavigating,
+              let userLoc = locationManager.currentLocation,
+              let poly = coord.currentRoutePolyline,
+              poly.pointCount >= 2 else {
+            if let ann = coord.routeLeadAnnotation {
+                map.removeAnnotation(ann)
+                coord.routeLeadAnnotation = nil
+            }
+            coord.lastLeadArrowPolyIndex = 0
+            coord.lastLeadArrowUserLoc = nil
+            return
+        }
+
+        let now = Date()
+        if let prev = coord.lastLeadArrowUserLoc {
+            let dt = now.timeIntervalSince(coord.lastLeadArrowUpdateAt)
+            if dt < 0.08 && userLoc.distance(from: prev) < 1.5 { return }
+        }
+        coord.lastLeadArrowUserLoc = userLoc
+        coord.lastLeadArrowUpdateAt = now
+
+        guard let snap = PolylineLeadArrow.snappedPosition(
+            polyline: poly,
+            user: userLoc,
+            anchorIndex: &coord.lastLeadArrowPolyIndex
+        ) else { return }
+
+        if coord.routeLeadAnnotation == nil {
+            let ann = RouteLeadArrowAnnotation(coordinate: snap.coordinate, bearingDegrees: snap.bearingDegrees)
+            coord.routeLeadAnnotation = ann
+            map.addAnnotation(ann)
+        } else if let ann = coord.routeLeadAnnotation {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                ann.coordinate = snap.coordinate
+                ann.bearingDegrees = snap.bearingDegrees
+                if let v = map.view(for: ann) {
+                    v.transform = CGAffineTransform(rotationAngle: CGFloat(snap.bearingDegrees * .pi / 180))
+                }
+            }
+        }
     }
 
     // MARK: - Coordinator
@@ -286,6 +349,10 @@ struct HorizonMapSurface: UIViewRepresentable {
         var currentRoutePolyline: MKPolyline? = nil
         var alertAnnotations: [UUID: MapAlertAnnotation] = [:]
         var truckStopAnnotations: [UUID: TruckStopAnnotation] = [:]
+        var routeLeadAnnotation: RouteLeadArrowAnnotation?
+        var lastLeadArrowPolyIndex: Int = 0
+        var lastLeadArrowUpdateAt: Date = .distantPast
+        var lastLeadArrowUserLoc: CLLocation?
         var shouldReEngage = false
         /// Throttle arrow re-animations — didUpdate can fire very frequently; fewer blocks = less risk while MapKit recycles views.
         private var lastUserArrowRadians: CGFloat?
@@ -294,17 +361,17 @@ struct HorizonMapSurface: UIViewRepresentable {
             let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
             return renderer.image { ctx in
                 let center = CGPoint(x: size / 2, y: size / 2)
-                let turquoise = UIColor(red: 0, green: 0.83, blue: 0.78, alpha: 1.0)
+                let routeOrange = HorizonRouteColors.routeOrangeUI
 
                 let glowRadius: CGFloat = 30
-                let gradient = CGGradient(
+                guard let gradient = CGGradient(
                     colorsSpace: nil,
                     colors: [
-                        turquoise.withAlphaComponent(0.4).cgColor,
-                        turquoise.withAlphaComponent(0.0).cgColor
+                        routeOrange.withAlphaComponent(0.4).cgColor,
+                        routeOrange.withAlphaComponent(0.0).cgColor
                     ] as CFArray,
                     locations: [0.0, 1.0]
-                )!
+                ) else { return }
                 ctx.cgContext.drawRadialGradient(
                     gradient,
                     startCenter: center,
@@ -319,7 +386,7 @@ struct HorizonMapSurface: UIViewRepresentable {
 
                 let arrowCfg = UIImage.SymbolConfiguration(pointSize: 28, weight: .bold)
                 if let arrowImg = UIImage(systemName: "arrowtriangle.up.fill", withConfiguration: arrowCfg)?
-                    .withTintColor(turquoise, renderingMode: .alwaysOriginal) {
+                    .withTintColor(routeOrange, renderingMode: .alwaysOriginal) {
                     let imgSize = arrowImg.size
                     let imgOrigin = CGPoint(
                         x: center.x - imgSize.width / 2,
@@ -327,6 +394,31 @@ struct HorizonMapSurface: UIViewRepresentable {
                     )
                     arrowImg.draw(at: imgOrigin)
                 }
+            }
+        }()
+
+        /// Shared bitmap for route corridor chevron (MapKit).
+        static let cachedRouteLeadChevron: UIImage = {
+            let size = CGSize(width: 44, height: 50)
+            let routeOrange = HorizonRouteColors.routeOrangeUI
+            return UIGraphicsImageRenderer(size: size).image { ctx in
+                let c = ctx.cgContext
+                c.translateBy(x: size.width / 2, y: size.height / 2)
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 0, y: -18))
+                path.addLine(to: CGPoint(x: 14, y: 12))
+                path.addLine(to: CGPoint(x: 0, y: 5))
+                path.addLine(to: CGPoint(x: -14, y: 12))
+                path.close()
+                c.setShadow(offset: CGSize(width: 0, height: 1), blur: 2.5, color: UIColor.black.withAlphaComponent(0.35).cgColor)
+                c.setFillColor(routeOrange.cgColor)
+                c.addPath(path.cgPath)
+                c.fillPath()
+                c.setShadow(offset: .zero, blur: 0, color: nil)
+                c.setStrokeColor(UIColor.white.withAlphaComponent(0.55).cgColor)
+                c.setLineWidth(1.1)
+                c.addPath(path.cgPath)
+                c.strokePath()
             }
         }()
 
@@ -348,13 +440,18 @@ struct HorizonMapSurface: UIViewRepresentable {
             }
             let renderer = MKPolylineRenderer(polyline: routeOverlay.polyline)
             if routeOverlay.isCasing {
-                renderer.strokeColor = UIColor.black.withAlphaComponent(0.25)
-                renderer.lineWidth = 12
+                renderer.strokeColor = UIColor.black.withAlphaComponent(0.28)
+                renderer.lineWidth = 18
+                renderer.lineCap = .round
+                renderer.lineJoin = .round
+            } else if routeOverlay.isQuantumAccent {
+                renderer.strokeColor = HorizonRouteColors.quantumPurpleUI
+                renderer.lineWidth = 15
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
             } else {
-                renderer.strokeColor = UIColor(red: 0, green: 0.83, blue: 0.78, alpha: 1.0) // #00d4c8
-                renderer.lineWidth = 8
+                renderer.strokeColor = HorizonRouteColors.routeOrangeUI
+                renderer.lineWidth = 14
                 renderer.lineCap = .round
                 renderer.lineJoin = .round
             }
@@ -371,6 +468,21 @@ struct HorizonMapSurface: UIViewRepresentable {
 
         // MARK: Custom annotation views
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let lead = annotation as? RouteLeadArrowAnnotation {
+                let id = "routeLeadChevron"
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                    ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+                view.annotation = annotation
+                view.canShowCallout = false
+                let size: CGFloat = 44
+                view.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+                view.centerOffset = .zero
+                view.image = Coordinator.cachedRouteLeadChevron
+                let radians = CGFloat(lead.bearingDegrees * .pi / 180)
+                view.transform = CGAffineTransform(rotationAngle: radians)
+                return view
+            }
+
             // Truck stop annotations
             if let stopAnn = annotation as? TruckStopAnnotation {
                 let reuseId = "truckStop"
@@ -485,9 +597,11 @@ struct HorizonMapSurface: UIViewRepresentable {
                 }
             }
             // #region agent log
+            #if DEBUG
             if Int(angle) % 45 == 0 {
                 print("[DBG][MAP][H-map-2] user arrow rotated angle=\(Int(angle))")
             }
+            #endif
             // #endregion
         }
 
@@ -508,15 +622,30 @@ struct HorizonMapSurface: UIViewRepresentable {
     }
 }
 
+// MARK: - Route lead arrow (MapKit)
+
+/// Single chevron snapped ahead on the corridor polyline during navigation.
+final class RouteLeadArrowAnnotation: NSObject, MKAnnotation {
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    var bearingDegrees: CLLocationDirection = 0
+
+    init(coordinate: CLLocationCoordinate2D, bearingDegrees: CLLocationDirection) {
+        self.coordinate = coordinate
+        self.bearingDegrees = bearingDegrees
+    }
+}
+
 // MARK: - RouteOverlay
 // Wraps MKPolyline with an isCasing flag so the renderer knows which style to apply.
 final class RouteOverlay: NSObject, MKOverlay {
     let polyline: MKPolyline
     let isCasing: Bool
+    let isQuantumAccent: Bool
 
-    init(polyline: MKPolyline, isCasing: Bool) {
+    init(polyline: MKPolyline, isCasing: Bool, isQuantumAccent: Bool = false) {
         self.polyline = polyline
         self.isCasing = isCasing
+        self.isQuantumAccent = isQuantumAccent
     }
 
     var coordinate: CLLocationCoordinate2D { polyline.coordinate }

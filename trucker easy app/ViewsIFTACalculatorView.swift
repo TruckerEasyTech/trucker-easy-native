@@ -26,8 +26,9 @@ struct IFTACalculatorView: View {
         let calendar = Calendar.current
         let startMonth = (selectedQuarter - 1) * 3 + 1
         let startComponents = DateComponents(year: selectedYear, month: startMonth, day: 1)
-        let start = calendar.date(from: startComponents)!
-        let end = calendar.date(byAdding: DateComponents(month: 3, day: -1), to: start)!
+        guard let start = calendar.date(from: startComponents),
+              let end = calendar.date(byAdding: DateComponents(month: 3, day: -1), to: start)
+        else { return (Date(), Date()) }
         return (start, end)
     }
     

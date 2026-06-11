@@ -27,8 +27,8 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>location</string>
-        <string>fetch</string>
-        <string>processing</string>
+        <string>audio</string>
+        <string>remote-notification</string>
     </array>
     
     <!-- Supported Interface Orientations (iPhone) -->
@@ -48,16 +48,26 @@
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     
+    <!-- Microphone / Voice -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Trucker Easy needs microphone access for voice commands while driving, so you can navigate hands-free safely.</string>
+
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Trucker Easy uses speech recognition for voice commands, allowing you to enter destinations and control navigation hands-free.</string>
+
+    <key>NSMotionUsageDescription</key>
+    <string>Trucker Easy uses motion sensors to detect when you're driving and automatically track your trips for HOS compliance.</string>
+
     <!-- Localization -->
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
 
     <!-- Backend / APIs -->
     <key>SupabaseURL</key>
-    <string>https://qhwuwiiwdzqkjzjqgpvx.supabase.co</string>
+    <string>$(SUPABASE_URL)</string>
 
     <key>SupabaseAnonKey</key>
-    <string>$(SupabaseAnonKey)</string>
+    <string>$(SUPABASE_ANON_KEY)</string>
 
     <key>MapProvider</key>
     <string>Mapbox</string>

@@ -534,6 +534,8 @@ struct AIResponseBubble: View {
 
 struct ChatTypingIndicator: View {
     @State private var phase: Int = 0
+    @State private var timer: Timer?
+
     var body: some View {
         HStack(spacing: 4) {
             ForEach(0..<3, id: \.self) { i in
@@ -544,9 +546,13 @@ struct ChatTypingIndicator: View {
             }
         }
         .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
+            timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
                 phase = (phase + 1) % 3
             }
+        }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
         }
     }
 }

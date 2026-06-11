@@ -542,6 +542,156 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var scaleMonitoringLabel: String {
+        switch self {
+        case .english:      return "Scale MONITORING"
+        case .portuguese:   return "Balança MONITORANDO"
+        case .spanish:      return "Báscula MONITOREANDO"
+        case .spanishLatam: return "Báscula MONITOREANDO"
+        case .french:       return "Balance SURVEILLÉE"
+        case .german:       return "Waage ÜBERWACHT"
+        case .hindi:        return "तराजू निगरानी"
+        case .arabic:       return "الميزان تحت المراقبة"
+        case .russian:      return "Весовая КОНТРОЛЬ"
+        case .polish:       return "Waga MONITOROWANA"
+        }
+    }
+
+    var scaleReportPromptLabel: String {
+        switch self {
+        case .english:      return "Report for other drivers"
+        case .portuguese:   return "Reportar para outros motoristas"
+        case .spanish:      return "Reportar para otros conductores"
+        case .spanishLatam: return "Reportar para otros conductores"
+        case .french:       return "Signaler aux autres chauffeurs"
+        case .german:       return "Für andere Fahrer melden"
+        case .hindi:        return "अन्य ड्राइवरों के लिए रिपोर्ट"
+        case .arabic:       return "إبلاغ السائقين الآخرين"
+        case .russian:      return "Сообщить другим водителям"
+        case .polish:       return "Zgłoś innym kierowcom"
+        }
+    }
+
+    var scaleReportThanksLabel: String {
+        switch self {
+        case .english:      return "Thanks — report sent"
+        case .portuguese:   return "Obrigado — reporte enviado"
+        case .spanish:      return "Gracias — reporte enviado"
+        case .spanishLatam: return "Gracias — reporte enviado"
+        case .french:       return "Merci — signalement envoyé"
+        case .german:       return "Danke — Meldung gesendet"
+        case .hindi:        return "धन्यवाद — रिपोर्ट भेजी गई"
+        case .arabic:       return "شكراً — تم إرسال البلاغ"
+        case .russian:      return "Спасибо — отчёт отправлен"
+        case .polish:       return "Dzięki — zgłoszenie wysłane"
+        }
+    }
+
+    var scaleMoreDetailsLabel: String {
+        switch self {
+        case .english:      return "More details (bypass / inspection)"
+        case .portuguese:   return "Mais detalhes (bypass / inspeção)"
+        case .spanish:      return "Más detalles (bypass / inspección)"
+        case .spanishLatam: return "Más detalles (bypass / inspección)"
+        case .french:       return "Plus de détails (contournement / inspection)"
+        case .german:       return "Mehr Details (Bypass / Inspektion)"
+        case .hindi:        return "अधिक विवरण (बाईपास / निरीक्षण)"
+        case .arabic:       return "تفاصيل أكثر (تجاوز / تفتيش)"
+        case .russian:      return "Подробнее (обход / инспекция)"
+        case .polish:       return "Więcej szczegółów (objazd / inspekcja)"
+        }
+    }
+
+    var scaleSelectStationLabel: String {
+        switch self {
+        case .english:      return "Select weigh station"
+        case .portuguese:   return "Selecionar balança"
+        case .spanish:      return "Seleccionar báscula"
+        case .spanishLatam: return "Seleccionar báscula"
+        case .french:       return "Choisir la station de pesée"
+        case .german:       return "Waage auswählen"
+        case .hindi:        return "वेट स्टेशन चुनें"
+        case .arabic:       return "اختر محطة الوزن"
+        case .russian:      return "Выберите весовую"
+        case .polish:       return "Wybierz wagę"
+        }
+    }
+
+    var scaleLoadingNearbyLabel: String {
+        switch self {
+        case .english:      return "Loading nearby scales…"
+        case .portuguese:   return "Carregando balanças próximas…"
+        case .spanish:      return "Cargando básculas cercanas…"
+        case .spanishLatam: return "Cargando básculas cercanas…"
+        case .french:       return "Chargement des stations à proximité…"
+        case .german:       return "Waagen in der Nähe laden…"
+        case .hindi:        return "पास की वेट स्टेशन लोड हो रही हैं…"
+        case .arabic:       return "جاري تحميل محطات الوزن القريبة…"
+        case .russian:      return "Загрузка весовых поблизости…"
+        case .polish:       return "Ładowanie wag w pobliżu…"
+        }
+    }
+
+    var scaleStatusUnconfirmedLabel: String {
+        switch self {
+        case .english:      return "Status not confirmed"
+        case .portuguese:   return "Status não confirmado"
+        case .spanish:      return "Estado no confirmado"
+        case .spanishLatam: return "Estado no confirmado"
+        case .french:       return "Statut non confirmé"
+        case .german:       return "Status unbestätigt"
+        case .hindi:        return "स्थिति अपुष्ट"
+        case .arabic:       return "الحالة غير مؤكدة"
+        case .russian:      return "Статус не подтверждён"
+        case .polish:       return "Status niepotwierdzony"
+        }
+    }
+
+    var scaleOfficialSourceLabel: String {
+        switch self {
+        case .english:      return "Official"
+        case .portuguese:   return "Oficial"
+        case .spanish:      return "Oficial"
+        case .spanishLatam: return "Oficial"
+        case .french:       return "Officiel"
+        case .german:       return "Offiziell"
+        case .hindi:        return "आधिकारिक"
+        case .arabic:       return "رسمي"
+        case .russian:      return "Официально"
+        case .polish:       return "Oficjalne"
+        }
+    }
+
+    var scaleCommunityAdvisoryLabel: String {
+        switch self {
+        case .english:      return "Driver report — unverified"
+        case .portuguese:   return "Reporte de motorista — não verificado"
+        case .spanish:      return "Reporte de conductor — no verificado"
+        case .spanishLatam: return "Reporte de conductor — no verificado"
+        case .french:       return "Signalement conducteur — non vérifié"
+        case .german:       return "Fahrermeldung — unbestätigt"
+        case .hindi:        return "ड्राइवर रिपोर्ट — अपुष्ट"
+        case .arabic:       return "بلاغ سائق — غير مؤكد"
+        case .russian:      return "Сообщение водителя — не проверено"
+        case .polish:       return "Zgłoszenie kierowcy — niezweryfikowane"
+        }
+    }
+
+    var scaleLocationOnlyHintLabel: String {
+        switch self {
+        case .english:      return "Official location — prepare to stop"
+        case .portuguese:   return "Local oficial — prepare-se para parar"
+        case .spanish:      return "Ubicación oficial — prepárate para parar"
+        case .spanishLatam: return "Ubicación oficial — prepárate para parar"
+        case .french:       return "Emplacement officiel — préparez-vous à vous arrêter"
+        case .german:       return "Offizieller Standort — Stopp vorbereiten"
+        case .hindi:        return "आधिकारिक स्थान — रुकने की तैयारी करें"
+        case .arabic:       return "موقع رسمي — استعد للتوقف"
+        case .russian:      return "Официальная точка — готовьтесь остановиться"
+        case .polish:       return "Oficjalna lokalizacja — przygotuj się do zatrzymania"
+        }
+    }
+
     // MARK: - Navigation / Map labels
     var myLocationLabel: String {
         switch self {
@@ -3225,6 +3375,99 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Voice: truck-stop diesel roughly half an hour ahead. Args: stop name, ETA minutes (rounded).
+    var voiceTruckFuelEtaPhrase: String {
+        switch self {
+        case .english:      return "%@ — truck-stop diesel about %d minutes ahead."
+        case .portuguese:   return "%@ — diesel para caminhões em cerca de %d minutos."
+        case .spanish:      return "%@ — diésel para camiones en unos %d minutos."
+        case .spanishLatam: return "%@ — diésel para camiones en unos %d minutos."
+        case .french:       return "%@ — diesel poids lourd dans environ %d minutes."
+        case .german:       return "%@ — LKW-Diesel in etwa %d Minuten."
+        case .hindi:        return "%@ — लगभग %d मिनट में ट्रक डीज़ल।"
+        case .arabic:       return "%@ — ديزل الشاحنات خلال نحو %d دقيقة."
+        case .russian:      return "%@ — дизель для грузовиков примерно через %d минут."
+        case .polish:       return "%@ — diesel dla ciężarówek za około %d minut."
+        }
+    }
+
+    /// Optional suffix when weigh-station status is reported open (voice).
+    var voiceScaleReportedOpenPhrase: String {
+        switch self {
+        case .english:      return "Drivers report the scale is open."
+        case .portuguese:   return "Motoristas reportam balança aberta."
+        case .spanish:      return "Otros conductores reportan báscula abierta."
+        case .spanishLatam: return "Otros conductores reportan báscula abierta."
+        case .french:       return "Signalement conducteurs : station ouverte."
+        case .german:       return "Fahrer melden: Waage offen."
+        case .hindi:        return "ड्राइवरों की रिपोर्ट: तौल खुला है।"
+        case .arabic:       return "تقارير السائقين: المحطة مفتوحة."
+        case .russian:      return "Водители сообщают: весовая открыта."
+        case .polish:       return "Zgłoszenia kierowców: waga czynna."
+        }
+    }
+
+    /// Optional suffix when weigh-station status is reported closed (voice).
+    var voiceScaleReportedClosedPhrase: String {
+        switch self {
+        case .english:      return "Drivers report the scale is closed."
+        case .portuguese:   return "Motoristas reportam balança fechada."
+        case .spanish:      return "Otros conductores reportan báscula cerrada."
+        case .spanishLatam: return "Otros conductores reportan báscula cerrada."
+        case .french:       return "Signalement conducteurs : station fermée."
+        case .german:       return "Fahrer melden: Waage geschlossen."
+        case .hindi:        return "ड्राइवरों की रिपोर्ट: तौल बंद है।"
+        case .arabic:       return "تقارير السائقين: المحطة مغلقة."
+        case .russian:      return "Водители сообщают: весовая закрыта."
+        case .polish:       return "Zgłoszenia kierowców: waga zamknięta."
+        }
+    }
+
+    var voiceScaleOfficialOpenPhrase: String {
+        switch self {
+        case .english:      return "Official source reports the scale is open."
+        case .portuguese:   return "Fonte oficial reporta balança aberta."
+        case .spanish:      return "Fuente oficial reporta báscula abierta."
+        case .spanishLatam: return "Fuente oficial reporta báscula abierta."
+        case .french:       return "Source officielle : station ouverte."
+        case .german:       return "Offizielle Quelle: Waage geöffnet."
+        case .hindi:        return "आधिकारिक स्रोत: तौल खुला है।"
+        case .arabic:       return "مصدر رسمي: المحطة مفتوحة."
+        case .russian:      return "Официальный источник: весовая открыта."
+        case .polish:       return "Źródło oficjalne: waga czynna."
+        }
+    }
+
+    var voiceScaleOfficialClosedPhrase: String {
+        switch self {
+        case .english:      return "Official source reports the scale is closed."
+        case .portuguese:   return "Fonte oficial reporta balança fechada."
+        case .spanish:      return "Fuente oficial reporta báscula cerrada."
+        case .spanishLatam: return "Fuente oficial reporta báscula cerrada."
+        case .french:       return "Source officielle : station fermée."
+        case .german:       return "Offizielle Quelle: Waage geschlossen."
+        case .hindi:        return "आधिकारिक स्रोत: तौल बंद है।"
+        case .arabic:       return "مصدر رسمي: المحطة مغلقة."
+        case .russian:      return "Официальный источник: весовая закрыта."
+        case .polish:       return "Źródło oficjalne: waga zamknięta."
+        }
+    }
+
+    var voiceScaleUnconfirmedPhrase: String {
+        switch self {
+        case .english:      return "Status not officially confirmed. Be prepared to stop."
+        case .portuguese:   return "Status não confirmado oficialmente. Prepare-se para parar."
+        case .spanish:      return "Estado no confirmado oficialmente. Prepárate para detenerte."
+        case .spanishLatam: return "Estado no confirmado oficialmente. Prepárate para detenerte."
+        case .french:       return "Statut non confirmé officiellement. Préparez-vous à vous arrêter."
+        case .german:       return "Status offiziell nicht bestätigt. Bereiten Sie einen Stopp vor."
+        case .hindi:        return "स्थिति आधिकारिक रूप से अपुष्ट। रुकने की तैयारी करें।"
+        case .arabic:       return "الحالة غير مؤكدة رسمياً. استعد للتوقف."
+        case .russian:      return "Статус официально не подтверждён. Будьте готовы остановиться."
+        case .polish:       return "Status niepotwierdzony oficjalnie. Przygotuj się do zatrzymania."
+        }
+    }
+
     /// Spoken phrase for police/accident alert
     var voiceRoadAlertPhrase: String {
         switch self {
@@ -3254,6 +3497,609 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .arabic:       return "ar-SA"
         case .russian:      return "ru-RU"
         case .polish:       return "pl-PL"
+        }
+    }
+
+    // MARK: - Horizon alerts, routing errors, geofence (UI)
+
+    var horizonRouteErrorTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Route Error"
+        case .portuguese: return "Erro de rota"
+        case .spanish, .spanishLatam: return "Error de ruta"
+        case .french: return "Erreur d’itinéraire"
+        case .german: return "Routenfehler"
+        case .polish: return "Błąd trasy"
+        case .russian: return "Ошибка маршрута"
+        }
+    }
+
+    var horizonRoutingNoticeTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Routing Notice"
+        case .portuguese: return "Aviso de roteamento"
+        case .spanish, .spanishLatam: return "Aviso de ruta"
+        case .french: return "Avis d’itinéraire"
+        case .german: return "Routing-Hinweis"
+        case .polish: return "Powiadomienie o trasie"
+        case .russian: return "Уведомление о маршруте"
+        }
+    }
+
+    var horizonRouteErrorCouldNotCalculate: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Could not calculate route"
+        case .portuguese: return "Não foi possível calcular a rota"
+        case .spanish, .spanishLatam: return "No se pudo calcular la ruta"
+        case .french: return "Impossible de calculer l’itinéraire"
+        case .german: return "Route konnte nicht berechnet werden"
+        case .polish: return "Nie udało się obliczyć trasy"
+        case .russian: return "Не удалось построить маршрут"
+        }
+    }
+
+    var horizonRouteErrorLocationUnavailable: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Location unavailable. Check GPS."
+        case .portuguese: return "Localização indisponível. Verifique o GPS."
+        case .spanish, .spanishLatam: return "Ubicación no disponible. Compruebe el GPS."
+        case .french: return "Position indisponible. Vérifiez le GPS."
+        case .german: return "Standort nicht verfügbar. GPS prüfen."
+        case .polish: return "Lokalizacja niedostępna. Sprawdź GPS."
+        case .russian: return "Местоположение недоступно. Проверьте GPS."
+        }
+    }
+
+    var horizonRouteErrorValhallaUnavailable: String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Truck routing server (Valhalla) is unavailable. Check your connection and try again. Car routes are not used."
+        case .portuguese:
+            return "Servidor de rotas para caminhão (Valhalla) indisponível. Verifique a conexão e tente de novo. Rotas de carro não são usadas."
+        case .spanish, .spanishLatam:
+            return "Servidor de rutas para camión (Valhalla) no disponible. Compruebe la conexión. No se usan rutas de coche."
+        case .french:
+            return "Serveur Valhalla (poids lourds) indisponible. Vérifiez la connexion. Pas d’itinéraires voiture."
+        case .german:
+            return "Valhalla-LKW-Routing nicht erreichbar. Verbindung prüfen. Keine Pkw-Routen."
+        case .polish:
+            return "Serwer Valhalla (ciężarówka) niedostępny. Sprawdź połączenie. Bez tras samochodowych."
+        case .russian:
+            return "Сервер Valhalla (грузовик) недоступен. Проверьте связь. Маршруты легковых авто не используются."
+        }
+    }
+
+    var horizonRerouteFailedMessage: String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Could not recalculate route — continuing on current path. Check signal or truck routing server."
+        case .portuguese:
+            return "Não foi possível recalcular a rota — continuando no trajeto atual. Verifique sinal ou servidor Valhalla."
+        case .spanish, .spanishLatam:
+            return "No se pudo recalcular la ruta — sigue la ruta actual. Compruebe señal o servidor Valhalla."
+        case .french:
+            return "Impossible de recalculer — poursuite sur l’itinéraire actuel. Vérifiez le signal ou Valhalla."
+        case .german:
+            return "Neuberechnung fehlgeschlagen — aktuelle Route beibehalten. Signal oder Valhalla prüfen."
+        case .polish:
+            return "Nie udało się przeliczyć trasy — kontynuuj obecną. Sprawdź zasięg lub Valhalla."
+        case .russian:
+            return "Не удалось перестроить маршрут — продолжайте по текущему. Проверьте связь или Valhalla."
+        }
+    }
+
+    var horizonRouteErrorUnableSafeRoute: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Unable to calculate a safe route right now. Check signal and try again."
+        case .portuguese: return "Não foi possível calcular uma rota segura agora. Verifique o sinal e tente de novo."
+        case .spanish, .spanishLatam: return "No se puede calcular una ruta segura ahora. Compruebe la señal e inténtelo de nuevo."
+        case .french: return "Impossible de calculer un itinéraire sûr pour le moment. Vérifiez le signal et réessayez."
+        case .german: return "Jetzt keine sichere Route berechenbar. Signal prüfen und erneut versuchen."
+        case .polish: return "Teraz nie można obliczyć bezpiecznej trasy. Sprawdź zasięg i spróbuj ponownie."
+        case .russian: return "Сейчас не удаётся построить безопасный маршрут. Проверьте связь и повторите."
+        }
+    }
+
+    var horizonRouteErrorAddressNoSafeRoute: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Address resolved to coordinates, but safe route is unavailable. Try again."
+        case .portuguese: return "Endereço convertido em coordenadas, mas rota segura indisponível. Tente de novo."
+        case .spanish, .spanishLatam: return "Dirección resuelta a coordenadas, pero la ruta segura no está disponible. Inténtelo de nuevo."
+        case .french: return "Adresse géolocalisée, mais itinéraire sûr indisponible. Réessayez."
+        case .german: return "Adresse auf Koordinaten gelöst, aber keine sichere Route. Erneut versuchen."
+        case .polish: return "Adres współrzędnych, ale bezpieczna trasa niedostępna. Spróbuj ponownie."
+        case .russian: return "Адрес найден по координатам, но безопасный маршрут недоступен. Повторите."
+        }
+    }
+
+    var horizonRouteErrorCouldNotResolveAddress: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Could not resolve destination address. Please pick a destination from Search."
+        case .portuguese: return "Não foi possível resolver o endereço de destino. Escolha um destino na Busca."
+        case .spanish, .spanishLatam: return "No se pudo resolver la dirección de destino. Elija un destino en Búsqueda."
+        case .french: return "Impossible de résoudre l’adresse de destination. Choisissez une destination dans Recherche."
+        case .german: return "Zieladresse nicht auflösbar. Bitte Ziel in der Suche wählen."
+        case .polish: return "Nie można znaleźć adresu celu. Wybierz cel z wyszukiwania."
+        case .russian: return "Не удалось определить адрес назначения. Выберите пункт в поиске."
+        }
+    }
+
+    var horizonRouteErrorNoCoordinates: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Route has no coordinates"
+        case .portuguese: return "A rota não tem coordenadas"
+        case .spanish, .spanishLatam: return "La ruta no tiene coordenadas"
+        case .french: return "L’itinéraire n’a pas de coordonnées"
+        case .german: return "Route ohne Koordinaten"
+        case .polish: return "Trasa bez współrzędnych"
+        case .russian: return "У маршрута нет координат"
+        }
+    }
+
+    var horizonRouteErrorZeroDistance: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Route distance is zero"
+        case .portuguese: return "Distância da rota é zero"
+        case .spanish, .spanishLatam: return "La distancia de la ruta es cero"
+        case .french: return "Distance d’itinéraire nulle"
+        case .german: return "Routenentfernung ist null"
+        case .polish: return "Dystans trasy wynosi zero"
+        case .russian: return "Длина маршрута равна нулю"
+        }
+    }
+
+    var horizonRoutingNoticeDefault: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Route provider changed."
+        case .portuguese: return "O provedor de rota mudou."
+        case .spanish, .spanishLatam: return "El proveedor de ruta cambió."
+        case .french: return "Le fournisseur d’itinéraire a changé."
+        case .german: return "Routenanbieter gewechselt."
+        case .polish: return "Zmieniono dostawcę trasy."
+        case .russian: return "Сменился поставщик маршрута."
+        }
+    }
+
+    func horizonRoutingNoticeSimple(provider: String) -> String {
+        switch self {
+        case .english, .hindi, .arabic: return "Route via \(provider) — truck restrictions may be limited."
+        case .portuguese: return "Rota via \(provider) — restrições de caminhão podem ser limitadas."
+        case .spanish, .spanishLatam: return "Ruta vía \(provider) — las restricciones para camiones pueden ser limitadas."
+        case .french: return "Itinéraire via \(provider) — restrictions poids lourds possibles."
+        case .german: return "Route über \(provider) — LKW-Beschränkungen können begrenzt sein."
+        case .polish: return "Trasa przez \(provider) — ograniczenia dla ciężarówek mogą być ograniczone."
+        case .russian: return "Маршрут через \(provider) — ограничения для грузовиков могут быть ограничены."
+        }
+    }
+
+    func horizonRoutingNoticeQuantum(provider: String, solver: String) -> String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Road line uses \(provider). Stop order came from Trucker Easy optimize (\(solver)). Truck dimensions on this segment may be limited."
+        case .portuguese:
+            return "A linha da estrada usa \(provider). A ordem das paradas veio do optimize Trucker Easy (\(solver)). Dimensões do caminhão neste trecho podem ser limitadas."
+        case .spanish, .spanishLatam:
+            return "La línea de ruta usa \(provider). El orden de paradas proviene del optimize de Trucker Easy (\(solver)). Las dimensiones del camión en este tramo pueden ser limitadas."
+        case .french:
+            return "La ligne suit \(provider). L’ordre des arrêts vient de l’optimisation Trucker Easy (\(solver)). Gabarit poids lourds possiblement limité sur ce segment."
+        case .german:
+            return "Streckenlinie über \(provider). Stoppreihenfolge von Trucker Easy Optimize (\(solver)). LKW-Maße auf diesem Abschnitt ggf. begrenzt."
+        case .polish:
+            return "Linia trasy: \(provider). Kolejność przystanków z optymalizacji Trucker Easy (\(solver)). Wymiary pojazdu na tym odcinku mogą być ograniczone."
+        case .russian:
+            return "Линия маршрута: \(provider). Порядок остановок из оптимизации Trucker Easy (\(solver)). Габариты на участке могут быть ограничены."
+        }
+    }
+
+    var routeEasyPickerTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Choose your route"
+        case .portuguese: return "Escolha sua rota"
+        case .spanish, .spanishLatam: return "Elige tu ruta"
+        case .french: return "Choisissez votre itinéraire"
+        case .german: return "Route wählen"
+        case .polish: return "Wybierz trasę"
+        case .russian: return "Выберите маршрут"
+        }
+    }
+
+    var routeEasyPickerSubtitle: String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Compare free, no-toll, and AI-optimized routes. Upgrade to unlock truck-safe savings."
+        case .portuguese:
+            return "Compare rota grátis, sem pedágio e rota inteligente. Faça upgrade para economia com caminhão."
+        case .spanish, .spanishLatam:
+            return "Compara ruta gratis, sin peajes e inteligente. Mejora el plan para ahorrar con camión."
+        case .french:
+            return "Comparez gratuit, sans péage et IA. Passez au plan supérieur pour économiser."
+        case .german:
+            return "Vergleiche Free, mautfrei und KI-Route. Upgrade für LKW-Einsparungen."
+        case .polish:
+            return "Porównaj darmową, bez opłat i AI. Ulepsz plan dla oszczędności ciężarówki."
+        case .russian:
+            return "Сравните бесплатный, без платных дорог и ИИ-маршрут. Обновите план для экономии."
+        }
+    }
+
+    var routeEasyPlanFree: String {
+        switch self {
+        case .portuguese: return "Grátis"
+        case .spanish, .spanishLatam: return "Gratis"
+        case .french: return "Gratuit"
+        case .german: return "Free"
+        case .polish: return "Free"
+        case .russian: return "Free"
+        default: return "Free"
+        }
+    }
+
+    var routeEasyKindFastest: String {
+        switch self {
+        case .portuguese: return "Rota rápida"
+        case .spanish, .spanishLatam: return "Ruta rápida"
+        default: return "Fastest"
+        }
+    }
+
+    var routeEasyKindNoTolls: String {
+        switch self {
+        case .portuguese: return "Sem pedágio"
+        case .spanish, .spanishLatam: return "Sin peajes"
+        default: return "No tolls"
+        }
+    }
+
+    var routeEasyKindSmart: String {
+        switch self {
+        case .portuguese: return "Rota inteligente"
+        case .spanish, .spanishLatam: return "Ruta inteligente"
+        default: return "AI Smart"
+        }
+    }
+
+    var routeEasyPickerTestingSubtitle: String {
+        switch self {
+        case .portuguese:
+            return "Build de teste — escolha Rápida, Sem pedágio ou Inteligente. Todas funcionam."
+        case .spanish, .spanishLatam:
+            return "Build de prueba — elige Rápida, Sin peajes o Inteligente. Todas funcionan."
+        default:
+            return "Test build — pick Fastest, No toll, or AI Smart. All three work."
+        }
+    }
+
+    var routeEasyTestingBanner: String {
+        switch self {
+        case .portuguese: return "Modo teste: sem checkout — toque numa rota para navegar."
+        case .spanish, .spanishLatam: return "Modo prueba: sin pago — toca una ruta para navegar."
+        default: return "Test mode: no checkout — tap any route to start navigation."
+        }
+    }
+
+    var routeEasyComparePlans: String {
+        switch self {
+        case .portuguese: return "Ver planos e preços"
+        case .spanish, .spanishLatam: return "Ver planes y precios"
+        default: return "See plans & pricing"
+        }
+    }
+
+    var routeEasyStartNavigation: String {
+        switch self {
+        case .portuguese: return "Iniciar navegação"
+        case .spanish, .spanishLatam: return "Iniciar navegación"
+        default: return "Start navigation"
+        }
+    }
+
+    func routeEasyUnlockPlan(_ planName: String) -> String {
+        switch self {
+        case .portuguese: return "Desbloquear com \(planName)"
+        case .spanish, .spanishLatam: return "Desbloquear con \(planName)"
+        default: return "Unlock with \(planName)"
+        }
+    }
+
+    func routeEasyEstimatedSavings(_ usd: Double) -> String {
+        switch self {
+        case .portuguese: return "Economia estimada ~$\(String(format: "%.0f", usd))"
+        case .spanish, .spanishLatam: return "Ahorro estimado ~$\(String(format: "%.0f", usd))"
+        default: return "Est. savings ~$\(String(format: "%.0f", usd))"
+        }
+    }
+
+    var horizonTruckSafeUnavailableTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Truck-safe route unavailable"
+        case .portuguese: return "Rota segura para caminhão indisponível"
+        case .spanish, .spanishLatam: return "Ruta segura para camión no disponible"
+        case .french: return "Itinéraire poids lourds indisponible"
+        case .german: return "LKW-sichere Route nicht verfügbar"
+        case .polish: return "Bezpieczna trasa dla ciężarówki niedostępna"
+        case .russian: return "Безопасный маршрут для грузовика недоступен"
+        }
+    }
+
+    func horizonTruckSafeFallbackExplanation(provider: String) -> String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "No truck-safe provider responded. Continue with \(provider) for basic navigation while restrictions may be limited."
+        case .portuguese:
+            return "Nenhum provedor seguro para caminhão respondeu. Continuar com \(provider) para navegação básica; restrições podem ser limitadas."
+        case .spanish, .spanishLatam:
+            return "Ningún proveedor seguro para camión respondió. Continuar con \(provider) para navegación básica; las restricciones pueden ser limitadas."
+        case .french:
+            return "Aucun fournisseur poids lourds n’a répondu. Continuer avec \(provider) pour une navigation basique ; restrictions possibles."
+        case .german:
+            return "Kein LKW-sicherer Anbieter antwortet. Mit \(provider) für Basisnavigation fortfahren; Beschränkungen möglich."
+        case .polish:
+            return "Brak odpowiedzi od dostawcy bezpiecznego dla ciężarówki. Kontynuuj z \(provider) — ograniczenia mogą obowiązywać."
+        case .russian:
+            return "Нет ответа от поставщика с учётом грузовика. Продолжить с \(provider) — ограничения могут действовать."
+        }
+    }
+
+    var truckSafeOnlyToggleTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Truck-safe routes only"
+        case .portuguese: return "Apenas rotas seguras para caminhão"
+        case .spanish, .spanishLatam: return "Solo rutas seguras para camión"
+        case .french: return "Itinéraires poids lourds uniquement"
+        case .german: return "Nur LKW-sichere Routen"
+        case .polish: return "Tylko trasy bezpieczne dla ciężarówki"
+        case .russian: return "Только маршруты для грузовиков"
+        }
+    }
+
+    var truckSafeOnlyToggleFooter: String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Uses Valhalla truck costing only. If Valhalla is offline, the app shows an error instead of OSRM or Apple Maps (car-grade routes)."
+        case .portuguese:
+            return "Usa só Valhalla (costing caminhão). Se o Valhalla estiver offline, o app mostra erro em vez de OSRM ou MapKit (rotas de carro)."
+        case .spanish, .spanishLatam:
+            return "Solo Valhalla (camión). Si Valhalla no responde, el app muestra error en lugar de OSRM o MapKit (rutas de coche)."
+        case .french:
+            return "Valhalla poids lourds uniquement. Si Valhalla est hors ligne, erreur au lieu d’OSRM ou MapKit (itinéraires voiture)."
+        case .german:
+            return "Nur Valhalla (LKW). Wenn Valhalla offline ist, Fehler statt OSRM/MapKit (Pkw-Routen)."
+        case .polish:
+            return "Tylko Valhalla (ciężarówka). Gdy Valhalla offline — błąd zamiast OSRM/MapKit (trasy samochodowe)."
+        case .russian:
+            return "Только Valhalla (грузовик). Если Valhalla недоступен — ошибка вместо OSRM/MapKit (легковые маршруты)."
+        }
+    }
+
+    var horizonContinueWithFallbackGPS: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Continue with fallback GPS"
+        case .portuguese: return "Continuar com GPS alternativo"
+        case .spanish, .spanishLatam: return "Continuar con GPS alternativo"
+        case .french: return "Continuer avec le GPS de secours"
+        case .german: return "Mit Fallback-GPS fortfahren"
+        case .polish: return "Kontynuuj z zapasowym GPS"
+        case .russian: return "Продолжить с запасным GPS"
+        }
+    }
+
+    var horizonYouHaveArrived: String {
+        switch self {
+        case .english, .hindi, .arabic: return "You have arrived!"
+        case .portuguese: return "Você chegou!"
+        case .spanish, .spanishLatam: return "¡Has llegado!"
+        case .french: return "Vous êtes arrivé !"
+        case .german: return "Sie sind angekommen!"
+        case .polish: return "Jesteś na miejscu!"
+        case .russian: return "Вы прибыли!"
+        }
+    }
+
+    func horizonGpsLive(accuracyMeters: Int) -> String {
+        switch self {
+        case .english, .hindi, .arabic: return "GPS live · ±\(accuracyMeters)m"
+        case .portuguese: return "GPS ao vivo · ±\(accuracyMeters)m"
+        case .spanish, .spanishLatam: return "GPS en vivo · ±\(accuracyMeters)m"
+        case .french: return "GPS actif · ±\(accuracyMeters)m"
+        case .german: return "GPS live · ±\(accuracyMeters)m"
+        case .polish: return "GPS na żywo · ±\(accuracyMeters)m"
+        case .russian: return "GPS онлайн · ±\(accuracyMeters)м"
+        }
+    }
+
+    func horizonGpsStale(seconds: Int) -> String {
+        switch self {
+        case .english, .hindi, .arabic: return "GPS stale · \(seconds)s"
+        case .portuguese: return "GPS desatualizado · \(seconds)s"
+        case .spanish, .spanishLatam: return "GPS desactualizado · \(seconds)s"
+        case .french: return "GPS obsolète · \(seconds)s"
+        case .german: return "GPS veraltet · \(seconds)s"
+        case .polish: return "GPS nieaktualne · \(seconds)s"
+        case .russian: return "GPS устарел · \(seconds)с"
+        }
+    }
+
+    var horizonGpsSearching: String {
+        switch self {
+        case .english, .hindi, .arabic: return "GPS searching"
+        case .portuguese: return "Buscando GPS"
+        case .spanish, .spanishLatam: return "Buscando GPS"
+        case .french: return "Recherche GPS"
+        case .german: return "GPS wird gesucht"
+        case .polish: return "Szukanie GPS"
+        case .russian: return "Поиск GPS"
+        }
+    }
+
+    var horizonNearbyWeighStationDefault: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Nearby Weigh Station"
+        case .portuguese: return "Balança próxima"
+        case .spanish, .spanishLatam: return "Báscula cercana"
+        case .french: return "Station de pesage proche"
+        case .german: return "Waage in der Nähe"
+        case .polish: return "Waga w pobliżu"
+        case .russian: return "Весовая поблизости"
+        }
+    }
+
+    var horizonGenericWeighStation: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Weigh Station"
+        case .portuguese: return "Balança"
+        case .spanish, .spanishLatam: return "Báscula"
+        case .french: return "Station de pesage"
+        case .german: return "Waage"
+        case .polish: return "Waga"
+        case .russian: return "Весовая"
+        }
+    }
+
+    var horizonArrivalYourDestination: String {
+        switch self {
+        case .english, .hindi, .arabic: return "your destination"
+        case .portuguese: return "seu destino"
+        case .spanish, .spanishLatam: return "tu destino"
+        case .french: return "votre destination"
+        case .german: return "Ihr Ziel"
+        case .polish: return "cel podróży"
+        case .russian: return "ваш пункт назначения"
+        }
+    }
+
+    var horizonEmergencyRouteDetails: String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Road graph unavailable; using direct guidance line."
+        case .portuguese:
+            return "Mapa de estradas indisponível; usando linha de orientação direta."
+        case .spanish, .spanishLatam:
+            return "Grafo de carreteras no disponible; usando línea de guía directa."
+        case .french:
+            return "Réseau routier indisponible ; ligne de guidage directe."
+        case .german:
+            return "Straßengraph nicht verfügbar; direkte Führungslinie."
+        case .polish:
+            return "Sieć dróg niedostępna; użyto prostej linii prowadzenia."
+        case .russian:
+            return "Дорожный граф недоступен; используется прямая линия навигации."
+        }
+    }
+
+    var horizonIdleQuickPlaces: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Places"
+        case .portuguese: return "Lugares"
+        case .spanish, .spanishLatam: return "Lugares"
+        case .french: return "Lieux"
+        case .german: return "Orte"
+        case .polish: return "Miejsca"
+        case .russian: return "Места"
+        }
+    }
+
+    var horizonIdleQuickFuel: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Fuel"
+        case .portuguese: return "Combustível"
+        case .spanish, .spanishLatam: return "Combustible"
+        case .french: return "Carburant"
+        case .german: return "Tanken"
+        case .polish: return "Paliwo"
+        case .russian: return "Топливо"
+        }
+    }
+
+    var horizonIdleQuickWeigh: String {
+        switch self {
+        case .english, .hindi, .arabic: return "DOT / Weigh"
+        case .portuguese: return "DOT / Balança"
+        case .spanish, .spanishLatam: return "DOT / Báscula"
+        case .french: return "DOT / Pesage"
+        case .german: return "DOT / Waage"
+        case .polish: return "DOT / Waga"
+        case .russian: return "DOT / Взвешивание"
+        }
+    }
+
+    var horizonIdleQuickRest: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Rest"
+        case .portuguese: return "Descanso"
+        case .spanish, .spanishLatam: return "Descanso"
+        case .french: return "Repos"
+        case .german: return "Pause"
+        case .polish: return "Odpoczynek"
+        case .russian: return "Отдых"
+        }
+    }
+
+    var horizonHOSDetail: String {
+        switch self {
+        case .english, .hindi, .arabic: return "HOS detail"
+        case .portuguese: return "Detalhe Jornada"
+        case .spanish, .spanishLatam: return "Detalle HOS"
+        case .french: return "Détail HOS"
+        case .german: return "HOS-Details"
+        case .polish: return "Szczegóły HOS"
+        case .russian: return "Детали HOS"
+        }
+    }
+
+    var horizonHOSSettings: String {
+        switch self {
+        case .english, .hindi, .arabic: return "HOS settings"
+        case .portuguese: return "Config. Jornada"
+        case .spanish, .spanishLatam: return "Ajustes HOS"
+        case .french: return "Réglages HOS"
+        case .german: return "HOS-Einstellungen"
+        case .polish: return "Ustawienia HOS"
+        case .russian: return "Настройки HOS"
+        }
+    }
+
+    func horizonGeofenceBanner(isEntry: Bool, name: String) -> String {
+        let title: String
+        switch self {
+        case .english, .hindi, .arabic:
+            title = isEntry ? "Entered geofence" : "Exited geofence"
+        case .portuguese:
+            title = isEntry ? "Entrou na cerca geográfica" : "Saiu da cerca geográfica"
+        case .spanish, .spanishLatam:
+            title = isEntry ? "Entró en la geovalla" : "Salió de la geovalla"
+        case .french:
+            title = isEntry ? "Entrée dans la géorepère" : "Sortie de la géorepère"
+        case .german:
+            title = isEntry ? "Geofence betreten" : "Geofence verlassen"
+        case .polish:
+            title = isEntry ? "Wejście do geofence" : "Wyjście z geofence"
+        case .russian:
+            title = isEntry ? "Вход в геозону" : "Выход из геозоны"
+        }
+        return "\(title): \(name)"
+    }
+
+    func horizonNavigateToDestination(_ name: String) -> String {
+        switch self {
+        case .english, .hindi, .arabic: return "Navigate to \(name)"
+        case .portuguese: return "Navegar até \(name)"
+        case .spanish, .spanishLatam: return "Navegar a \(name)"
+        case .french: return "Naviguer vers \(name)"
+        case .german: return "Nach \(name) navigieren"
+        case .polish: return "Nawiguj do \(name)"
+        case .russian: return "Навигация до \(name)"
+        }
+    }
+
+    var horizonEmergencyRouteTitle: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Emergency route mode"
+        case .portuguese: return "Modo rota de emergência"
+        case .spanish, .spanishLatam: return "Modo ruta de emergencia"
+        case .french: return "Mode itinéraire d’urgence"
+        case .german: return "Notroutenmodus"
+        case .polish: return "Tryb trasy awaryjnej"
+        case .russian: return "Аварийный режим маршрута"
         }
     }
 }
@@ -3478,15 +4324,55 @@ enum SupportedRegion: String, CaseIterable, Identifiable {
     }
 }
 
+extension AppLanguage {
+    /// Valhalla-only policy: never imply MapKit/OSRM was used when truck routing failed.
+    func horizonRoutingFailureMessage(_ error: Error) -> String {
+        if case RoutingServiceError.allProvidersFailed = error {
+            return horizonRouteErrorValhallaUnavailable
+        }
+        return horizonRouteErrorUnableSafeRoute
+    }
+
+    /// Matches `RegionalSettingsManager` / `selectedLanguage` in `UserDefaults`.
+    /// `nonisolated(unsafe)` keeps this readable from any isolation domain; `UserDefaults` is thread-safe for reads/writes.
+    nonisolated(unsafe) static var persistedDriverChoice: AppLanguage {
+        if let raw = UserDefaults.standard.string(forKey: "selectedLanguage"),
+           let lang = AppLanguage.allCases.first(where: { $0.rawValue == raw }) {
+            return lang
+        }
+        return .english
+    }
+
+    /// Speed compliance banner when GPS/telemetry exceeds policy-derived heavy-vehicle guidance.
+    func truckSpeedComplianceMessage(currentFormatted: String, limitFormatted: String) -> String {
+        switch self {
+        case .english, .hindi, .arabic:
+            return "Truck speed \(currentFormatted) is above local heavy-vehicle guidance (\(limitFormatted)). Reduce speed."
+        case .portuguese:
+            return "Velocidade \(currentFormatted) acima da referência para veículo pesado (\(limitFormatted)). Reduza."
+        case .spanish, .spanishLatam:
+            return "Velocidad \(currentFormatted) por encima de la referencia para vehículo pesado (\(limitFormatted)). Reduzca."
+        case .french:
+            return "Vitesse \(currentFormatted) au-dessus de la référence poids lourds (\(limitFormatted)). Ralentissez."
+        case .german:
+            return "Geschwindigkeit \(currentFormatted) über Schwerverkehr-Richtwert (\(limitFormatted)). Reduzieren."
+        case .polish:
+            return "Prędkość \(currentFormatted) powyżej wytycznej dla pojazdu ciężkiego (\(limitFormatted)). Zwolnij."
+        case .russian:
+            return "Скорость \(currentFormatted) выше ориентира для тяжёлого транспорта (\(limitFormatted)). Снизьте скорость."
+        }
+    }
+}
+
 // MARK: - Regional Settings Manager
 @Observable
 class RegionalSettingsManager {
     var currentRegion: SupportedRegion {
         didSet {
             UserDefaults.standard.set(currentRegion.rawValue, forKey: "selectedRegion")
-            // Update language to region default if user hasn't manually set it
+            // App copy defaults to English until the driver explicitly picks a language in settings.
             if !UserDefaults.standard.bool(forKey: "languageManuallySet") {
-                currentLanguage = currentRegion.defaultLanguage
+                currentLanguage = .english
             }
         }
     }
@@ -3521,12 +4407,12 @@ class RegionalSettingsManager {
         }
         self.currentRegion = detectedRegion
 
-        // Detect language
+        // Detect language: English until the driver saves a choice (region does not imply UI language).
         if let savedLang = UserDefaults.standard.string(forKey: "selectedLanguage"),
            let lang = AppLanguage(rawValue: savedLang) {
             self.currentLanguage = lang
         } else {
-            self.currentLanguage = detectedRegion.defaultLanguage
+            self.currentLanguage = .english
         }
     }
 

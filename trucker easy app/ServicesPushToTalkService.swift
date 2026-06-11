@@ -1,4 +1,4 @@
-// © 2024–2025 TruckerEasy LLC. All rights reserved.
+// © 2024–2026 TruckerEasy LLC. All rights reserved.
 // Push-to-Talk (CB Radio / Channel 19) — Agora RTC backend
 
 import Foundation

@@ -219,7 +219,9 @@ extension FuelPriceService {
                 sourceLabel: "EIA API v2 – weekly on-highway diesel"
             )
         } catch {
+            #if DEBUG
             print("[Fuel] EIA API v2 error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }
@@ -273,7 +275,9 @@ extension FuelPriceService {
                 sourceLabel: "EIA DNAV – weekly on-highway diesel"
             )
         } catch {
+            #if DEBUG
             print("[Fuel] EIA DNAV error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }
@@ -323,7 +327,9 @@ extension FuelPriceService {
                 sourceLabel: "Natural Resources Canada – weekly diesel retail"
             )
         } catch {
+            #if DEBUG
             print("[Fuel] NRCan error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }
@@ -370,7 +376,9 @@ extension FuelPriceService {
                 sourceLabel: "ANP – Levantamento Semanal de Preços (últimas 4 semanas)"
             )
         } catch {
+            #if DEBUG
             print("[Fuel] ANP error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }
@@ -452,7 +460,9 @@ extension FuelPriceService {
                 sourceLabel: "EC Weekly Oil Bulletin – diesel with taxes"
             )
         } catch {
+            #if DEBUG
             print("[Fuel] EU Bulletin error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }
@@ -586,7 +596,9 @@ extension FuelPriceService {
             guard let csv = String(data: csvData, encoding: .utf8) else { return nil }
             return parseUKBEISCSV(csv)
         } catch {
+            #if DEBUG
             print("[Fuel] UK BEIS scrape error: \(error.localizedDescription)")
+            #endif
             return nil
         }
     }

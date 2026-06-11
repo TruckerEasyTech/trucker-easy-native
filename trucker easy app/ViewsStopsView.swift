@@ -12,7 +12,7 @@ struct StopItem: Identifiable {
     let category: StopCategory
     let availability: StopAvailability
     let rating: Double?
-    let reviewCount: Int
+    let reviewCount: Int?
     let coordinate: CLLocationCoordinate2D
 
     enum StopAvailability {
@@ -45,6 +45,9 @@ struct StopItem: Identifiable {
         case restAreas    = "Rest Areas"
         case restaurants  = "Restaurants"
         case parking      = "Parking"
+        case truckWash    = "Truck Wash"
+        case hotels       = "Hotels"
+        case repairShops  = "Repair"
 
         var icon: String {
             switch self {
@@ -54,6 +57,9 @@ struct StopItem: Identifiable {
             case .restAreas:     return "bed.double.fill"
             case .restaurants:   return "fork.knife"
             case .parking:       return "p.circle.fill"
+            case .truckWash:     return "drop.circle.fill"
+            case .hotels:        return "building.2.fill"
+            case .repairShops:   return "wrench.and.screwdriver.fill"
             }
         }
         var color: Color {
@@ -64,6 +70,9 @@ struct StopItem: Identifiable {
             case .restAreas:     return Color(hex: "#8b5cf6")
             case .restaurants:   return Color(hex: "#10b981")
             case .parking:       return Color(hex: "#6366f1")
+            case .truckWash:     return Color(hex: "#38bdf8")
+            case .hotels:        return Color(hex: "#a855f7")
+            case .repairShops:   return Color(hex: "#f97316")
             }
         }
         var searchQuery: String {
@@ -74,6 +83,9 @@ struct StopItem: Identifiable {
             case .restAreas:     return "rest area highway interstate rest stop"
             case .restaurants:   return "restaurant diner"
             case .parking:       return "truck parking"
+            case .truckWash:     return "Blue Beacon truck wash"
+            case .hotels:        return "hotel motel near highway"
+            case .repairShops:   return "truck repair shop mechanic diesel"
             }
         }
     }
@@ -91,7 +103,7 @@ struct StopsView: View {
     @State private var parkingFullNames: Set<String> = []
 
     private let weighStationService = WeighStationStatusService.shared
-    private let categories: [StopItem.StopCategory] = [.nearMe, .truckStops, .weighStations, .restAreas, .restaurants, .parking]
+    private let categories: [StopItem.StopCategory] = StopItem.StopCategory.allCases
 
     var filteredStops: [StopItem] {
         if searchText.isEmpty { return stops }
@@ -118,6 +130,11 @@ struct StopsView: View {
                 searchBar
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+
+                // ── Diet-aware suggestion banner ─────────────────────────
+                if selectedCategory == .restaurants || selectedCategory == .nearMe {
+                    dietSuggestionBanner
+                }
 
                 // ── List ──────────────────────────────────────────────────
                 if isLoading {
@@ -250,6 +267,94 @@ struct StopsView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.08), lineWidth: 1))
     }
 
+    // MARK: - Diet Suggestion Banner
+
+    @ViewBuilder
+    private var dietSuggestionBanner: some View {
+        let profile = HealthProfile.loadSaved()
+        if profile.dietType.lowercased() != "standard" {
+            HStack(spacing: 10) {
+                Image(systemName: "fork.knife.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(Color(hex: "#00d4c8"))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Personalized for You")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("Showing \(profile.dietType) options based on your health profile")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.6))
+                    if !profile.allergies.isEmpty {
+                        Text("Avoiding: \(profile.allergies.joined(separator: ", "))")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(Color(hex: "#ff6b6b").opacity(0.8))
+                    }
+                }
+                Spacer()
+                Button(action: { loadDietSpecificStops() }) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color(hex: "#00d4c8").opacity(0.3))
+                        .clipShape(Circle())
+                }
+            }
+            .padding(12)
+            .background(
+                LinearGradient(
+                    colors: [Color(hex: "#00d4c8").opacity(0.12), Color(hex: "#004d40").opacity(0.08)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            )
+            .cornerRadius(12)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "#00d4c8").opacity(0.2), lineWidth: 1))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+        }
+    }
+
+    private func loadDietSpecificStops() {
+        guard let location = locationManager.currentLocation else { return }
+        let profile = HealthProfile.loadSaved()
+        isLoading = true
+        Task {
+            let request = MKLocalSearch.Request()
+            request.naturalLanguageQuery = profile.foodSearchQuery
+            request.region = MKCoordinateRegion(
+                center: location.coordinate,
+                latitudinalMeters: 40_000,
+                longitudinalMeters: 40_000
+            )
+            do {
+                let response = try await MKLocalSearch(request: request).start()
+                let items: [StopItem] = response.mapItems.compactMap { item in
+                    let dist = location.distance(from: CLLocation(
+                        latitude: item.placemark.coordinate.latitude,
+                        longitude: item.placemark.coordinate.longitude
+                    )) / 1609.34
+                    return StopItem(
+                        name: item.name ?? "Restaurant",
+                        address: [item.placemark.thoroughfare, item.placemark.locality]
+                            .compactMap { $0 }.joined(separator: ", "),
+                        distanceMiles: dist,
+                        category: .restaurants,
+                        availability: .unknown,
+                        rating: nil,
+                        reviewCount: nil,
+                        coordinate: item.placemark.coordinate
+                    )
+                }.sorted { $0.distanceMiles < $1.distanceMiles }
+                await MainActor.run {
+                    stops = items
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run { isLoading = false }
+            }
+        }
+    }
+
     // MARK: - Empty State
 
     private var emptyState: some View {
@@ -291,19 +396,10 @@ struct StopsView: View {
                 stops = items.prefix(20).compactMap { item in
                     let coord: CLLocationCoordinate2D
                     let addr: String
-                    if #available(iOS 26, *) {
-                        coord = item.location.coordinate
-                        let addrParts = [item.addressRepresentations?.cityName, item.addressRepresentations?.regionName]
-                            .compactMap { $0 }.filter { !$0.isEmpty }
-                        addr = addrParts.isEmpty
-                            ? (item.addressRepresentations?.fullAddress(includingRegion: true, singleLine: true) ?? "")
-                            : addrParts.joined(separator: ", ")
-                    } else {
-                        coord = item.placemark.coordinate
-                        let addrParts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea]
-                            .compactMap { $0 }.filter { !$0.isEmpty }
-                        addr = addrParts.isEmpty ? (item.placemark.title ?? "") : addrParts.joined(separator: ", ")
-                    }
+                    coord = item.placemark.coordinate
+                    let addrParts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea]
+                        .compactMap { $0 }.filter { !$0.isEmpty }
+                    addr = addrParts.isEmpty ? (item.placemark.title ?? "") : addrParts.joined(separator: ", ")
                     let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
                     let distMeters = location.distance(from: itemLoc)
                     let distMi = distMeters / 1609.34
@@ -330,10 +426,8 @@ struct StopsView: View {
                         distanceMiles: distMi,
                         category: selectedCategory,
                         availability: avail,
-                        rating: selectedCategory == .restaurants || selectedCategory == .truckStops
-                            ? Double.random(in: 2.5...5.0).rounded(toPlaces: 1)
-                            : nil,
-                        reviewCount: Int.random(in: 1...250),
+                        rating: nil,
+                        reviewCount: nil,
                         coordinate: coord
                     )
                 }
@@ -417,9 +511,11 @@ private struct StopRow: View {
                             Text(String(format: "%.1f", rating))
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(Color(hex: "#f59e0b"))
-                            Text("(\(stop.reviewCount))")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color.white.opacity(0.4))
+                            if let count = stop.reviewCount {
+                                Text("(\(count))")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Color.white.opacity(0.4))
+                            }
                         }
                     }
                 }
@@ -444,6 +540,7 @@ struct StopDetailSheet: View {
     let stop: StopItem
     @Environment(\.dismiss) private var dismiss
     @State private var showingRoute = false
+    @State private var isFavorite = false
 
     var body: some View {
         NavigationView {
@@ -472,7 +569,25 @@ struct StopDetailSheet: View {
                                 .foregroundColor(Color.white.opacity(0.55))
                                 .multilineTextAlignment(.center)
 
-                            // Stats row
+                            HStack(spacing: 12) {
+                                Button(action: {
+                                    isFavorite.toggle()
+                                    FavoritePlacesStore.shared.toggle(stop)
+                                }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: isFavorite ? "heart.fill" : "heart")
+                                            .foregroundColor(isFavorite ? Color(hex: "#ef4444") : .white)
+                                        Text(isFavorite ? "Saved" : "Save")
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color.white.opacity(0.1))
+                                    .clipShape(Capsule())
+                                }
+                            }
+
                             HStack(spacing: 24) {
                                 statPill(value: String(format: "%.1f mi", stop.distanceMiles), label: "Distance", color: Color(hex: "#00d4c8"))
                                 if stop.availability != .unknown {
@@ -523,6 +638,7 @@ struct StopDetailSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear { isFavorite = FavoritePlacesStore.shared.isFavorite(stop) }
     }
 
     private func statPill(value: String, label: String, color: Color) -> some View {
@@ -535,6 +651,60 @@ struct StopDetailSheet: View {
                 .foregroundColor(Color.white.opacity(0.45))
         }
     }
+}
+
+// MARK: - Favorite Places Store
+
+@Observable
+final class FavoritePlacesStore {
+    static let shared = FavoritePlacesStore()
+    private let key = "favoritePlaces_v1"
+    private(set) var favorites: [FavoritePlace] = []
+
+    init() { load() }
+
+    func isFavorite(_ stop: StopItem) -> Bool {
+        favorites.contains { $0.name == stop.name }
+    }
+
+    func toggle(_ stop: StopItem) {
+        if let idx = favorites.firstIndex(where: { $0.name == stop.name }) {
+            favorites.remove(at: idx)
+        } else {
+            let fav = FavoritePlace(
+                name: stop.name,
+                address: stop.address,
+                latitude: stop.coordinate.latitude,
+                longitude: stop.coordinate.longitude,
+                category: stop.category.rawValue,
+                savedAt: Date()
+            )
+            favorites.insert(fav, at: 0)
+        }
+        save()
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(favorites) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func load() {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([FavoritePlace].self, from: data) else { return }
+        favorites = decoded
+    }
+}
+
+struct FavoritePlace: Codable, Identifiable {
+    var id: String { name }
+    let name: String
+    let address: String
+    let latitude: Double
+    let longitude: Double
+    let category: String
+    let savedAt: Date
 }
 
 // MARK: - Double rounding helper

@@ -8,6 +8,7 @@ import MapKit
 
 struct HorizonTruckSettingsSheet: View {
     @Binding var profile: TruckProfile
+    @Binding var truckSafeOnlyMode: Bool
     var lang: AppLanguage = .english
     @Environment(\.dismiss) private var dismiss
 
@@ -39,6 +40,11 @@ struct HorizonTruckSettingsSheet: View {
                 }
                 Section("Cargo") {
                     Toggle("HAZMAT", isOn: $profile.hasHazmat)
+                }
+                Section {
+                    Toggle(lang.truckSafeOnlyToggleTitle, isOn: $truckSafeOnlyMode)
+                } footer: {
+                    Text(lang.truckSafeOnlyToggleFooter)
                 }
             }
             .navigationTitle("Truck Profile")
@@ -122,47 +128,7 @@ struct HorizonMoodCheckSheet: View {
     let onSubmit: (Int) -> Void
     let onSkip: () -> Void
 
-    enum DriverStatus: Int, CaseIterable {
-        case ready      = 5
-        case needCoffee = 4
-        case hungry     = 3
-        case needRest   = 1
-
-        var icon: String {
-            switch self {
-            case .ready:      return "truck.box.fill"
-            case .needCoffee: return "cup.and.saucer.fill"
-            case .hungry:     return "fork.knife"
-            case .needRest:   return "bed.double.fill"
-            }
-        }
-        var label: String {
-            switch self {
-            case .ready:      return "Pronto!"
-            case .needCoffee: return "Preciso de café"
-            case .hungry:     return "Com fome"
-            case .needRest:   return "Preciso descansar"
-            }
-        }
-        var sublabel: String {
-            switch self {
-            case .ready:      return "Vamos rodar!"
-            case .needCoffee: return "Parada rápida"
-            case .hungry:     return "Achar truck stop"
-            case .needRest:   return "Rest area ahead"
-            }
-        }
-        var color: Color {
-            switch self {
-            case .ready:      return Color(hex: "#10b981")
-            case .needCoffee: return Color(hex: "#f59e0b")
-            case .hungry:     return Color(hex: "#6366f1")
-            case .needRest:   return Color(hex: "#ef4444")
-            }
-        }
-    }
-
-    @State private var selected: DriverStatus? = nil
+    @State private var moodRating = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -177,10 +143,10 @@ struct HorizonMoodCheckSheet: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(AppTheme.Colors.accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Pronto para rodar?")
+                    Text(lang.howAreYouFeeling)
                         .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.white)
-                    Text("Como você está agora, motorista?")
+                    Text(lang.tapStarMoodLabel)
                         .font(.system(size: 12))
                         .foregroundColor(AppTheme.Colors.textSecondary)
                 }
@@ -192,43 +158,11 @@ struct HorizonMoodCheckSheet: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+            .padding(.bottom, 12)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(DriverStatus.allCases, id: \.rawValue) { status in
-                    Button(action: {
-                        selected = status
-                        onSubmit(status.rawValue)
-                    }) {
-                        VStack(spacing: 8) {
-                            ZStack {
-                                Circle()
-                                    .fill(selected == status ? status.color : status.color.opacity(0.15))
-                                    .frame(width: 52, height: 52)
-                                Image(systemName: status.icon)
-                                    .font(.system(size: 22, weight: .semibold))
-                                    .foregroundColor(selected == status ? .white : status.color)
-                            }
-                            Text(status.label)
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-                            Text(status.sublabel)
-                                .font(.system(size: 10))
-                                .foregroundColor(AppTheme.Colors.textSecondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(selected == status ? status.color.opacity(0.12) : AppTheme.Colors.backgroundCard)
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(selected == status ? status.color : AppTheme.Colors.textSecondary.opacity(0.12), lineWidth: 1.5)
-                        )
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+            WellnessStarRating(rating: $moodRating, onSelect: { onSubmit(moodRating) })
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
         }
         .background(AppTheme.Colors.backgroundSecond)
     }
@@ -303,7 +237,7 @@ struct HorizonGlobalSearchSheet: View {
 
                 List(results, id: \.self) { item in
                     Button(action: {
-                        let coord = item.location.coordinate
+                        let coord = item.placemark.coordinate
                         let name = item.name ?? "Destination"
                         onSelectResult(coord, name)
                     }) {
@@ -312,8 +246,8 @@ struct HorizonGlobalSearchSheet: View {
                                 Text(item.name ?? "Unknown")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
-                                if let addr = item.address?.shortAddress
-                                    ?? item.addressRepresentations?.cityWithContext {
+                                let addrParts = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea].compactMap { $0 }
+                                if let addr = addrParts.isEmpty ? nil : addrParts.joined(separator: ", ") {
                                     Text(addr)
                                         .font(.system(size: 12))
                                         .foregroundColor(AppTheme.Colors.textSecondary)
@@ -322,7 +256,7 @@ struct HorizonGlobalSearchSheet: View {
                             }
                             Spacer()
                             if let loc = locationManager.currentLocation {
-                                let dist = loc.distance(from: item.location)
+                                let dist = loc.distance(from: CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude))
                                 Text(dist < 1609
                                      ? String(format: "%.0f ft", dist * 3.28084)
                                      : String(format: "%.1f mi", dist / 1609.34))
@@ -364,7 +298,7 @@ struct HorizonGlobalSearchSheet: View {
             await MainActor.run {
                 if let loc = locationManager.currentLocation {
                     results = items.sorted { a, b in
-                        return loc.distance(from: a.location) < loc.distance(from: b.location)
+                        return loc.distance(from: CLLocation(latitude: a.placemark.coordinate.latitude, longitude: a.placemark.coordinate.longitude)) < loc.distance(from: CLLocation(latitude: b.placemark.coordinate.latitude, longitude: b.placemark.coordinate.longitude))
                     }.prefix(10).map { $0 }
                 } else {
                     results = Array(items.prefix(10))
@@ -504,60 +438,87 @@ struct HorizonActiveLoadBar: View {
     let onFuelReport: () -> Void
     var onMarkPickedUp: (() -> Void)? = nil
     let onMarkDelivered: () -> Void
+    /// Quando `nil`, o botão de otimização quântica fica oculto (API não configurada no build).
+    var onOptimizeRoute: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: isPickedUp ? "shippingbox.fill" : "arrow.up.circle.fill")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isPickedUp ? "shippingbox.fill" : "arrow.up.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(isPickedUp ? Color(hex: "#10b981") : Color(hex: "#f59e0b"))
+                        Text(isPickedUp ? "Em Rota · #\(load.loadNumber)" : "Buscando · #\(load.loadNumber)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    Text(isPickedUp ? load.destinationAddress : load.originAddress)
                         .font(.system(size: 11))
-                        .foregroundColor(isPickedUp ? Color(hex: "#10b981") : Color(hex: "#f59e0b"))
-                    Text(isPickedUp ? "Em Rota · #\(load.loadNumber)" : "Buscando · #\(load.loadNumber)")
-                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button(action: onFuelReport) {
+                    Image(systemName: "fuelpump.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(AppTheme.Colors.accent)
+                        .padding(8)
+                        .background(AppTheme.Colors.accent.opacity(0.15))
+                        .cornerRadius(8)
+                }
+                if isPickedUp {
+                    Button(action: onMarkDelivered) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 12))
+                            Text("Entregue")
+                                .font(.system(size: 12, weight: .bold))
+                        }
                         .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color(hex: "#10b981"))
+                        .cornerRadius(8)
+                    }
+                } else {
+                    Button(action: { onMarkPickedUp?() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 12))
+                            Text("Carreguei")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color(hex: "#f59e0b"))
+                        .cornerRadius(8)
+                    }
                 }
-                Text(isPickedUp ? load.destinationAddress : load.originAddress)
-                    .font(.system(size: 11))
-                    .foregroundColor(AppTheme.Colors.textSecondary)
-                    .lineLimit(1)
             }
-            Spacer()
-            Button(action: onFuelReport) {
-                Image(systemName: "fuelpump.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(AppTheme.Colors.accent)
-                    .padding(8)
-                    .background(AppTheme.Colors.accent.opacity(0.15))
-                    .cornerRadius(8)
-            }
-            if isPickedUp {
-                Button(action: onMarkDelivered) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12))
-                        Text("Entregue")
-                            .font(.system(size: 12, weight: .bold))
+
+            if let onOptimizeRoute {
+                Button(action: onOptimizeRoute) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Otimizar Rota")
+                            .font(.system(size: 13, weight: .bold))
                     }
                     .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color(hex: "#10b981"))
-                    .cornerRadius(8)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: "#6366f1"), Color(hex: "#4f46e5")],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(10)
                 }
-            } else {
-                Button(action: { onMarkPickedUp?() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 12))
-                        Text("Carreguei")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color(hex: "#f59e0b"))
-                    .cornerRadius(8)
-                }
+                .accessibilityLabel("Otimizar rota com motor de otimização")
             }
         }
         .padding(.horizontal, 14)
@@ -767,6 +728,8 @@ struct HorizonTruckStopReviewSheet: View {
     @State private var price: Int = 0
     @State private var comments: String = ""
     @State private var submitted = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
     @FocusState private var commentsFocused: Bool
 
     var canSubmit: Bool {
@@ -825,16 +788,27 @@ struct HorizonTruckStopReviewSheet: View {
 
                     VStack(spacing: 10) {
                         Button(action: submitReview) {
-                            Text(submitted ? "Submitted!" : "Submit Review")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(canSubmit ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary.opacity(0.3))
-                                .cornerRadius(12)
+                            HStack(spacing: 8) {
+                                if isSubmitting { ProgressView().tint(.black) }
+                                Text(submitted ? "Submitted!" : "Submit Review")
+                                    .font(.system(size: 16, weight: .bold))
+                            }
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(canSubmit ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary.opacity(0.3))
+                            .cornerRadius(12)
                         }
-                        .disabled(!canSubmit || submitted)
+                        .disabled(!canSubmit || submitted || isSubmitting)
                         .padding(.horizontal, 16)
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(AppTheme.Colors.warning)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
+                        }
 
                         Button("Skip", action: onDismiss)
                             .font(.system(size: 14))
@@ -855,22 +829,63 @@ struct HorizonTruckStopReviewSheet: View {
     }
 
     private func submitReview() {
-        submitted = true
-        let key = "review_\(stop.name)_\(Date().timeIntervalSince1970)"
-        let data: [String: Any] = [
-            "stop": stop.name, "address": stop.address,
-            "easyToReach": easyToReach, "cleanliness": cleanliness,
-            "restaurants": restaurants, "friendlyService": friendlyService,
-            "price": price, "comments": comments,
-            "date": ISO8601DateFormatter().string(from: Date())
-        ]
-        UserDefaults.standard.set(data, forKey: key)
+        guard SupabaseClient.shared.isAuthenticated,
+              let driverId = SupabaseClient.shared.currentDriverId else {
+            errorMessage = "Faça login para enviar sua avaliação."
+            return
+        }
+        isSubmitting = true
+        errorMessage = nil
 
         Task {
+            let payload = TruckStopReviewPayload(
+                poi_place_id: stop.dataSource == .supabase ? stop.id : nil,
+                driver_id: driverId,
+                location_name: stop.name,
+                latitude: stop.coordinate.latitude,
+                longitude: stop.coordinate.longitude,
+                easy_access_rating: easyToReach > 0 ? easyToReach : nil,
+                cleanliness_rating: cleanliness > 0 ? cleanliness : nil,
+                restaurants_rating: restaurants > 0 ? restaurants : nil,
+                friendly_service_rating: friendlyService > 0 ? friendlyService : nil,
+                price_rating: price > 0 ? price : nil,
+                overall_rating: max(1.0, min(5.0, overallScore)),
+                restaurant_names: [],
+                has_healthy_options: nil,
+                comments: comments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : comments.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            do {
+                try await SupabaseClient.shared.submitTruckStopReview(payload)
+                await MainActor.run {
+                    let key = "review_\(stop.name)_\(Date().timeIntervalSince1970)"
+                    let data: [String: Any] = [
+                        "stop": stop.name, "address": stop.address,
+                        "easyToReach": easyToReach, "cleanliness": cleanliness,
+                        "restaurants": restaurants, "friendlyService": friendlyService,
+                        "price": price, "comments": comments,
+                        "date": ISO8601DateFormatter().string(from: Date())
+                    ]
+                    UserDefaults.standard.set(data, forKey: key)
+                    isSubmitting = false
+                    submitted = true
+                }
+            } catch {
+                await MainActor.run {
+                    isSubmitting = false
+                    errorMessage = "Não foi possível enviar. Faça login novamente e tente de novo."
+                }
+                #if DEBUG
+                print("[TruckStopReview] Supabase sync failed: \(error.localizedDescription)")
+                #endif
+                return
+            }
+            #if DEBUG
             print("[TruckStopReview] Submitted: \(stop.name) — overall \(overallScore)/5")
+            #endif
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { onDismiss() }
+            }
         }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { onDismiss() }
     }
 
     private var overallScore: Double {
@@ -930,7 +945,7 @@ struct HorizonAIChatPanel: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(Color(hex: "#c9a84c"))
-                Text("Easy AI")
+                Text("Route Easy")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
                 Spacer()
@@ -957,14 +972,14 @@ struct HorizonAIChatPanel: View {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         if messages.isEmpty {
                             VStack(spacing: 8) {
-                                Text("Ask about your route, tolls, HOS, fuel, restrictions...")
+                                Text("Route Easy — compare tolls, fuel, and time. Ask anything about your haul.")
                                     .font(.system(size: 13))
                                     .foregroundColor(AppTheme.Colors.textSecondary)
                                     .multilineTextAlignment(.center)
                                     .padding(.top, 12)
                                 HStack(spacing: 6) {
-                                    aiQuickButton("Route alternatives?")
-                                    aiQuickButton("Toll costs?")
+                                    aiQuickButton("Fewer tolls?")
+                                    aiQuickButton("Cheapest fuel?")
                                 }
                                 HStack(spacing: 6) {
                                     aiQuickButton("Nearest rest area?")
@@ -1022,7 +1037,7 @@ struct HorizonAIChatPanel: View {
             Divider().background(Color.white.opacity(0.1))
 
             HStack(spacing: 8) {
-                TextField("Ask Easy AI...", text: $inputText)
+                TextField("Ask Route Easy...", text: $inputText)
                     .font(.system(size: 14))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)

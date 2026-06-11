@@ -90,13 +90,16 @@ struct CheckupView: View {
     @Query private var medications: [Medication]
 
     @State private var moodRating: Int = 0
-    @State private var hkSteps: Int = 0          // Steps from HealthKit (today)
+    @State private var hkSteps: Int = 0
+    @State private var hkSleepHours: Double = 0
     @State private var showingAddMedication = false
     @State private var medicationAlert: Medication? = nil
     @State private var showingMedicationAlert = false
     @State private var showingHealthProfile = false
     @State private var showingSleepLog = false
     @State private var showingHOSInfo = false
+    @State private var showingTelemedicine = false
+    @State private var showingLotusCortex = false
 
     var todaysLogs: [WellnessLog] { logs.filter { $0.date.isToday } }
     var todayMood: WellnessLog? { todaysLogs.first { $0.category == .mental } }
@@ -179,6 +182,7 @@ struct CheckupView: View {
                         waterGlasses: totalWaterToday,
                         moodRating: todayMood != nil ? moodRating : 0,
                         hkSteps: hkSteps,
+                        hkSleepHours: hkSleepHours,
                         todayText: lang.todayLabel,
                         sleepText: lang.sleepLabel,
                         exerciseText: lang.exerciseLabel,
@@ -225,6 +229,14 @@ struct CheckupView: View {
                     MentalHealthSupportCard()
                         .padding(.horizontal, AppTheme.Spacing.md)
 
+                    // MARK: Lotus Cortex (AI wellness + telehealth screening)
+                    LotusCortexCard(onTap: { showingLotusCortex = true })
+                        .padding(.horizontal, AppTheme.Spacing.md)
+
+                    // MARK: Telemedicine (DoctorsHero)
+                    TelemedicineCard(onTap: { showingTelemedicine = true })
+                        .padding(.horizontal, AppTheme.Spacing.md)
+
                     Spacer(minLength: AppTheme.Spacing.xxl)
                 }
             }
@@ -239,6 +251,14 @@ struct CheckupView: View {
         }
         .sheet(isPresented: $showingHOSInfo) {
             HOSInfoSheet(hos: regionalSettings.hosRules)
+                .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showingTelemedicine) {
+            TelemedicineView()
+                .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showingLotusCortex) {
+            CortexWellnessView()
                 .preferredColorScheme(.dark)
         }
         .overlay(
@@ -260,6 +280,7 @@ struct CheckupView: View {
             #if canImport(HealthKit)
             if let hk = HealthKitManager.shared {
                 hk.fetchTodaySteps { steps in hkSteps = steps }
+                hk.fetchLastNightSleep { hours in hkSleepHours = hours }
             }
             #endif
         }
@@ -303,17 +324,12 @@ struct CheckupView: View {
             log.stressLevel = 6 - rating
             modelContext.insert(log)
         }
+        try? modelContext.save()
+        WellnessCloudSync.pushDailyCheckin(moodStars: rating, source: .checkup)
     }
 
     private func moodRatingText(_ r: Int) -> String {
-        switch r {
-        case 1: return "Feeling bad"
-        case 2: return "Below normal"
-        case 3: return "Getting by"
-        case 4: return "Feeling good"
-        case 5: return "Feeling great!"
-        default: return ""
-        }
+        r > 0 ? "Mood \(r)/5" : ""
     }
 
     private func saveWellnessLog(category: WellnessCategory, value: Double) {
@@ -435,6 +451,42 @@ struct DriverStatusBanner: View {
     }
 }
 
+// MARK: - Wellness Star Rating (1–5, sem emoji)
+struct WellnessStarRating: View {
+    @Binding var rating: Int
+    var starSize: CGFloat = 38
+    var spacing: CGFloat = 16
+    var onSelect: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(1...5, id: \.self) { star in
+                Button(action: {
+                    rating = star
+                    onSelect?()
+                }) {
+                    Image(systemName: star <= rating ? "star.fill" : "star")
+                        .font(.system(size: starSize))
+                        .foregroundColor(star <= rating ? starColor(star) : AppTheme.Colors.textSecondary.opacity(0.3))
+                        .te_uniformScale(star == rating ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: rating)
+                }
+            }
+        }
+    }
+
+    private func starColor(_ star: Int) -> Color {
+        switch star {
+        case 1: return AppTheme.Colors.danger
+        case 2: return AppTheme.Colors.warning
+        case 3: return AppTheme.Colors.ctaGlow
+        case 4: return AppTheme.Colors.success
+        case 5: return AppTheme.Colors.accent
+        default: return AppTheme.Colors.textSecondary
+        }
+    }
+}
+
 // MARK: - Mood Check Card
 struct MoodCheckCard: View {
     @Binding var moodRating: Int
@@ -443,6 +495,7 @@ struct MoodCheckCard: View {
     var howAreYouText: String = "How are you feeling?"
     var savedText: String = "Saved"
     var tapStarText: String = "Tap a star to log your mood"
+    var showsFeedback: Bool = false
 
     var body: some View {
         VStack(spacing: AppTheme.Spacing.md) {
@@ -463,39 +516,23 @@ struct MoodCheckCard: View {
                 }
             }
 
-            // 5 Stars — tamanho generoso para uso com luvas
-            HStack(spacing: 16) {
-                ForEach(1...5, id: \.self) { star in
-                    Button(action: {
-                        moodRating = star
-                        onSave()
-                    }) {
-                        VStack(spacing: 4) {
-                            Image(systemName: star <= moodRating ? "star.fill" : "star")
-                                .font(.system(size: 38))
-                                .foregroundColor(star <= moodRating ? moodColor(star) : AppTheme.Colors.textSecondary.opacity(0.3))
-                                .te_uniformScale(star == moodRating ? 1.2 : 1.0)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: moodRating)
-                        }
-                    }
-                }
-            }
+            WellnessStarRating(rating: $moodRating, onSelect: onSave)
 
-            if moodRating > 0 {
-                HStack(spacing: 8) {
-                    Text(moodEmoji)
-                        .font(.title2)
-                    Text(moodLabel)
-                        .font(AppTheme.Typography.captionBold())
-                        .foregroundColor(moodColor(moodRating))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(moodColor(moodRating).opacity(0.1))
-                .cornerRadius(AppTheme.Radius.pill)
-                .transition(.scale.combined(with: .opacity))
-            } else {
+            if moodRating == 0 {
                 Text(tapStarText)
+                    .font(AppTheme.Typography.caption())
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+            } else if showsFeedback {
+                Text(moodLabel)
+                    .font(AppTheme.Typography.captionBold())
+                    .foregroundColor(moodColor(moodRating))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(moodColor(moodRating).opacity(0.1))
+                    .cornerRadius(AppTheme.Radius.pill)
+                    .transition(.scale.combined(with: .opacity))
+            } else {
+                Text("\(moodRating)/5")
                     .font(AppTheme.Typography.caption())
                     .foregroundColor(AppTheme.Colors.textSecondary)
             }
@@ -513,17 +550,6 @@ struct MoodCheckCard: View {
         case 4: return AppTheme.Colors.success
         case 5: return AppTheme.Colors.accent
         default: return AppTheme.Colors.textSecondary
-        }
-    }
-
-    private var moodEmoji: String {
-        switch moodRating {
-        case 1: return "😞"
-        case 2: return "😕"
-        case 3: return "😐"
-        case 4: return "😊"
-        case 5: return "😄"
-        default: return ""
         }
     }
 
@@ -546,6 +572,7 @@ struct TodayVitalsCard: View {
     let waterGlasses: Int
     let moodRating: Int
     var hkSteps: Int = 0
+    var hkSleepHours: Double = 0
     var todayText: String = "TODAY"
     var sleepText: String = "Sleep"
     var exerciseText: String = "Exercise"
@@ -594,7 +621,7 @@ struct TodayVitalsCard: View {
                 )
             }
 
-            // HealthKit steps row — only shown when data is available
+            // HealthKit steps row
             if hkSteps > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "shoeprints.fill")
@@ -614,6 +641,28 @@ struct TodayVitalsCard: View {
                     }
                 }
                 .padding(.top, 4)
+            }
+
+            // HealthKit sleep row
+            if hkSleepHours > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "bed.double.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(hkSleepHours >= 7 ? AppTheme.Colors.accent : AppTheme.Colors.warning)
+                    Text(String(format: "%.1fh sleep (Apple Health)", hkSleepHours))
+                        .font(AppTheme.Typography.small())
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                    if hkSleepHours < 6 {
+                        Text("• Rest needed!")
+                            .font(AppTheme.Typography.small())
+                            .foregroundColor(AppTheme.Colors.danger)
+                    } else if hkSleepHours >= 7 {
+                        Text("• Well rested")
+                            .font(AppTheme.Typography.small())
+                            .foregroundColor(AppTheme.Colors.success)
+                    }
+                }
+                .padding(.top, 2)
             }
         }
     }
@@ -1097,34 +1146,38 @@ struct MentalHealthSupportCard: View {
                 .multilineTextAlignment(.leading)
 
             HStack(spacing: AppTheme.Spacing.sm) {
-                Link(destination: URL(string: "tel://988")!) {
-                    HStack {
-                        Image(systemName: "phone.fill")
-                        Text("Call 988")
+                if let telURL = URL(string: "tel://988") {
+                    Link(destination: telURL) {
+                        HStack {
+                            Image(systemName: "phone.fill")
+                            Text("Call 988")
+                        }
+                        .font(AppTheme.Typography.captionBold())
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color(hex: "#6366f1"))
+                        .cornerRadius(AppTheme.Radius.md)
                     }
-                    .font(AppTheme.Typography.captionBold())
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color(hex: "#6366f1"))
-                    .cornerRadius(AppTheme.Radius.md)
                 }
 
-                Link(destination: URL(string: "sms://988")!) {
-                    HStack {
-                        Image(systemName: "message.fill")
-                        Text("SMS 988")
+                if let smsURL = URL(string: "sms://988") {
+                    Link(destination: smsURL) {
+                        HStack {
+                            Image(systemName: "message.fill")
+                            Text("SMS 988")
+                        }
+                        .font(AppTheme.Typography.captionBold())
+                        .foregroundColor(Color(hex: "#6366f1"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color(hex: "#6366f1").opacity(0.1))
+                        .cornerRadius(AppTheme.Radius.md)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                                .stroke(Color(hex: "#6366f1").opacity(0.4), lineWidth: 1)
+                        )
                     }
-                    .font(AppTheme.Typography.captionBold())
-                    .foregroundColor(Color(hex: "#6366f1"))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color(hex: "#6366f1").opacity(0.1))
-                    .cornerRadius(AppTheme.Radius.md)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                            .stroke(Color(hex: "#6366f1").opacity(0.4), lineWidth: 1)
-                    )
                 }
             }
         }

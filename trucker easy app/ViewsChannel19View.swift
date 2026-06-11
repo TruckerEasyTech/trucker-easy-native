@@ -1,4 +1,4 @@
-// © 2024–2025 TruckerEasy LLC. All rights reserved.
+// © 2024–2026 TruckerEasy LLC. All rights reserved.
 // Channel 19 — Push-to-Talk CB Radio for Truckers
 
 import SwiftUI

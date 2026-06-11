@@ -1,0 +1,2 @@
+# Cron chama sem JWT de utilizador — auth via header x-cron-secret + CRON_SECRET
+verify_jwt = false

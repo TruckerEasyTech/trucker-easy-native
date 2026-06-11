@@ -28,6 +28,9 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 
     var currentLocation: CLLocation?
     var currentHeading: CLHeading?
+    /// Increments on each accepted location fix (and on heading updates so Mapbox puck bearing refreshes when stationary).
+    private(set) var locationFixEpoch: UInt64 = 0
+    private var lastHeadingPresentationBumpAt: Date = .distantPast
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
     var isAuthorized: Bool {
         authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways
@@ -63,14 +66,17 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     func setNavigationMode(_ isNavigating: Bool) {
         if isNavigating {
             manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-            manager.distanceFilter = kCLDistanceFilterNone
+            // 2 m — fluid puck on highway without flooding SwiftUI (Mapbox FollowPuck interpolates between fixes).
+            manager.distanceFilter = 2
             manager.activityType = .automotiveNavigation
         } else {
             manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
             manager.distanceFilter = 15
             manager.activityType = .otherNavigation
         }
+        #if DEBUG
         print("[LocationManager] mode=\(isNavigating ? "nav" : "idle") accuracy=\(manager.desiredAccuracy) distanceFilter=\(manager.distanceFilter)")
+        #endif
     }
 
     func requestPermission() {
@@ -111,15 +117,23 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         // Accept only accurate fixes — discard stale or low-accuracy updates
         guard let loc = locations.last, loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 200 else { return }
         if #available(iOS 15.0, *), let source = loc.sourceInformation, source.isSimulatedBySoftware {
+            #if DEBUG
             print("[LocationManager] ⚠️ Ignoring simulated location update")
+            #endif
             return
         }
         currentLocation = loc
+        locationFixEpoch &+= 1
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         guard newHeading.headingAccuracy >= 0 else { return }
         currentHeading = newHeading
+        let now = Date()
+        if now.timeIntervalSince(lastHeadingPresentationBumpAt) >= 0.22 {
+            lastHeadingPresentationBumpAt = now
+            locationFixEpoch &+= 1
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -130,7 +144,9 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
         if clError?.code == .denied {
             stopTracking()
         }
+        #if DEBUG
         print("[LocationManager] ❌ \(error.localizedDescription)")
+        #endif
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -144,25 +160,37 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     func geocodeLocation(_ location: CLLocation) async -> String? {
-        guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
-        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-            request.getMapItems { mapItems, error in
-                if let error = error {
-                    print("Reverse geocoding error: \(error)")
-                    continuation.resume(returning: nil)
-                    return
+        if #available(iOS 26, *) {
+            guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
+            return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                request.getMapItems { mapItems, error in
+                    if let error = error {
+                        #if DEBUG
+                        print("Reverse geocoding error: \(error)")
+                        #endif
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    if let item = mapItems?.first,
+                       let repr = item.addressRepresentations {
+                        let city = repr.cityName ?? ""
+                        let region = repr.regionName ?? ""
+                        let parts = [city, region].filter { !$0.isEmpty }
+                        let result = parts.joined(separator: ", ")
+                        continuation.resume(returning: result.isEmpty ? nil : result)
+                    } else {
+                        continuation.resume(returning: nil)
+                    }
                 }
-                if let item = mapItems?.first,
-                   let repr = item.addressRepresentations {
-                    // Use MKAddressRepresentations (iOS 18+ MapKit API)
-                    let city = repr.cityName ?? ""
-                    let region = repr.regionName ?? ""
-                    let parts = [city, region].filter { !$0.isEmpty }
-                    let result = parts.joined(separator: ", ")
-                    continuation.resume(returning: result.isEmpty ? nil : result)
-                } else {
-                    continuation.resume(returning: nil)
-                }
+            }
+        } else {
+            do {
+                let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
+                guard let pm = placemarks.first else { return nil }
+                let parts = [pm.locality, pm.administrativeArea].compactMap { $0 }.filter { !$0.isEmpty }
+                return parts.isEmpty ? nil : parts.joined(separator: ", ")
+            } catch {
+                return nil
             }
         }
     }
@@ -184,6 +212,7 @@ extension LocationManager {
         guard useFakeLocationInSimulator else { return }
         debugLocationOverrideActive = true
         currentLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        locationFixEpoch &+= 1
         print("[LocationManager][DEBUG] setDebugLocation \(coordinate.latitude),\(coordinate.longitude)")
     }
 

@@ -1,0 +1,4 @@
+# Credenciais locais — nunca versionar (defesa em profundidade mesmo fora da raiz do repo)
+.env
+.env.*
+!.env.example

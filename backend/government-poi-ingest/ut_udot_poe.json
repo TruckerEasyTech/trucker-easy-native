@@ -1,0 +1,13 @@
+[
+  {"id": "perry", "name": "Perry Port of Entry", "lat": 41.4624, "lon": -112.0378, "highway": "I-15", "milepost": "358.8", "full_time": true},
+  {"id": "st-george", "name": "St. George Port of Entry", "lat": 37.0451, "lon": -113.5679, "highway": "I-15", "milepost": "1", "full_time": true},
+  {"id": "wendover", "name": "Wendover Port of Entry", "lat": 40.7369, "lon": -114.0379, "highway": "I-80", "milepost": "3", "full_time": true},
+  {"id": "echo", "name": "Echo Port of Entry", "lat": 41.0811, "lon": -111.2462, "highway": "I-80", "milepost": "180", "full_time": true},
+  {"id": "daniels", "name": "Daniels Port of Entry", "lat": 40.5142, "lon": -111.3886, "highway": "US-40", "milepost": "22", "full_time": true},
+  {"id": "kanab", "name": "Kanab Port of Entry", "lat": 37.0475, "lon": -112.5263, "highway": "US-89", "milepost": "67", "full_time": true},
+  {"id": "monticello", "name": "Monticello Port of Entry", "lat": 37.8719, "lon": -109.3429, "highway": "US-491", "milepost": "2", "full_time": true},
+  {"id": "peerless", "name": "Peerless Port of Entry", "lat": 39.5994, "lon": -110.8107, "highway": "US-6", "milepost": "231", "full_time": true},
+  {"id": "vernal", "name": "Vernal Port of Entry", "lat": 40.4555, "lon": -109.5287, "highway": "US-40", "milepost": null, "full_time": false},
+  {"id": "thompson-springs", "name": "Thompson Springs Port of Entry", "lat": 38.9711, "lon": -109.7128, "highway": "I-70", "milepost": null, "full_time": false},
+  {"id": "roto-flats", "name": "Roto Flats Port of Entry", "lat": 38.7420, "lon": -112.6020, "highway": "US-89", "milepost": null, "full_time": false}
+]

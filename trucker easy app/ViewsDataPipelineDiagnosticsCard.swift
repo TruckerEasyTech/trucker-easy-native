@@ -6,6 +6,7 @@ struct DataPipelineDiagnosticsCard: View {
     let fleetTelemetryService: FleetTelemetryService
     let jurisdictionPolicyService: JurisdictionPolicyService
     let operationalFeedService: OperationalFeedService
+    var integrationHealth: [IntegrationHealthResult] = []
     let onClose: () -> Void
 
     // GPS is "live" if the last fix is no older than 5 seconds
@@ -58,16 +59,28 @@ struct DataPipelineDiagnosticsCard: View {
         UserDefaults.standard.bool(forKey: "tomtom_sdk_ready")
     }
 
+    private var valhallaHealth: IntegrationHealthResult? {
+        integrationHealth.first { $0.name == "Valhalla" }
+    }
+
     private var routingHealthy: Bool {
-        mapboxConfigured || tomTomRoutingConfigured || tomTomSDKReady
+        valhallaHealth?.ok == true || mapboxConfigured
+    }
+
+    private var truckSafeOnlyActive: Bool {
+        UserDefaults.standard.bool(forKey: "truckSafeOnlyMode")
     }
 
     private var routingDetails: String {
-        let mapboxApi = mapboxRoutingConfigured ? "Mapbox: ok" : "Mapbox: missing"
-        let tomTomSDK = tomTomSDKReady ? "TomTom SDK: ok" : "TomTom SDK: off"
-        let tomTomApi = tomTomRoutingConfigured ? "TomTom API: ok" : "TomTom API: missing"
-        let provider = RoutingService.shared.lastProvider.rawValue
-        return "\(provider) · \(tomTomSDK) · \(mapboxApi) · \(tomTomApi)"
+        if let v = valhallaHealth {
+            return v.ok ? "Truck routes OK · \(v.detail)" : "Valhalla unreachable · \(v.detail)"
+        }
+        let n = ValhallaRoutingService.shared.serverBaseURLs.count
+        return n > 0 ? "Valhalla: \(n) URL(s) — run diagnostics" : "Configure VALHALLA_SERVER_URL"
+    }
+
+    private var truckSafeOnlyDetails: String {
+        truckSafeOnlyActive ? "ON — blocks OSRM/MapKit" : "OFF — OSRM fallback allowed"
     }
 
     var body: some View {
@@ -87,6 +100,18 @@ struct DataPipelineDiagnosticsCard: View {
             statusRow(name: "GPS",     isHealthy: gpsIsLive,           details: gpsDetails)
             statusRow(name: "Policy",  isHealthy: policyIsHealthy,     details: policyDetails)
             statusRow(name: "Routing", isHealthy: routingHealthy,      details: routingDetails)
+            statusRow(
+                name: "Truck-safe",
+                isHealthy: !truckSafeOnlyActive || valhallaHealth?.ok == true,
+                details: truckSafeOnlyDetails
+            )
+
+            if !integrationHealth.isEmpty {
+                Divider().background(Color.white.opacity(0.1))
+                ForEach(integrationHealth) { item in
+                    statusRow(name: item.name, isHealthy: item.ok, details: item.detail)
+                }
+            }
         }
         .padding(12)
         .background(AppTheme.Colors.backgroundCard.opacity(0.95))

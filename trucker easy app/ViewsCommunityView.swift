@@ -117,7 +117,9 @@ struct CommunityView: View {
             posts = records.map(CommunityPost.init(record:))
             usingOfflineFallback = false
         } catch {
+            #if DEBUG
             print("CommunityView: failed to load posts — \(error.localizedDescription)")
+            #endif
             posts = []
             usingOfflineFallback = false
         }
@@ -466,7 +468,7 @@ struct PostDetailView: View {
                                     .foregroundColor(AppTheme.Colors.textSecondary)
                             }
                             Spacer()
-                            Button(action: {}) {
+                            ShareLink(item: "\(post.content)\n\n— Shared from Trucker Easy") {
                                 Image(systemName: "square.and.arrow.up")
                                     .font(.system(size: 16))
                                     .foregroundColor(AppTheme.Colors.textSecondary)
@@ -546,6 +548,14 @@ struct PostDetailView: View {
     private func toggleLike() {
         hasLiked.toggle()
         post.likeCount += hasLiked ? 1 : -1
+        guard let remoteID = post.remoteID else { return }
+        Task {
+            try? await SupabaseClient.shared.update(
+                table: "community_posts",
+                id: remoteID,
+                body: ["like_count": post.likeCount]
+            )
+        }
     }
 
     private func addComment() {
@@ -575,7 +585,9 @@ struct PostDetailView: View {
                     post.commentCount = max(post.commentCount, comments.count)
                 }
             } catch {
+                #if DEBUG
                 print("PostDetailView: failed to submit comment — \(error.localizedDescription)")
+                #endif
                 await MainActor.run {
                     newComment = content
                 }
@@ -594,7 +606,9 @@ struct PostDetailView: View {
             comments = records.map { PostComment(record: $0, localPostId: post.id) }
             post.commentCount = max(post.commentCount, comments.count)
         } catch {
+            #if DEBUG
             print("PostDetailView: failed to load comments — \(error.localizedDescription)")
+            #endif
         }
     }
 }
@@ -817,7 +831,9 @@ struct NewPostView: View {
                     dismiss()
                 }
             } catch {
+                #if DEBUG
                 print("NewPostView: failed to submit post — \(error.localizedDescription)")
+                #endif
             }
             await MainActor.run {
                 isSubmitting = false
