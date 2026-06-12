@@ -330,22 +330,8 @@ private struct TruckerPathBottomTripBar: View {
 
                 Spacer(minLength: 0)
 
-                if let hosContext {
-                    Button(action: { onHosTap?() }) {
-                        VStack(spacing: 2) {
-                            Text("DOT")
-                                .font(.system(size: 8, weight: .black))
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(hosContext.formattedCriticalRemaining)
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(hosContext.barColor)
-                        }
-                        .frame(width: 52, height: 44)
-                        .background(Color(hex: "#2a2a2e"))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
+                // DOT/HOS movido para o pill semáforo (DotHosBar) reaproveitado da My Horizon,
+                // posicionado abaixo da barra de manobra e sempre visível dirigindo.
 
                 Menu {
                     Button(action: onToggleSteps) {
