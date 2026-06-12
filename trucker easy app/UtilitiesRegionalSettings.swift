@@ -4407,13 +4407,25 @@ class RegionalSettingsManager {
         }
         self.currentRegion = detectedRegion
 
-        // Detect language: English until the driver saves a choice (region does not imply UI language).
+        // Detect language: escolha manual salva vence; senão, idioma do iPhone na 1ª abertura.
         if let savedLang = UserDefaults.standard.string(forKey: "selectedLanguage"),
            let lang = AppLanguage(rawValue: savedLang) {
             self.currentLanguage = lang
         } else {
-            self.currentLanguage = .english
+            // v1.1 "Bem-vindo no idioma do motorista": casa o idioma do aparelho com um
+            // dos 10 idiomas do app. Ajustável no perfil (escolha manual passa a vencer).
+            self.currentLanguage = Self.detectDeviceLanguage()
         }
+    }
+
+    /// Mapeia `Locale.preferredLanguages` (ex: "pt-BR", "es-MX") para um AppLanguage.
+    private static func detectDeviceLanguage() -> AppLanguage {
+        let preferred = (Locale.preferredLanguages.first ?? "en").lowercased()
+        if preferred.hasPrefix("es") {
+            // es-MX / es-419 (LatAm) ganham a variante Latino; Espanha fica no Español.
+            return (preferred.contains("mx") || preferred.contains("419")) ? .spanishLatam : .spanish
+        }
+        return AppLanguage.allCases.first { preferred.hasPrefix($0.code) } ?? .english
     }
 
     // MARK: - Formatting helpers
