@@ -312,6 +312,10 @@ struct HorizonView: View {
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
+    /// Cooldown do retry de POIs com lista vazia — sem isto, re-tentava a cada tick de GPS
+    /// (~13 buscas MapKit/ciclo), estourava a cota iOS de 50 req/min (GEOErrorDomain -3)
+    /// e derrubava TODA busca por nome no app (sugestões e geocode do destino).
+    @State private var lastNearbySearchAttemptAt: Date = .distantPast
 
     @State private var showingCheapestDiesel = false
     @State private var cheapestDieselStop: TruckStopItem? = nil
@@ -1690,10 +1694,14 @@ struct HorizonView: View {
         }
 
         let shouldRefresh: Bool
-        if truckStopService.nearbyStops.isEmpty { shouldRefresh = true }
+        if truckStopService.nearbyStops.isEmpty {
+            // Lista vazia: re-tenta no máximo 1x/min (cooldown) em vez de a cada tick de GPS.
+            shouldRefresh = now.timeIntervalSince(lastNearbySearchAttemptAt) >= 60
+        }
         else if let last = lastScaleCheckLocation, loc.distance(from: last) > (isNavigating ? 2_000 : 16_000) { shouldRefresh = true }
         else { shouldRefresh = false }
         if shouldRefresh {
+            lastNearbySearchAttemptAt = now
             lastScaleCheckLocation = loc
             Task {
                 await truckStopService.searchNearby(location: loc)
