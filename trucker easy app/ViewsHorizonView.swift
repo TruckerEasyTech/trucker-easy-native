@@ -786,9 +786,7 @@ struct HorizonView: View {
                 )
             }
 
-            // DOT/HOS semáforo (verde→amarelo→vermelho) — MESMO componente da My Horizon.
-            // Idle: top-trailing. Navegando: top-leading logo abaixo da barra de manobra,
-            // desacoplado de routeSteps para o motorista nunca perder o timer dirigindo.
+            // DOT/HOS — hidden during active navigation (competitor-style clean map).
             if !isNavigating {
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 0) {
@@ -801,18 +799,6 @@ struct HorizonView: View {
                     Spacer(minLength: 0)
                 }
                 .zIndex(310)
-                .allowsHitTesting(true)
-            } else {
-                VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 0) {
-                        horizonDotHosPill
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, navigationTopChromeHeight + 8)
-                    .padding(.leading, 12)
-                    Spacer(minLength: 0)
-                }
-                .zIndex(410)
                 .allowsHitTesting(true)
             }
 
