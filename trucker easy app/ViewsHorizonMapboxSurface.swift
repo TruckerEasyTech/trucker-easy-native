@@ -11,11 +11,13 @@ extension MapStyleOption {
     fileprivate var mapboxStyleURI: StyleURI {
         switch self {
         case .standard:
-            return .streets
-        case .globe, .hybrid:
-            return .satelliteStreets
+            return .streets           // clean flat road map
+        case .globe:
+            return .standard          // Mapbox Standard 3D globe view (was duplicating .hybrid → toggle looked broken)
+        case .hybrid:
+            return .satelliteStreets  // satellite imagery + street labels
         case .satellite:
-            return .satellite
+            return .satellite         // pure aerial imagery, no labels
         }
     }
 }
