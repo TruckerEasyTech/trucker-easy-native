@@ -18,8 +18,14 @@ struct AppEntryView: View {
 
     private var needsMorningCheckIn: Bool {
         guard !AppAccessPolicy.skipLaunchWellnessCheck else { return false }
+        #if DEBUG
+        // Build de teste (Xcode): pergunta de bem-estar em TODA abertura, pra QA sempre ver.
+        // Na loja/TestFlight (Release) continua 1x por dia — "Skip" também marca o dia.
+        return true
+        #else
         let todayStr = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
         return lastMorningCheckIn != todayStr
+        #endif
     }
 
     /// After splash, onboarding can still flip `hasSeenWelcome` — `onChange(showSplash)` alone misses that path.
