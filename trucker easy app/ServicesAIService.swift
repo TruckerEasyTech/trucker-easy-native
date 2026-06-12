@@ -57,10 +57,13 @@ final class AIService {
     /// Streams a response to `message`, using Foundation Models when available and
     /// falling back to OpenRouter otherwise. Yields incremental text chunks.
     func streamResponse(to message: String, context: [String]) -> AsyncThrowingStream<String, Error> {
+        // Diz EXATAMENTE por que o modelo on-device não está disponível (acionável pro motorista).
+        var onDeviceIssue = "No on-device model available"
         #if canImport(FoundationModels)
         if #available(iOS 26, *) {
             let model = SystemLanguageModel.default
-            if case .available = model.availability {
+            switch model.availability {
+            case .available:
                 agentLogAIService(
                     runId: "post-fix",
                     hypothesisId: "H7",
@@ -69,6 +72,14 @@ final class AIService {
                     data: [:]
                 )
                 return streamWithFoundationModels(message: message, context: context)
+            case .unavailable(.appleIntelligenceNotEnabled):
+                onDeviceIssue = "Apple Intelligence is turned OFF — enable it in Settings → Apple Intelligence & Siri, then try again"
+            case .unavailable(.modelNotReady):
+                onDeviceIssue = "Apple Intelligence model is still downloading — try again in a few minutes"
+            case .unavailable(.deviceNotEligible):
+                onDeviceIssue = "This device does not support Apple Intelligence"
+            case .unavailable:
+                onDeviceIssue = "On-device model unavailable"
             }
         }
         #endif
@@ -77,12 +88,12 @@ final class AIService {
                 runId: "post-fix",
                 hypothesisId: "H7",
                 location: "ServicesAIService.swift:streamResponse",
-                message: "AI unavailable: no on-device model + missing OpenRouterAPIKey",
+                message: "AI unavailable: \(onDeviceIssue) + missing OpenRouterAPIKey",
                 data: ["foundationModelsAvailable": false]
             )
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: AIError.serviceUnavailable(
-                    "No on-device model available and OpenRouterAPIKey is missing."
+                    "\(onDeviceIssue). Cloud fallback is also off (OpenRouterAPIKey missing)."
                 ))
             }
         }
