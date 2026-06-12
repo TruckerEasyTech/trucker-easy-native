@@ -44,6 +44,8 @@ struct HorizonBottomSheet: View {
     @State private var isLoadingSuggestions = false
     @State private var searchDebounceTask: Task<Void, Never>? = nil
     @State private var showSuggestions = false
+    // Últimos destinos roteados — aparecem ao focar a busca com o campo vazio.
+    @State private var recentSearches: [HorizonRecentSearch] = []
 
     // Speech recognition
     @State private var speechRecognizer: SFSpeechRecognizer? = nil
@@ -144,6 +146,11 @@ struct HorizonBottomSheet: View {
             guard !isNavigating else { return }
             if focused {
                 isExpanded = true
+                recentSearches = HorizonRecentSearchStore.load()
+                if destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !recentSearches.isEmpty {
+                    showSuggestions = true
+                }
             } else {
                 isExpanded = false
             }
@@ -162,7 +169,8 @@ struct HorizonBottomSheet: View {
             // #endregion
             if newValue.count < 2 {
                 searchSuggestions = []
-                showSuggestions = false
+                // Campo vazio + histórico → mantém o dropdown com os destinos recentes.
+                showSuggestions = newValue.isEmpty && searchFocused && !recentSearches.isEmpty
                 return
             }
             showSuggestions = true
@@ -315,6 +323,37 @@ struct HorizonBottomSheet: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             } else {
+                // Histórico de destinos — exibido quando ainda não há sugestões digitadas.
+                if searchSuggestions.isEmpty {
+                    ForEach(recentSearches) { recent in
+                        Button(action: { routeToRecent(recent) }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(AppTheme.Colors.textSecondary)
+                                    .frame(width: 20)
+                                Text(recent.name)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                Spacer()
+                                if let loc = locationManager.currentLocation {
+                                    let dist = loc.distance(from: CLLocation(latitude: recent.latitude, longitude: recent.longitude))
+                                    Text(formatSuggestionDistance(dist))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(AppTheme.Colors.accent)
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                        if recent != recentSearches.last {
+                            Divider()
+                                .background(Color.white.opacity(0.08))
+                                .padding(.leading, 44)
+                        }
+                    }
+                }
                 ForEach(searchSuggestions, id: \.self) { item in
                     Button(action: {
                         let name = item.name ?? destination
@@ -324,6 +363,7 @@ struct HorizonBottomSheet: View {
                         searchFocused = false
                         // ━━━ FIX: Use coordinate directly (avoids redundant geocoding) ━━━
                         let coord = item.placemark.coordinate
+                        HorizonRecentSearchStore.record(name: name, coordinate: coord)
                         if let directRoute = onCalculateRouteToCoordinate {
                             directRoute(coord, name)
                         } else {
@@ -546,11 +586,27 @@ struct HorizonBottomSheet: View {
             let name = best.name ?? destination
             destination = name
             if let directRoute = onCalculateRouteToCoordinate {
+                HorizonRecentSearchStore.record(name: name, coordinate: best.placemark.coordinate)
                 directRoute(best.placemark.coordinate, name)
                 return
             }
         }
         onCalculateRoute(destination)
+    }
+
+    /// Re-roteia para um destino do histórico com um toque.
+    private func routeToRecent(_ recent: HorizonRecentSearch) {
+        destination = recent.name
+        showSuggestions = false
+        searchSuggestions = []
+        searchFocused = false
+        // Re-registra para promover ao topo do histórico.
+        HorizonRecentSearchStore.record(name: recent.name, coordinate: recent.coordinate)
+        if let directRoute = onCalculateRouteToCoordinate {
+            directRoute(recent.coordinate, recent.name)
+        } else {
+            onCalculateRoute(recent.name)
+        }
     }
 
     // MARK: - Destination / ETA Row
