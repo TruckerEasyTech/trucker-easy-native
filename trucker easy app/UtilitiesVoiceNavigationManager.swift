@@ -93,11 +93,14 @@ final class VoiceNavigationManager {
         speak(phrase, language: lang.speechLanguageCode)
     }
 
-    func announceTruckFuelEta(stopName: String, etaMinutes: Int, lang: AppLanguage) {
+    func announceTruckFuelEta(stopName: String, etaMinutes: Int, parkingNote: String? = nil, lang: AppLanguage) {
         guard isEnabled else { return }
         guard !spokenTruckFuelStopNames.contains(stopName) else { return }
         spokenTruckFuelStopNames.insert(stopName)
-        let phrase = String(format: lang.voiceTruckFuelEtaPhrase, stopName, etaMinutes)
+        var phrase = String(format: lang.voiceTruckFuelEtaPhrase, stopName, etaMinutes)
+        if let parkingNote, !parkingNote.isEmpty {
+            phrase += " \(parkingNote)."
+        }
         speak(naturalize(phrase, lang: lang), language: lang.speechLanguageCode)
     }
 

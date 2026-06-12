@@ -2985,7 +2985,18 @@ struct HorizonView: View {
             let dist = location.distance(from: CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude))
             let etaMinutes = Int(round((dist / minSpeedMs) / 60.0))
             guard (26...34).contains(etaMinutes) else { continue }
-            VoiceNavigationManager.shared.announceTruckFuelEta(stopName: stop.name, etaMinutes: etaMinutes, lang: lang)
+            // Heads-up de vaga (dor nº1) — reaproveita as frases de report já traduzidas (10 idiomas).
+            let parkingNote: String? = {
+                if let avail = stop.amenities.parkingAvailable {
+                    return avail == 0 ? lang.reportSubParkingFull : lang.reportSubParkingAvailable
+                }
+                switch stop.amenities.parkingStatus {
+                case .full: return lang.reportSubParkingFull
+                case .available, .limited: return lang.reportSubParkingAvailable
+                case .unknown: return nil
+                }
+            }()
+            VoiceNavigationManager.shared.announceTruckFuelEta(stopName: stop.name, etaMinutes: etaMinutes, parkingNote: parkingNote, lang: lang)
             lastNavFuelEtaVoiceAt = now
             return
         }
