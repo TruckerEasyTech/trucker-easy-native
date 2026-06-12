@@ -31,6 +31,9 @@ struct HorizonBottomSheet: View {
     let onAnalyzeLoadRoute: () -> Void
     /// Dentro do painel unificado (toolbar + sheet) — sem cantos/clip duplicados.
     var unifiedChrome: Bool = false
+    /// Parser de comando falado: recebe a transcrição final e devolve true se era
+    /// "rota para X" / "route to X" e a rota foi iniciada (hands-free).
+    var onRouteIntent: ((String) -> Bool)? = nil
 
     @State private var destination = ""
     @State private var weatherService = WeatherService.shared
@@ -424,6 +427,16 @@ struct HorizonBottomSheet: View {
                 }
                 if result.isFinal {
                     self.stopListening()
+                    let spoken = transcript
+                    DispatchQueue.main.async {
+                        // Hands-free: se o motorista disse "rota para X" / "route to X",
+                        // inicia a rota automaticamente e limpa o campo de busca.
+                        if self.onRouteIntent?(spoken) == true {
+                            self.destination = ""
+                            self.showSuggestions = false
+                            self.searchFocused = false
+                        }
+                    }
                 }
             }
             if error != nil {

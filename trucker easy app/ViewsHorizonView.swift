@@ -1345,7 +1345,8 @@ struct HorizonView: View {
                     calculateRoute(to: dropoff)
                     isAnalyzingLoadRoute = false
                 },
-                unifiedChrome: true
+                unifiedChrome: true,
+                onRouteIntent: { handleAIRouteIntent($0) }
             )
         }
         .frame(height: idleBottomSheetHeight, alignment: .top)
