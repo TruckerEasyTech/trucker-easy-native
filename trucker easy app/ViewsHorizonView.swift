@@ -68,7 +68,7 @@ struct HorizonView: View {
     @Query private var geofences: [GeofenceRegion]
 
     @State private var locationManager = LocationManager()
-    @State private var selectedMapStyle: MapStyleOption = .globe
+    @State private var selectedMapStyle: MapStyleOption = .hybrid
     @State private var mapAlerts: [MapAlert] = []
     @State private var route: MKRoute?
     @State private var truckRoute: TruckRoute?
