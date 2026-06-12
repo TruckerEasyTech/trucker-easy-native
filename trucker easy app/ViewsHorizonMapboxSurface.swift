@@ -402,6 +402,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         private var routeArrowManager: PointAnnotationManager?
         private var truckStopManager: PointAnnotationManager?
         private var alertManager: PointAnnotationManager?
+        /// Evita reconstruir os pins quando a lista não mudou. `refreshPoints` roda a cada
+        /// `updateUIView` (timer HOS 1Hz + GPS); sem isto, regenerava dezenas de imagens
+        /// Core Graphics por frame e travava a main thread (UI/abas sem resposta).
+        private var lastStopsFingerprint: Int?
+        private var lastAlertsFingerprint: Int?
+        /// Cache de imagem de pin por aparência (network / tipo de alerta) — ~5 variações,
+        /// não uma renderização por POI.
+        private var stopImageCache: [String: PointAnnotation.Image] = [:]
+        private var alertImageCache: [String: PointAnnotation.Image] = [:]
 
         /// Incremental polyline anchor for route chevron (reset when route geometry changes).
         private var lastLeadArrowPolyIndex: Int = 0
@@ -434,6 +443,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             routeArrowManager = mapView.annotations.makePointAnnotationManager(id: "horizon-route-lead-arrow")
             truckStopManager = mapView.annotations.makePointAnnotationManager(id: "horizon-stops")
             alertManager = mapView.annotations.makePointAnnotationManager(id: "horizon-alerts")
+            // Managers recriados começam vazios → força refreshPoints a re-adicionar os pins.
+            lastStopsFingerprint = nil
+            lastAlertsFingerprint = nil
         }
 
         func refreshRoute(
@@ -568,34 +580,54 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         func refreshPoints(mapView: MapboxMaps.MapView, truckStops: [TruckStopItem], alerts: [MapAlert]) {
             guard let stopsMgr = truckStopManager, let alertMgr = alertManager else { return }
 
-            var stopAnnotations: [PointAnnotation] = []
-            stopAnnotations.reserveCapacity(truckStops.count)
-            for stop in truckStops {
-                var ann = PointAnnotation(id: stop.id.uuidString, coordinate: stop.coordinate)
-                ann.iconAnchor = .center
-                if let img = HorizonMapboxPinImages.truckStopImage(for: stop) {
-                    ann.image = img
-                }
-                let captured = stop
-                ann.tapHandler = { [weak self] _ in
-                    self?.onTruckStopTapped?(captured)
-                    return true
-                }
-                stopAnnotations.append(ann)
-            }
-            stopsMgr.annotations = stopAnnotations
+            var stopsHasher = Hasher()
+            for stop in truckStops { stopsHasher.combine(stop.id) }
+            let stopsFp = stopsHasher.finalize()
 
-            var alertAnns: [PointAnnotation] = []
-            alertAnns.reserveCapacity(alerts.count)
-            for alert in alerts {
-                var ann = PointAnnotation(id: alert.id.uuidString, coordinate: alert.coordinate)
-                ann.iconAnchor = .center
-                if let img = HorizonMapboxPinImages.alertImage(for: alert) {
-                    ann.image = img
+            var alertsHasher = Hasher()
+            for alert in alerts { alertsHasher.combine(alert.id) }
+            let alertsFp = alertsHasher.finalize()
+
+            // Reconstrói os pins SOMENTE quando a lista muda. Antes isto rodava a cada frame
+            // (timer HOS / GPS), regenerando imagens Core Graphics e travando a main thread.
+            if stopsFp != lastStopsFingerprint {
+                lastStopsFingerprint = stopsFp
+                var stopAnnotations: [PointAnnotation] = []
+                stopAnnotations.reserveCapacity(truckStops.count)
+                for stop in truckStops {
+                    var ann = PointAnnotation(id: stop.id.uuidString, coordinate: stop.coordinate)
+                    ann.iconAnchor = .center
+                    let key = String(describing: stop.network)
+                    if let img = stopImageCache[key] ?? HorizonMapboxPinImages.truckStopImage(for: stop) {
+                        stopImageCache[key] = img
+                        ann.image = img
+                    }
+                    let captured = stop
+                    ann.tapHandler = { [weak self] _ in
+                        self?.onTruckStopTapped?(captured)
+                        return true
+                    }
+                    stopAnnotations.append(ann)
                 }
-                alertAnns.append(ann)
+                stopsMgr.annotations = stopAnnotations
             }
-            alertMgr.annotations = alertAnns
+
+            if alertsFp != lastAlertsFingerprint {
+                lastAlertsFingerprint = alertsFp
+                var alertAnns: [PointAnnotation] = []
+                alertAnns.reserveCapacity(alerts.count)
+                for alert in alerts {
+                    var ann = PointAnnotation(id: alert.id.uuidString, coordinate: alert.coordinate)
+                    ann.iconAnchor = .center
+                    let key = String(describing: alert.type)
+                    if let img = alertImageCache[key] ?? HorizonMapboxPinImages.alertImage(for: alert) {
+                        alertImageCache[key] = img
+                        ann.image = img
+                    }
+                    alertAnns.append(ann)
+                }
+                alertMgr.annotations = alertAnns
+            }
         }
     }
 }

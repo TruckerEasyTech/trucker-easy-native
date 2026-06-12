@@ -55,7 +55,13 @@ final class RoutingService {
         return URLSession(configuration: config)
     }()
 
-    private init() {}
+    private init() {
+        // Poda única do cache de rotas legado (acumulado antes da persistência em background).
+        // Roda fora da main thread; depois disso o cache se reconstrói já limitado.
+        Task.detached(priority: .utility) {
+            Self.pruneCacheOnLaunchIfNeeded()
+        }
+    }
 
     // MARK: - Self-hosted routing reachability
     //
@@ -782,32 +788,59 @@ final class RoutingService {
                 originalRoutingProvider: sourceProvider.rawValue
             )
 
-            var cached = loadAllCachedRoutes()
+            // Persistência pesada (JSON encode/decode de até maxCachedRoutes rotas, cada uma com
+            // milhares de pontos de shape) sai da main thread — antes travava a UI ao aplicar a rota.
+            Task.detached(priority: .utility) {
+                Self.persistCachedRoute(payload)
+            }
+        }
+
+        /// Faz load + merge + encode + save do cache FORA da main thread (chamado via `Task.detached`).
+        nonisolated private static func persistCachedRoute(_ payload: CachedRoutePayload) {
+            var cached = loadAllCachedRoutesStatic()
 
             let now = Date().timeIntervalSince1970
-            cached.removeAll { now - $0.cachedAt > Self.cacheExpirySeconds }
+            cached.removeAll { now - $0.cachedAt > cacheExpirySeconds }
 
+            let newDest = CLLocation(latitude: payload.destinationLatitude, longitude: payload.destinationLongitude)
             cached.removeAll { existing in
                 let existingDest = CLLocation(latitude: existing.destinationLatitude, longitude: existing.destinationLongitude)
-                let newDest = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
                 return existingDest.distance(from: newDest) < 5_000
             }
 
             cached.insert(payload, at: 0)
 
-            if cached.count > Self.maxCachedRoutes {
-                cached = Array(cached.prefix(Self.maxCachedRoutes))
+            if cached.count > maxCachedRoutes {
+                cached = Array(cached.prefix(maxCachedRoutes))
             }
 
             guard let data = try? JSONEncoder().encode(cached) else { return }
-            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+            UserDefaults.standard.set(data, forKey: cacheKey)
             #if DEBUG
-            print("[Routing] ✅ Cached route to '\(route.destinationName)' (\(cached.count) routes stored)")
+            print("[Routing] ✅ Cached route to '\(payload.destinationName)' (\(cached.count) routes stored)")
             #endif
         }
 
         private func loadAllCachedRoutes() -> [CachedRoutePayload] {
-            guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+            Self.loadAllCachedRoutesStatic()
+        }
+
+        /// Limpa, UMA única vez, o cache de rotas legado (potencialmente grande) que foi gravado
+        /// antes da persistência em segundo plano. Ele se reconstrói nos próximos cálculos.
+        nonisolated private static func pruneCacheOnLaunchIfNeeded() {
+            let flagKey = "offlineRouteCachePrunedV4"
+            let defaults = UserDefaults.standard
+            guard !defaults.bool(forKey: flagKey) else { return }
+            defaults.removeObject(forKey: cacheKey)
+            defaults.removeObject(forKey: "lastOfflineRoute")
+            defaults.set(true, forKey: flagKey)
+            #if DEBUG
+            print("[Routing] 🧹 Cache de rotas legado limpo (poda única)")
+            #endif
+        }
+
+        nonisolated private static func loadAllCachedRoutesStatic() -> [CachedRoutePayload] {
+            guard let data = UserDefaults.standard.data(forKey: cacheKey),
                   let routes = try? JSONDecoder().decode([CachedRoutePayload].self, from: data) else {
                 if let oldData = UserDefaults.standard.data(forKey: "lastOfflineRoute"),
                    let old = try? JSONDecoder().decode(CachedRoutePayload.self, from: oldData) {
@@ -1240,7 +1273,7 @@ private struct OSRMRouteResponse: Decodable {
     }
 }
 
-private struct CachedRoutePayload: Codable {
+private struct CachedRoutePayload: Codable, Sendable {
     let originLatitude: Double
     let originLongitude: Double
     let destinationLatitude: Double
