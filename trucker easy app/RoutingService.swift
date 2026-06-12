@@ -196,6 +196,9 @@ final class RoutingService {
                             avoidTolls: avoidTolls,
                             serverBaseURL: base
                         )
+                        #if DEBUG
+                        print("[TRACE-NAV] 1 · Valhalla retornou ao RoutingService")
+                        #endif
                         guard Self.isRoutePlausible(origin: origin, destination: destination, route: valRoute) else {
                             failureReasons.append("Valhalla: implausible route rejected")
                             agentLogRouting(
@@ -211,9 +214,16 @@ final class RoutingService {
                             )
                             throw RoutingServiceError.noRoute
                         }
+                        #if DEBUG
+                        print("[TRACE-NAV] 2 · plausível OK")
+                        #endif
                         lastProvider = .valhalla
+                        #if DEBUG
+                        print("[TRACE-NAV] 3 · lastProvider setado")
+                        #endif
                         cacheRoute(valRoute, from: origin.coordinate, to: destination, sourceProvider: .valhalla)
                         #if DEBUG
+                        print("[TRACE-NAV] 4 · cacheRoute despachado")
                         print("[Routing] ✅ Valhalla OK (truck costing)")
                         #endif
                         recordEvent(
@@ -223,7 +233,14 @@ final class RoutingService {
                             startedAt: startedAt,
                             detail: "Valhalla truck-aware route"
                         )
-                        return routeTaggedWithGeometry(valRoute)
+                        #if DEBUG
+                        print("[TRACE-NAV] 5 · recordEvent OK")
+                        #endif
+                        let taggedRoute = routeTaggedWithGeometry(valRoute)
+                        #if DEBUG
+                        print("[TRACE-NAV] 6 · tagging OK — retornando rota")
+                        #endif
+                        return taggedRoute
                     } catch {
                         failureReasons.append("Valhalla(\(base)): \(error.localizedDescription)")
                         #if DEBUG

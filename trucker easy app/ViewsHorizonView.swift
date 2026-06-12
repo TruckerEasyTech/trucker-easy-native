@@ -2128,12 +2128,18 @@ struct HorizonView: View {
             truckRoute = routeForNavigation; route = nil
             routeSteps = steps; currentStepIndex = 0
         }
+        #if DEBUG
+        print("[TRACE-NAV] 9 · transaction OK (truckRoute setado)")
+        #endif
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
         #if canImport(MapboxMaps)
         // Offline C3 — baixa tiles do corredor (visão geral + janela à frente) ao aplicar a rota.
         if MapProviderConfig.isMapboxHorizonRendererEnabled, result.coordinates.count >= 2 {
             OfflineRouteTileManager.shared.cacheRoute(coordinates: result.coordinates, style: selectedMapStyle.mapboxStyleURI)
         }
+        #endif
+        #if DEBUG
+        print("[TRACE-NAV] 10 · tiles offline despachados")
         #endif
         showingFallbackConfirmation = false
         pendingFallbackRoute = nil
@@ -2143,10 +2149,19 @@ struct HorizonView: View {
         lastRoutingProvider = provider; dockCheckDone = false
         navigationEngine.language = lang
         navigationEngine.startNavigation(route: routeForNavigation)
+        #if DEBUG
+        print("[TRACE-NAV] 11 · navigationEngine ligado")
+        #endif
         VoiceNavigationManager.shared.resetForNewRoute()
+        #if DEBUG
+        print("[TRACE-NAV] 12 · voz resetada")
+        #endif
         lastNavFuelEtaVoiceAt = .distantPast
         UIApplication.shared.isIdleTimerDisabled = true
         mapRecenter?()
+        #if DEBUG
+        print("[TRACE-NAV] 13 · recenter OK")
+        #endif
 
         // Toll data
         let distanceM = result.distanceMeters
@@ -3397,10 +3412,16 @@ struct HorizonView: View {
                     avoidTolls: false,
                     accessMode: routingAccessMode
                 )
+                #if DEBUG
+                print("[TRACE-NAV] 7 · rota chegou ao runSingleTruckRoute")
+                #endif
                 if !isReroute { isCalculatingRoute = false }
                 routeEasyPendingCoordinate = coordinate
                 routeEasyPendingAddress = address
                 destinationAddress = address
+                #if DEBUG
+                print("[TRACE-NAV] 8 · chamando applyRoute")
+                #endif
                 applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
                 print("[Route] ✅ NAV START · \(routing.lastProvider.rawValue) · \(Int(result.distanceMeters / 1609)) mi · \(address)")
             } catch {

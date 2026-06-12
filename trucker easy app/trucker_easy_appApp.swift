@@ -100,6 +100,10 @@ struct trucker_easy_appApp: App {
     init() {
         #if DEBUG
         validateBuildConfig()
+        #if arch(arm64)
+        // Vigia de congelamento: se a main thread travar >5s, imprime o backtrace dela.
+        MainThreadWatchdog.start()
+        #endif
         #endif
         AppAccessPolicy.applyTestingDefaultsIfNeeded()
         MapProviderConfig.configureIfAvailable()
