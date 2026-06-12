@@ -231,7 +231,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             // Troca de estilo AO VIVO, inclusive navegando — o completion do loadMapStyle
             // re-instala managers, rota e pins, então nada se perde no reload do estilo.
             coord.lastStyle = selectedMapStyle
-            coord.deferredStyle = nil
             loadMapStyle(selectedMapStyle, on: mapView, coordinator: coord)
         }
 
@@ -325,7 +324,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         var onStyleChange: ((MapStyleOption) -> Void)?
         var lastRouteFingerprint: String = ""
         var lastStyle: MapStyleOption = .standard
-        var deferredStyle: MapStyleOption?
         var lastKnownCoordinate: CLLocationCoordinate2D?
         var isNavigatingMode = false
         var wasNavigatingMode = false

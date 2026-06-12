@@ -4407,9 +4407,10 @@ class RegionalSettingsManager {
     var currentRegion: SupportedRegion {
         didSet {
             UserDefaults.standard.set(currentRegion.rawValue, forKey: "selectedRegion")
-            // App copy defaults to English until the driver explicitly picks a language in settings.
+            // Sem escolha manual de idioma, trocar região re-sincroniza com o idioma do
+            // APARELHO (antes resetava pra inglês e desfazia o "bem-vindo no idioma").
             if !UserDefaults.standard.bool(forKey: "languageManuallySet") {
-                currentLanguage = .english
+                currentLanguage = Self.detectDeviceLanguage()
             }
         }
     }

@@ -807,12 +807,19 @@ final class RoutingService {
 
             // Persistência pesada (JSON encode/decode de até maxCachedRoutes rotas, cada uma com
             // milhares de pontos de shape) sai da main thread — antes travava a UI ao aplicar a rota.
-            Task.detached(priority: .utility) {
+            Self.cachePersistQueue.async {
                 Self.persistCachedRoute(payload)
             }
         }
 
-        /// Faz load + merge + encode + save do cache FORA da main thread (chamado via `Task.detached`).
+        /// Fila SERIAL de persistência do cache — duas rotas calculadas em sequência rápida
+        /// faziam read-modify-write concorrente (Task.detached) e a última escrita engolia
+        /// a primeira. Serial = ordem garantida, zero rota perdida.
+        nonisolated private static let cachePersistQueue = DispatchQueue(
+            label: "com.truckereasy.route-cache-persist", qos: .utility
+        )
+
+        /// Faz load + merge + encode + save do cache FORA da main thread (na fila serial acima).
         nonisolated private static func persistCachedRoute(_ payload: CachedRoutePayload) {
             var cached = loadAllCachedRoutesStatic()
 
