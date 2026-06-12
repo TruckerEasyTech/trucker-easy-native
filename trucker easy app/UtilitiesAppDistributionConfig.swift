@@ -18,8 +18,9 @@ enum AppAccessPolicy {
     /// Wellness mood sheets only when parked (speed near zero, not navigating).
     static let moodCheckOnlyWhenParked = true
 
-    /// Skip full-screen morning check-in on launch (QA / TestFlight).
-    static var skipLaunchWellnessCheck: Bool { unlockAllFeaturesForTesting }
+    /// Check-in de bem-estar na abertura SEMPRE ativo (1x/dia) — parte central do produto.
+    /// Antes era pulado no modo de testes e a pergunta de estrelas nunca aparecia.
+    static var skipLaunchWellnessCheck: Bool { false }
 
     /// Keep Mapbox as Horizon map renderer (satellite/3D). Valhalla routing is separate and always truck-aware.
     static let useMapKitHorizonMap = false

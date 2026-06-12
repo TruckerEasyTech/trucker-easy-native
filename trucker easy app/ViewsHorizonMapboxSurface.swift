@@ -130,8 +130,14 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         mapView.location.options.puckBearingEnabled = true
     }
 
+    /// Modo conforto noturno: das 19h às 7h o globo/mapa fica escuro para não ofuscar na cabine.
+    private static var isNightComfortHours: Bool {
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour >= 19 || hour < 7
+    }
+
     private func bootstrapMap(_ mapView: MapboxMaps.MapView, coordinator: Coordinator) {
-        mapView.overrideUserInterfaceStyle = isNavigating ? .dark : .light
+        mapView.overrideUserInterfaceStyle = (isNavigating || Self.isNightComfortHours) ? .dark : .light
         applyUserLocationPuck(on: mapView, navigating: isNavigating)
         Self.tuckMapboxOrnaments(mapView, navigating: isNavigating)
         var g = mapView.gestures.options
@@ -196,7 +202,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             return
         }
         host.syncContentScaleWithScreen()
-        mapView.overrideUserInterfaceStyle = isNavigating ? .dark : .light
+        mapView.overrideUserInterfaceStyle = (isNavigating || Self.isNightComfortHours) ? .dark : .light
         applyUserLocationPuck(on: mapView, navigating: isNavigating)
         Self.tuckMapboxOrnaments(mapView, navigating: isNavigating)
         let coord = context.coordinator
