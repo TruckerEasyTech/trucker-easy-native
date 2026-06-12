@@ -112,6 +112,12 @@ final class VoiceNavigationManager {
         speak(phrase, language: lang.speechLanguageCode)
     }
 
+    /// ETA × HOS — fala se a chegada cabe (ou não) nas horas de direção restantes do DOT.
+    func announceHosEta(_ phrase: String, lang: AppLanguage) {
+        guard isEnabled else { return }
+        speak(naturalize(phrase, lang: lang), language: lang.speechLanguageCode, priority: true)
+    }
+
     func resetForNewRoute() {
         lastSpokenStepIndex = -1
         lastSpokenAlertId = nil

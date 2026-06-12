@@ -316,6 +316,10 @@ struct HorizonView: View {
     /// (~13 buscas MapKit/ciclo), estourava a cota iOS de 50 req/min (GEOErrorDomain -3)
     /// e derrubava TODA busca por nome no app (sugestões e geocode do destino).
     @State private var lastNearbySearchAttemptAt: Date = .distantPast
+    /// ETA × HOS: nível já anunciado nesta rota (nil = ainda não falou) —
+    /// 0 confortável · 1 apertado (<30min de folga) · 2 estoura o limite de direção.
+    @State private var hosEtaAnnouncedLevel: Int? = nil
+    @State private var lastHosEtaCheckAt: Date = .distantPast
 
     @State private var showingCheapestDiesel = false
     @State private var cheapestDieselStop: TruckStopItem? = nil
@@ -1653,6 +1657,7 @@ struct HorizonView: View {
         evaluateTruckSpeedCompliance(using: loc)
         evaluateGeofenceEvents(using: loc)
         hosContext.feedSpeed(fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph))
+        evaluateHosEtaAdvisory(now: now)
 
         #if DEBUG
         if !HorizonViewFirstGpsFixLogged.didLog,
@@ -1756,6 +1761,45 @@ struct HorizonView: View {
         if locationHistory.count > cap {
             locationHistory.removeFirst(locationHistory.count - cap)
         }
+    }
+
+    // MARK: - ETA × HOS (diferencial: "você chega dentro das suas horas?")
+
+    /// Compara o ETA da navegação com as horas de direção DOT restantes e anuncia por voz:
+    /// confortável ("chega 1h12 antes do limite"), apertado (<30min de folga) ou estouro
+    /// (alerta + aviso visual). Fala só quando o nível MUDA — sem tagarelar na cabine.
+    private func evaluateHosEtaAdvisory(now: Date) {
+        guard isNavigating else { return }
+        guard hosContext.status == .driving else { return }   // só com o timer DOT rodando
+        guard now.timeIntervalSince(lastHosEtaCheckAt) >= 60 else { return }
+        lastHosEtaCheckAt = now
+
+        let etaSeconds = navigationEngine.timeRemaining > 0
+            ? navigationEngine.timeRemaining
+            : activeDurationSeconds
+        guard etaSeconds > 60 else { return }
+
+        let margin = hosContext.drivingRemaining - etaSeconds
+        let level = margin <= 0 ? 2 : (margin < 1800 ? 1 : 0)
+        guard hosEtaAnnouncedLevel != level else { return }
+        hosEtaAnnouncedLevel = level
+
+        let minutes = max(1, Int(abs(margin) / 60))
+        let phrase: String
+        switch level {
+        case 2: phrase = lang.hosEtaOverPhrase(shortByMinutes: minutes)
+        case 1: phrase = lang.hosEtaTightPhrase(spareMinutes: minutes)
+        default: phrase = lang.hosEtaComfortablePhrase(spareMinutes: minutes)
+        }
+        VoiceNavigationManager.shared.announceHosEta(phrase, lang: lang)
+        if level == 2 {
+            // Estoura o limite: além da voz, aviso visual.
+            routingNotice = phrase
+            showingRoutingNotice = true
+        }
+        #if DEBUG
+        print("[HOS-ETA] level=\(level) marginMin=\(Int(margin / 60)) etaMin=\(Int(etaSeconds / 60))")
+        #endif
     }
 
     // MARK: - Route Calculation
@@ -2164,6 +2208,9 @@ struct HorizonView: View {
         print("[TRACE-NAV] 11 · navigationEngine ligado")
         #endif
         VoiceNavigationManager.shared.resetForNewRoute()
+        // ETA × HOS: nova rota = re-anuncia o status das horas na primeira avaliação.
+        hosEtaAnnouncedLevel = nil
+        lastHosEtaCheckAt = .distantPast
         #if DEBUG
         print("[TRACE-NAV] 12 · voz resetada")
         #endif

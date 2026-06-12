@@ -3588,6 +3588,43 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    // MARK: - ETA × HOS (diferencial Trucker Easy: "você chega dentro das suas horas?")
+
+    /// "1h 25m" / "45 min" — duração curta para frases de voz.
+    private func hosEtaSpan(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if h > 0 && m > 0 { return "\(h)h \(m)m" }
+        if h > 0 { return "\(h)h" }
+        return "\(m) min"
+    }
+
+    func hosEtaComfortablePhrase(spareMinutes: Int) -> String {
+        let span = hosEtaSpan(spareMinutes)
+        switch self {
+        case .portuguese: return "Você chega \(span) antes do seu limite de direção."
+        case .spanish, .spanishLatam: return "Llegarás \(span) antes de tu límite de conducción."
+        default: return "You will arrive \(span) before your driving limit."
+        }
+    }
+
+    func hosEtaTightPhrase(spareMinutes: Int) -> String {
+        let span = hosEtaSpan(spareMinutes)
+        switch self {
+        case .portuguese: return "Atenção: só \(span) de folga até o seu limite de direção. Planeje uma parada."
+        case .spanish, .spanishLatam: return "Atención: solo \(span) de margen hasta tu límite de conducción. Planifica una parada."
+        default: return "Heads up: only \(span) to spare on your driving limit. Plan a stop."
+        }
+    }
+
+    func hosEtaOverPhrase(shortByMinutes: Int) -> String {
+        let span = hosEtaSpan(shortByMinutes)
+        switch self {
+        case .portuguese: return "Alerta DOT: a chegada passa \(span) do seu limite de direção. Pare em um truck stop para a pausa obrigatória."
+        case .spanish, .spanishLatam: return "Alerta DOT: la llegada supera tu límite de conducción por \(span). Detente en un truck stop para el descanso."
+        default: return "DOT alert: arrival exceeds your driving limit by \(span). Stop at a truck stop for your required break."
+        }
+    }
+
     var horizonRouteErrorUnableSafeRoute: String {
         switch self {
         case .english, .hindi, .arabic: return "Unable to calculate a safe route right now. Check signal and try again."
