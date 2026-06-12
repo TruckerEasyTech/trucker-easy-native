@@ -848,6 +848,9 @@ struct HorizonView: View {
                     onStopNavigation: {
                         navigationEngine.stopNavigation()
                         restrictionWarningManager.clearWarnings()
+                        #if canImport(MapboxMaps)
+                        OfflineRouteTileManager.shared.clear()
+                        #endif
                         var t = Transaction(animation: nil); t.disablesAnimations = true
                         withTransaction(t) {
                             truckRoute = nil
@@ -1726,6 +1729,9 @@ struct HorizonView: View {
         checkTruckStopProximity(from: loc, speed: speed)
         checkFacilityVisitDeparture(from: loc)
         announceNavTruckFuelEtasIfNeeded(location: loc, speed: speed, now: now)
+        #if canImport(MapboxMaps)
+        if isNavigating { OfflineRouteTileManager.shared.refreshAheadWindow(from: loc.coordinate) }
+        #endif
         appendLocationHistorySample(loc, now: now)
         checkGradeAlert(from: loc); checkSharpCurveAlert(at: loc); checkWindAlert()
         if isNavigating { checkDestinationDock(from: loc) }
@@ -2129,6 +2135,12 @@ struct HorizonView: View {
             routeSteps = steps; currentStepIndex = 0
         }
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
+        #if canImport(MapboxMaps)
+        // Offline C3 — baixa tiles do corredor (visão geral + janela à frente) ao aplicar a rota.
+        if MapProviderConfig.isMapboxHorizonRendererEnabled, result.coordinates.count >= 2 {
+            OfflineRouteTileManager.shared.cacheRoute(coordinates: result.coordinates, style: selectedMapStyle.mapboxStyleURI)
+        }
+        #endif
         showingFallbackConfirmation = false
         pendingFallbackRoute = nil
         pendingFallbackProvider = .unknown

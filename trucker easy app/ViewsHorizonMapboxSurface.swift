@@ -8,7 +8,7 @@ import UIKit
 // MARK: - Map style → Mapbox StyleURI
 
 extension MapStyleOption {
-    fileprivate var mapboxStyleURI: StyleURI {
+    var mapboxStyleURI: StyleURI {
         switch self {
         case .standard:
             return .streets           // clean flat road map
