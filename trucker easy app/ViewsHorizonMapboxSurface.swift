@@ -176,13 +176,22 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             onControlsReady?((
                 zoomIn: {
                     guard let map = coordinator.mapView else { return }
-                    let z = map.mapboxMap.cameraState.zoom
-                    map.mapboxMap.setCamera(to: CameraOptions(zoom: min(z + 1, 22)))
+                    if coordinator.isNavigatingMode {
+                        // Navegando o FollowPuck é dono da câmera — ajusta o zoom do viewport.
+                        coordinator.setNavigationZoom(coordinator.navigationZoom + 1, on: map)
+                    } else {
+                        let z = map.mapboxMap.cameraState.zoom
+                        map.mapboxMap.setCamera(to: CameraOptions(zoom: min(z + 1, 22)))
+                    }
                 },
                 zoomOut: {
                     guard let map = coordinator.mapView else { return }
-                    let z = map.mapboxMap.cameraState.zoom
-                    map.mapboxMap.setCamera(to: CameraOptions(zoom: max(z - 1, 2)))
+                    if coordinator.isNavigatingMode {
+                        coordinator.setNavigationZoom(coordinator.navigationZoom - 1, on: map)
+                    } else {
+                        let z = map.mapboxMap.cameraState.zoom
+                        map.mapboxMap.setCamera(to: CameraOptions(zoom: max(z - 1, 2)))
+                    }
                 },
                 recenter: {
                     guard let map = coordinator.mapView else { return }
@@ -219,13 +228,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         }
 
         if coord.lastStyle != selectedMapStyle {
-            if isNavigating {
-                coord.deferredStyle = selectedMapStyle
-            } else {
-                coord.lastStyle = selectedMapStyle
-                coord.deferredStyle = nil
-                loadMapStyle(selectedMapStyle, on: mapView, coordinator: coord)
-            }
+            // Troca de estilo AO VIVO, inclusive navegando — o completion do loadMapStyle
+            // re-instala managers, rota e pins, então nada se perde no reload do estilo.
+            coord.lastStyle = selectedMapStyle
+            coord.deferredStyle = nil
+            loadMapStyle(selectedMapStyle, on: mapView, coordinator: coord)
         }
 
         let fp = routeFingerprint()
@@ -263,11 +270,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             )
         }
 
-        if !isNavigating, let deferred = coord.deferredStyle {
-            coord.lastStyle = deferred
-            coord.deferredStyle = nil
-            loadMapStyle(deferred, on: mapView, coordinator: coord)
-        }
 
         coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts)
         if isNavigating, let coords = activeRouteCoordinates(), coords.count >= 2,
@@ -344,6 +346,21 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// Mapbox FollowPuck — smooth 60fps camera + puck (no manual setCamera jumps).
         private var followPuckState: FollowPuckViewportState?
         private var followPuckActive = false
+        /// Zoom da câmera navegando — ajustável pelos botões +/− (o FollowPuck é dono da câmera,
+        /// então setCamera manual era sobrescrito; o ajuste tem que ser no próprio viewport).
+        var navigationZoom: CGFloat = 16.5
+
+        func setNavigationZoom(_ zoom: CGFloat, on mapView: MapboxMaps.MapView) {
+            navigationZoom = min(max(zoom, 11), 20)
+            guard followPuckActive else { return }
+            var opts = FollowPuckViewportStateOptions()
+            opts.zoom = navigationZoom
+            opts.pitch = 45
+            opts.bearing = .course
+            let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
+            followPuckState = state
+            mapView.viewport.transition(to: state)
+        }
 
         private var lastIdleCameraUpdateAt: Date = .distantPast
         private var lastIdleCameraCenter: CLLocation?
@@ -360,7 +377,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             if isNavigatingMode, let c = smoothedRouteCoord {
                 mapView.mapboxMap.setCamera(to: CameraOptions(
                     center: c,
-                    zoom: 16.5,
+                    zoom: navigationZoom,
                     bearing: smoothedRouteBearing,
                     pitch: 45
                 ))
@@ -374,7 +391,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             if isNavigating {
                 guard !followPuckActive else { return }
                 var opts = FollowPuckViewportStateOptions()
-                opts.zoom = 16.5
+                opts.zoom = navigationZoom
                 opts.pitch = 45
                 opts.bearing = .course
                 let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
