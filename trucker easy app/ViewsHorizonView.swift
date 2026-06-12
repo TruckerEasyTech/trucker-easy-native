@@ -410,6 +410,17 @@ struct HorizonView: View {
     /// Purple route line when solver is Neal / Leap / Braket (geometry still from Valhalla/OSRM/MapKit).
     private var routeQuantumMapLineAccent: Bool { truckRoute?.provenance?.usesQuantumAccentPolyline ?? false }
     private var isNavigating: Bool { truckRoute != nil || route != nil }
+
+    /// HOS REAL vindo do timer DOT (DotHosContext) — substitui o antigo HOSState.mock
+    /// (4h30 fixos) que chegava aos painéis de truck stop. Dado real, sem adivinhação.
+    private var liveHOSState: HOSState {
+        HOSState(
+            driveTimeRemainingHours: hosContext.drivingRemaining / 3600,
+            dutyTimeRemainingHours: hosContext.shiftRemaining / 3600,
+            isInBreak: hosContext.status == .offDuty || hosContext.status == .sleeper,
+            breakEndsAt: nil
+        )
+    }
     private var subscriptionPlan: TruckerEasyPlan { store.effectivePlan }
     private var routingAccessMode: RoutingService.RoutingAccessMode {
         if subscriptionPlan.hasTruckRoutes || AppAccessPolicy.unlockAllFeaturesForTesting {
@@ -596,7 +607,7 @@ struct HorizonView: View {
                     .presentationDetents([.medium, .large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
             .sheet(item: $selectedTruckStop) { stop in
-                TruckStopDetailSheet(stop: stop, hos: truckStopService.hos, onNavigate: { truckStop in
+                TruckStopDetailSheet(stop: stop, hos: liveHOSState, onNavigate: { truckStop in
                     calculateRoute(to: truckStop.coordinate, address: truckStop.name); showingTruckStops = false
                 })
                 .presentationDetents([.large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
@@ -1060,7 +1071,7 @@ struct HorizonView: View {
         if showingTruckStops && !isNavigating {
             VStack {
                 Spacer().frame(height: 190)
-                TruckStopsPanel(stops: truckStopService.nearbyStops, hos: truckStopService.hos,
+                TruckStopsPanel(stops: truckStopService.nearbyStops, hos: liveHOSState,
                     isLoading: truckStopService.isLoading, onClose: { showingTruckStops = false },
                     onSelect: { stop in selectedTruckStop = stop; showingTruckStopDetail = true })
                     .padding(.horizontal, AppTheme.Spacing.md)

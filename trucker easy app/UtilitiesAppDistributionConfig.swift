@@ -9,7 +9,10 @@ enum AppAccessPolicy {
     #if DEBUG
     static let unlockAllFeaturesForTesting = true
     #else
-    static let unlockAllFeaturesForTesting = false
+    // TESTFLIGHT: true — testador na estrada precisa de todas as features (Premium,
+    // Route Easy completo) sem paywall. ⚠️ TODO: voltar para `false` ANTES do envio
+    // à App Store (release público volta ao gating de planos).
+    static let unlockAllFeaturesForTesting = true
     #endif
 
     /// Fleet dispatch portal (loads from dispatcher) — off for solo-driver; nothing to tap while driving.
