@@ -72,10 +72,15 @@ struct RouteWarningEngine {
         from result: ComplianceChecker.ComplianceResult,
         location: CLLocationCoordinate2D
     ) -> [TruckRestrictionWarning] {
-        result.violations.map { violation in
+        result.violations.compactMap { violation -> TruckRestrictionWarning? in
+            // Comprimento total NÃO é restrição real no National Network dos EUA — isto gerava um
+            // aviso FIXO falso ("Length 1676 cm"). Restrições de comprimento REAIS (curva fechada,
+            // via estreita) vêm dos notices do Valhalla, não de comparar com um baseline regional.
+            if violation.type == .length { return nil }
+
             let type: TruckRestrictionWarning.WarningType
             let message: String
-            
+
             switch violation.type {
             case .height:
                 type = .heightLimit

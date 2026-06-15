@@ -3912,7 +3912,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .portuguese: return "Rota inteligente"
         case .spanish, .spanishLatam: return "Ruta inteligente"
-        default: return "AI Smart"
+        default: return "Easy"
         }
     }
 
@@ -3923,7 +3923,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .spanish, .spanishLatam:
             return "Build de prueba — elige Rápida, Sin peajes o Inteligente. Todas funcionan."
         default:
-            return "Test build — pick Fastest, No toll, or AI Smart. All three work."
+            return "Test build — pick Fastest, No toll, or Easy. All three work."
         }
     }
 

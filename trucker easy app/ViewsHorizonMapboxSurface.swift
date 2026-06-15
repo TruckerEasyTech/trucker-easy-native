@@ -451,8 +451,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             guard followPuckActive else { return }
             var opts = FollowPuckViewportStateOptions()
             opts.zoom = navigationZoom
-            opts.pitch = 0
-            opts.bearing = .constant(0)   // north-up: zoom changes never re-introduce rotation
+            opts.pitch = 50                // visão inclinada pra frente (GPS de verdade)
+            opts.bearing = .heading        // mapa GIRA pro sentido da viagem (course-up)
             let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
             followPuckState = state
             mapView.viewport.transition(to: state)
@@ -474,8 +474,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 mapView.mapboxMap.setCamera(to: CameraOptions(
                     center: c,
                     zoom: navigationZoom,
-                    bearing: 0,   // north-up recenter (no rotation)
-                    pitch: 0
+                    bearing: smoothedRouteBearing,   // course-up: aponta pro sentido da viagem
+                    pitch: 50
                 ))
             } else if let c = lastKnownCoordinate {
                 let z: CGFloat = mapView.mapboxMap.cameraState.zoom
@@ -488,10 +488,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 guard !followPuckActive else { return }
                 var opts = FollowPuckViewportStateOptions()
                 opts.zoom = navigationZoom
-                // North-up: the map never spins (Trucker Path behavior the user asked for). Only the
-                // puck arrow rotates to the heading; the map stays flat + north-fixed = stable, no jitter.
-                opts.pitch = 0
-                opts.bearing = .constant(0)
+                // Course-up: o mapa GIRA pro sentido da viagem e inclina pra frente (GPS de verdade).
+                // O puck já emite um bearing de corredor ESTÁVEL, então gira suave (sem jitter).
+                opts.pitch = 50
+                opts.bearing = .heading
                 let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
                 followPuckState = state
                 followPuckActive = true

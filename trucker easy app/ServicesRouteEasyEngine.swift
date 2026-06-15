@@ -315,11 +315,11 @@ enum RouteEasyEngine {
                 if let estimatedSavingsUSD, estimatedSavingsUSD > 2, let stopName {
                     subtitle = "Best cost-benefit · fuel at \(stopName) saves ~$\(String(format: "%.0f", estimatedSavingsUSD))"
                 } else if let savings, savings > 2, let stopName {
-                    subtitle = "AI Smart · stop at \(stopName) saves ~$\(String(format: "%.0f", savings))"
+                    subtitle = "Easy · stop at \(stopName) saves ~$\(String(format: "%.0f", savings))"
                 } else if let stopName {
-                    subtitle = "AI Smart · fuel/rest option: \(stopName)"
+                    subtitle = "Easy · fuel/rest option: \(stopName)"
                 } else {
-                    subtitle = "AI Smart · balances time, tolls, fuel and HOS"
+                    subtitle = "Easy · balances time, tolls, fuel and HOS"
                 }
             }
         }

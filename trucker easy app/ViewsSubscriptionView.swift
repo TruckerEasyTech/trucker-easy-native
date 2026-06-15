@@ -259,7 +259,7 @@ struct SubscriptionView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(AppTheme.Colors.accent)
             VStack(alignment: .leading, spacing: 4) {
-                Text(plan >= .premium ? "Unlock AI Smart Route" : "Unlock No-Toll Truck Routes")
+                Text(plan >= .premium ? "Unlock Easy Route" : "Unlock No-Toll Truck Routes")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
                 Text(plan >= .premium
@@ -339,7 +339,7 @@ private struct RouteEasyPlanComparison: View {
             )
             routeTierRow(
                 badge: "PREMIUM",
-                title: "AI Smart route",
+                title: "Easy route",
                 detail: "Optimizes fuel + tolls + time — shows estimated savings before you roll.",
                 color: Color(hex: "#f59e0b"),
                 emphasized: highlight == .premium
