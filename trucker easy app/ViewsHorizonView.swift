@@ -366,6 +366,8 @@ struct HorizonView: View {
     @State private var showingCheapestDiesel = false
     @State private var cheapestDieselStop: TruckStopItem? = nil
     @State private var publicDieselPrice: FuelPricePoint? = nil
+    /// Limite de velocidade real (km/h) da via atual, do Valhalla /locate. Issue 2.
+    @State private var currentEdgeSpeedLimitKmh: Double? = nil
 
     @State private var currentTollResult: TollResult? = nil
     @State private var currentProfitability: TripProfitability? = nil
@@ -1756,8 +1758,10 @@ struct HorizonView: View {
                 await weatherService.refresh(for: loc.coordinate)
                 await logisticsNewsService.refresh(for: loc.coordinate)
                 let publicPrice = await FuelPriceService.shared.fetchPublicDieselPrice(for: regionalSettings.currentRegion)
+                let edgeLimit = await ValhallaRoutingService.shared.fetchEdgeSpeedLimitKmh(at: loc.coordinate)
                 await MainActor.run {
                     publicDieselPrice = publicPrice
+                    currentEdgeSpeedLimitKmh = edgeLimit
                     if weatherService.currentWeather != nil && !weatherShownThisLaunch {
                         weatherShownThisLaunch = true
                         showingWeather = true
@@ -2873,7 +2877,10 @@ struct HorizonView: View {
         let gpsSpeedMph = max(0, location.speed * 2.23694)
         let effectiveMph = fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph)
         let speedKmh = effectiveMph * 1.60934
-        let legalLimit = jurisdictionPolicyService.effectiveSpeedLimitKmh(fallback: countryCompliance.truckSpeedLimitKmh)
+        // Issue 2: usa o limite REAL da via (Valhalla /locate) quando disponível, pegando o MENOR
+        // entre ele e o baseline da jurisdição (seguro p/ caminhão). Antes: só o genérico (ex.: 65).
+        let jurisdictionLimit = jurisdictionPolicyService.effectiveSpeedLimitKmh(fallback: countryCompliance.truckSpeedLimitKmh)
+        let legalLimit = min(jurisdictionLimit, currentEdgeSpeedLimitKmh ?? jurisdictionLimit)
         // Issue 2 (teste de estrada): só avisa com folga real (~+5 mph / +8 km/h) e no
         // máximo a cada 3 min. Antes disparava a +3 km/h e re-disparava a cada 45s, virando
         // "nag" constante ao cruzar acima do limite-base. (O limite em si vem de fonte pesada;

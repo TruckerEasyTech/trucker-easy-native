@@ -354,8 +354,12 @@ class TruckRestrictionWarningManager {
                     language: AppLanguage.persistedDriverChoice
                 )
 
-                // Preserve dismissed IDs — o que o motorista fechou (X) não volta nesta sessão.
-                self.activeWarnings = updatedWarnings.filter { !dismissedWarningIds.contains($0.id) }
+                // Preserve dismissed IDs + só REATRIBUI se mudou de verdade. Antes reatribuía a cada
+                // ~0.45s mesmo idêntico → a overlay re-disparava a transição e o aviso "ficava subindo".
+                let filtered = updatedWarnings.filter { !dismissedWarningIds.contains($0.id) }
+                if filtered != self.activeWarnings {
+                    self.activeWarnings = filtered
+                }
             }
         }
 
