@@ -164,6 +164,30 @@ private struct TruckerPathTopManeuverBar: View {
         return nil
     }
 
+    /// Destino da saída ("...toward X" / "...para X") — a cidade/via pra onde a saída leva.
+    /// Vem direto do texto da instrução do Valhalla (campo `sign.exit_toward`).
+    private var exitToward: String? {
+        let sources = [nextStepInstruction, step.instructions].compactMap { $0 }
+        for text in sources {
+            if let t = TruckerPathTopManeuverBar.parseToward(from: text) { return t }
+        }
+        return nil
+    }
+
+    static func parseToward(from text: String) -> String? {
+        let patterns = [#"toward\s+(.+?)[\.,;]*$"#, #"\bpara\s+(.+?)[\.,;]*$"#, #"rumo a\s+(.+?)[\.,;]*$"#]
+        for p in patterns {
+            if let regex = try? NSRegularExpression(pattern: p, options: .caseInsensitive),
+               let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               m.numberOfRanges > 1,
+               let r = Range(m.range(at: 1), in: text) {
+                let s = String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if s.count >= 2 && s.count <= 42 { return s }
+            }
+        }
+        return nil
+    }
+
     static func parseExitNumber(from text: String) -> String? {
         let lower = text.lowercased()
         let patterns = [#"exit\s+(\d+[a-z]?)"#, #"take\s+exit\s+(\d+[a-z]?)"#, #"\bexits?\s+(\d+[a-z]?)\b"#]
@@ -201,15 +225,40 @@ private struct TruckerPathTopManeuverBar: View {
                     .minimumScaleFactor(0.6)
 
                 Text(stayOnTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.95))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.72)
 
                 if let exit = exitShield {
-                    Text("Exit \(exit)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color(hex: "#4ade80"))
+                    // Placa de saída estilo rodovia US — grande e alto contraste, p/ o motorista
+                    // bater o olho e saber ONDE sair e PRA ONDE (cidade/via). Antes: texto verde 11pt.
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("EXIT")
+                                .font(.system(size: 12, weight: .heavy))
+                            Text(exit)
+                                .font(.system(size: 22, weight: .black, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color(hex: "#16a34a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        if let toward = exitToward {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.turn.up.right")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text(toward)
+                                    .font(.system(size: 15, weight: .bold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .foregroundColor(Color(hex: "#4ade80"))
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
 
