@@ -19,11 +19,22 @@ enum PolylineLeadArrow {
         guard coords.count >= 2 else { return nil }
 
         let n = coords.count
-        var start = max(0, min(anchorIndex, n - 2))
+        let originalAnchor = max(0, min(anchorIndex, n - 2))
+        var start = originalAnchor
         if start > 0 { start = max(0, start - 24) }
         let end = min(n - 2, start + 120)
 
-        var bestDist = Double.greatestFiniteMagnitude
+        // Issue 1+3 (teste de estrada): trava de direção + anti-retrocesso. Em trevos/interseções
+        // o segmento geometricamente MAIS PERTO pode ser de outro sentido — e o puck "pula" de via.
+        // Penalizamos cada candidato por (a) rumo desalinhado com o curso do motorista e (b) regredir
+        // o índice. Sem curso confiável (parado), cai no comportamento antigo (puro mais-perto),
+        // então NUNCA fica pior no caso comum (onde o segmento certo já é o mais perto E alinhado).
+        let course = user.course
+        let useBearing = course >= 0 && user.speed >= 2.0   // rumo só é confiável em movimento
+        let bearingPenaltyMeters = 28.0                     // 180° de erro = +28m de "custo"
+        let backwardPenaltyMeters = 12.0                    // regredir o índice = +12m
+
+        var bestScore = Double.greatestFiniteMagnitude
         var bestPoint: CLLocationCoordinate2D?
         var bestBearing: Double = 0
         var bestSeg = start
@@ -32,10 +43,18 @@ enum PolylineLeadArrow {
             let a = coords[i]
             let b = coords[i + 1]
             guard let proj = projectPoint(user.coordinate, segmentStart: a, segmentEnd: b) else { continue }
-            if proj.distanceMeters < bestDist {
-                bestDist = proj.distanceMeters
+            let segBearing = a.bearing(to: b)
+            var score = proj.distanceMeters
+            if useBearing {
+                var diff = abs(segBearing - course).truncatingRemainder(dividingBy: 360)
+                if diff > 180 { diff = 360 - diff }
+                score += (diff / 180.0) * bearingPenaltyMeters
+            }
+            if i < originalAnchor { score += backwardPenaltyMeters }
+            if score < bestScore {
+                bestScore = score
                 bestPoint = proj.coordinate
-                bestBearing = a.bearing(to: b)
+                bestBearing = segBearing
                 bestSeg = i
             }
         }

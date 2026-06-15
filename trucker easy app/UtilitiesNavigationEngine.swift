@@ -195,6 +195,12 @@ final class NavigationEngine {
         }
     }
 
+    #if DEBUG
+    /// Issue 1 (teste de estrada): rastreia regressões do índice mais-próximo — a assinatura
+    /// do "tremor" de manobra. Só DEBUG; não afeta release.
+    private var lastLoggedClosestIndex = -1
+    #endif
+
     func updateLocation(_ location: CLLocation) {
         guard state == .navigating || state == .rerouting else { return }
         guard let route = activeRoute, !route.coordinates.isEmpty else { return }
@@ -231,6 +237,17 @@ final class NavigationEngine {
 
         let nextTurnDistance = calculateDistanceToNextStep(from: location, route: route, startIndex: closestIndex)
         distanceToNextStep = nextTurnDistance
+
+        #if DEBUG
+        // Issue 1: loga quando o índice mais-próximo REGRIDE — sinal de pulo em interseção que faz
+        // a distância-pra-manobra (e a instrução) tremer. Confirma a causa no próximo TestFlight.
+        if lastLoggedClosestIndex >= 0, closestIndex < lastLoggedClosestIndex {
+            print("[NavJitter] closestIdx \(lastLoggedClosestIndex)→\(closestIndex) "
+                + "nextTurn=\(Int(nextTurnDistance))m step=\(currentStepIndex) "
+                + "d2route=\(Int(distanceToRoute))m acc=\(Int(location.horizontalAccuracy))m")
+        }
+        lastLoggedClosestIndex = closestIndex
+        #endif
 
         updateRemainingStats(from: location, route: route, routeIndex: closestIndex)
         checkAndAnnounceStep(distance: nextTurnDistance)

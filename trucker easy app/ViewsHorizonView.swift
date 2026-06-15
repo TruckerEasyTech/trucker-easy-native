@@ -79,6 +79,8 @@ struct HorizonView: View {
 
     @State private var navigationEngine = NavigationEngine()
     @State private var restrictionWarningManager = TruckRestrictionWarningManager()
+    /// Motor de telemetria — consolida HOS + navegação + restrições num NavigationState único.
+    @State private var telemetryEngine = NavigationTelemetryEngine()
     @State private var dismissedRestrictionIds: Set<UUID> = []
 
     @State private var truckProfile = TruckProfile.loadSaved()
@@ -1707,6 +1709,10 @@ struct HorizonView: View {
         hosContext.feedSpeed(fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph))
         evaluateHosEtaAdvisory(now: now)
 
+        // Consolida HOS + navegação + restrições num NavigationState único (montador,
+        // sem efeito colateral — lê o que já foi atualizado acima). Em DEBUG, loga no console.
+        telemetryEngine.assemble(hos: hosContext, nav: navigationEngine, warnings: truckWarnings)
+
         #if DEBUG
         if !HorizonViewFirstGpsFixLogged.didLog,
            loc.horizontalAccuracy > 0, loc.horizontalAccuracy < 80 {
@@ -2855,8 +2861,12 @@ struct HorizonView: View {
         let effectiveMph = fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph)
         let speedKmh = effectiveMph * 1.60934
         let legalLimit = jurisdictionPolicyService.effectiveSpeedLimitKmh(fallback: countryCompliance.truckSpeedLimitKmh)
-        guard speedKmh > legalLimit + 3 else { return }
-        let now = Date(); guard now.timeIntervalSince(lastSpeedComplianceAlertAt) > 45 else { return }
+        // Issue 2 (teste de estrada): só avisa com folga real (~+5 mph / +8 km/h) e no
+        // máximo a cada 3 min. Antes disparava a +3 km/h e re-disparava a cada 45s, virando
+        // "nag" constante ao cruzar acima do limite-base. (O limite em si vem de fonte pesada;
+        // conectar a um DB de limite por trecho de via é um passo de dados separado.)
+        guard speedKmh > legalLimit + 8 else { return }
+        let now = Date(); guard now.timeIntervalSince(lastSpeedComplianceAlertAt) > 180 else { return }
         lastSpeedComplianceAlertAt = now
         let currentSpeed = regionalSettings.formatSpeed(speedKmh)
         let limitText = regionalSettings.formatSpeed(legalLimit)
