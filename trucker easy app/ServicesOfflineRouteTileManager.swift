@@ -22,8 +22,9 @@ final class OfflineRouteTileManager {
     private let overviewRegionId = "te-route-overview"
     private let aheadRegionId = "te-route-ahead"
     private let overviewZoom: ClosedRange<UInt8> = 0...10   // rota inteira, leve
-    private let aheadZoom: ClosedRange<UInt8> = 11...14      // trecho à frente, detalhado
-    private let aheadDistanceMeters: CLLocationDistance = 80_000
+    private let aheadZoom: ClosedRange<UInt8> = 11...16      // até o zoom de NAVEGAÇÃO (16) — sem isso
+                                                            // faltavam tiles offline ao aproximar (z16)
+    private let aheadDistanceMeters: CLLocationDistance = 50_000   // janela menor compensa o z16 mais pesado
     private let refreshAfterMovedMeters: CLLocationDistance = 40_000
 
     private var routeCoordinates: [CLLocationCoordinate2D] = []
