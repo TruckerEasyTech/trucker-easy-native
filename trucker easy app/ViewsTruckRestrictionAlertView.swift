@@ -313,8 +313,9 @@ class TruckRestrictionWarningManager {
             language: AppLanguage.persistedDriverChoice
         )
         
-        self.activeWarnings = warnings
-        self.dismissedWarningIds.removeAll()
+        // Mantém o que o motorista já fechou (X): reroute/reload da MESMA viagem não pode
+        // ressuscitar warnings dispensados. O reset total fica só no clearWarnings (fim da viagem).
+        self.activeWarnings = warnings.filter { !dismissedWarningIds.contains($0.id) }
         self.lastAnnouncedId = nil
         
         #if DEBUG
@@ -353,8 +354,8 @@ class TruckRestrictionWarningManager {
                     language: AppLanguage.persistedDriverChoice
                 )
 
-                // Preserve dismissed IDs
-                self.activeWarnings = updatedWarnings
+                // Preserve dismissed IDs — o que o motorista fechou (X) não volta nesta sessão.
+                self.activeWarnings = updatedWarnings.filter { !dismissedWarningIds.contains($0.id) }
             }
         }
 

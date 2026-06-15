@@ -1978,7 +1978,13 @@ struct HorizonView: View {
         #if DEBUG
         print("[Route] \(isReroute ? "REROUTE" : "NEW") → \(address) from \(String(format: "%.5f,%.5f", origin.coordinate.latitude, origin.coordinate.longitude))")
         #endif
-        runSingleTruckRoute(from: origin, to: coordinate, address: address, isReroute: isReroute)
+        if isReroute {
+            // Dirigindo: reroute silencioso, rota única (não abre seletor no meio da viagem).
+            runSingleTruckRoute(from: origin, to: coordinate, address: address, isReroute: true)
+        } else {
+            // Rota inicial: monta e apresenta os 3 modos (Rápida / Sem Pedágio / Easy-AI).
+            runRouteEasyPlanning(from: origin, to: coordinate, address: address)
+        }
     }
 
     private func calculateRoute(to address: String) {
@@ -2066,7 +2072,11 @@ struct HorizonView: View {
                 // #endregion
                 let coord = first.placemark.coordinate
                 await MainActor.run {
-                    runSingleTruckRoute(from: origin, to: coord, address: destinationName, isReroute: reroute)
+                    if reroute {
+                        runSingleTruckRoute(from: origin, to: coord, address: destinationName, isReroute: true)
+                    } else {
+                        runRouteEasyPlanning(from: origin, to: coord, address: destinationName)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -3448,45 +3458,46 @@ struct HorizonView: View {
                     accessMode: routingAccessMode
                 )
                 let provider = routing.lastProvider
-                let fastest = RouteEasyEngine.fastestOption(
-                    route: fast,
-                    provider: provider,
-                    dieselPricePerGallon: diesel,
-                    mpg: mpg,
-                    usesTruckForFreeTier: usesTruck
-                )
-
-                isCalculatingRoute = false
                 routeEasyPendingCoordinate = coordinate
                 routeEasyPendingAddress = address
-                routeEasyOptions = [fastest]
-                commitSelectedRoute(fastest, coordinate: coordinate, address: address)
 
-                // Enrich route options in background — must not block entering navigation.
-                Task { @MainActor in
-                    do {
-                        let options = try await RouteEasyEngine.buildOptions(
-                            from: origin,
-                            to: coordinate,
-                            destinationName: address,
-                            profile: truckProfile,
-                            dieselPricePerGallon: diesel,
-                            mpg: mpg,
-                            cheapestFuelStop: fuelStop,
-                            effectivePlan: subscriptionPlan,
-                            includeFuelSmart: routeEasyIncludesFuelSmart,
-                            prefetchedFastest: fast,
-                            prefetchedFastProvider: provider
-                        )
-                        routeEasyOptions = options
-                        #if DEBUG
-                        print("[RouteEasy] Picker ready — \(options.count) options")
-                        #endif
-                    } catch {
-                        #if DEBUG
-                        print("[RouteEasy] optional enrich failed: \(error.localizedDescription)")
-                        #endif
-                    }
+                // "Mostrar os 3 na hora": monta Rápida + Sem Pedágio + Easy/AI e ABRE o seletor —
+                // o motorista escolhe ANTES de navegar (não aplica a Rápida sozinho).
+                do {
+                    let options = try await RouteEasyEngine.buildOptions(
+                        from: origin,
+                        to: coordinate,
+                        destinationName: address,
+                        profile: truckProfile,
+                        dieselPricePerGallon: diesel,
+                        mpg: mpg,
+                        cheapestFuelStop: fuelStop,
+                        effectivePlan: subscriptionPlan,
+                        includeFuelSmart: routeEasyIncludesFuelSmart,
+                        prefetchedFastest: fast,
+                        prefetchedFastProvider: provider
+                    )
+                    isCalculatingRoute = false
+                    routeEasyOptions = options
+                    showingRouteEasyPicker = true
+                    #if DEBUG
+                    print("[RouteEasy] Picker apresentado — \(options.count) opções")
+                    #endif
+                } catch {
+                    // Fallback: se a comparação falhar, não deixa o motorista preso — aplica a Rápida.
+                    isCalculatingRoute = false
+                    let fastest = RouteEasyEngine.fastestOption(
+                        route: fast,
+                        provider: provider,
+                        dieselPricePerGallon: diesel,
+                        mpg: mpg,
+                        usesTruckForFreeTier: usesTruck
+                    )
+                    routeEasyOptions = [fastest]
+                    commitSelectedRoute(fastest, coordinate: coordinate, address: address)
+                    #if DEBUG
+                    print("[RouteEasy] comparação falhou → aplicou Rápida: \(error.localizedDescription)")
+                    #endif
                 }
             } catch {
                 isCalculatingRoute = false

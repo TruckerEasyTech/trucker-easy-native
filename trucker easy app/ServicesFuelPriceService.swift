@@ -168,8 +168,28 @@ extension FuelPriceService {
     /// Series: EPD2D = No.2 On-Highway Diesel, NUS = National U.S. average, weekly.
     /// Fallback: EIA DNAV TSV endpoint (also keyless).
     private func fetchEIADieselPrice() async -> FuelPricePoint? {
-        if let point = await fetchEIAFromAPI() { return point }
-        return await fetchEIAFromDNAV()
+        if let point = await fetchEIAFromAPI() {
+            #if DEBUG
+            print("[Fuel] diesel via EIA API: $\(point.dieselPrice)/gal")
+            #endif
+            return point
+        }
+        if let point = await fetchEIAFromDNAV() {
+            #if DEBUG
+            print("[Fuel] diesel via EIA DNAV: $\(point.dieselPrice)/gal")
+            #endif
+            return point
+        }
+        // 3º fallback sem chave: USDA Open Ag Transport republica o diesel semanal da EIA.
+        let usda = await fetchUSDADieselPrice()
+        #if DEBUG
+        if let usda {
+            print("[Fuel] diesel via USDA: $\(usda.dieselPrice)/gal")
+        } else {
+            print("[Fuel] diesel: todas as fontes falharam (usa fallback $3.85)")
+        }
+        #endif
+        return usda
     }
 
     /// EIA API v2 — works without an API key.
@@ -280,6 +300,51 @@ extension FuelPriceService {
             #endif
             return nil
         }
+    }
+
+    /// USDA Open Ag Transport (Socrata) — republica o diesel "on-highway" semanal da EIA.
+    /// Endpoint keyless: /resource/x88w-atzp.json · campos: date, region ("US"=nacional), diesel_price.
+    private func fetchUSDADieselPrice() async -> FuelPricePoint? {
+        var components = URLComponents(string: "https://agtransport.usda.gov/resource/x88w-atzp.json")
+        components?.queryItems = [
+            URLQueryItem(name: "region", value: "US"),
+            URLQueryItem(name: "$order", value: "date DESC"),
+            URLQueryItem(name: "$limit", value: "1")
+        ]
+        guard let url = components?.url else { return nil }
+
+        do {
+            var request = URLRequest(url: url, timeoutInterval: 15)
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+            let rows = try JSONDecoder().decode([USDADieselRow].self, from: data)
+            guard let row = rows.first, let price = Double(row.diesel_price), price > 0 else { return nil }
+
+            return FuelPricePoint(
+                id: "usda-usa-\(row.date)",
+                provider: .eia,   // USDA republica o dado da EIA
+                stationName: nil,
+                locationLabel: "United States (national avg)",
+                dieselPrice: price,
+                currencyCode: "USD",
+                unitLabel: "$/gal",
+                updatedAt: Date(),
+                latitude: nil, longitude: nil,
+                isEstimated: true,
+                sourceLabel: "USDA Open Ag Transport – weekly on-highway diesel"
+            )
+        } catch {
+            #if DEBUG
+            print("[Fuel] USDA Socrata error: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
+    private struct USDADieselRow: Decodable {
+        let date: String
+        let diesel_price: String
     }
 
     private func parseEIADate(_ period: String) -> Date? {
