@@ -65,7 +65,7 @@ final class PoiPlacesService {
     /// Official + OSM weigh stations ahead of the driver (Supabase `places_near`).
     func fetchWeighStationsNear(
         location: CLLocation,
-        radiusMeters: Double = 40_000,
+        radiusMeters: Double = 20_000,
         limit: Int = 40
     ) async throws -> [PlacesNearRow] {
         try await fetchPlacesNear(
@@ -78,7 +78,7 @@ final class PoiPlacesService {
 
     func fetchPlacesNear(
         location: CLLocation,
-        radiusMeters: Double = 80_467,
+        radiusMeters: Double = 24_000,   // 80km estourava o timeout de 15s; raio menor = query no limite
         poiTypes: [String]? = nil,
         limit: Int = 50
     ) async throws -> [PlacesNearRow] {

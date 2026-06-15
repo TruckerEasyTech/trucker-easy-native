@@ -422,7 +422,8 @@ final class TruckStopService {
     /// Map pins: smaller radius + fewer types so `places_near` stays under Supabase statement timeout.
     func searchNearby(
         location: CLLocation,
-        radiusMeters: Double = 40_233,
+        radiusMeters: Double = 20_000,   // 40km fazia a query levar ~16s e ESTOURAR o timeout de 15s
+                                         // → caía no MapKit (poucos/nenhum stop). 20km completa em ~8s.
         limit: Int = 30
     ) async {
         let now = Date()
