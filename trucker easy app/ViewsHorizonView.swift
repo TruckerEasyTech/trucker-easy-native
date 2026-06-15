@@ -515,6 +515,9 @@ struct HorizonView: View {
                 DispatchQueue.main.async {
                     self.isIdleBottomSheetReady = true
                 }
+                // Atualiza o style pack offline do Mapbox p/ a versão atual (Offline API) — limpa o
+                // aviso "outdated resource mapbox://styles/mapbox/standard shall be updated".
+                OfflineRouteTileManager.shared.updateOfflineResources()
                 // #region agent log
                 agentLogHorizon(
                     runId: "baseline",

@@ -67,6 +67,17 @@ final class OfflineRouteTileManager {
         lastWindowAnchor = nil
     }
 
+    /// Update explícito via Offline API: rebaixa a versão ATUAL do style pack (e da rota ativa,
+    /// se houver) com `acceptExpired: false`, limpando o aviso do Mapbox
+    /// "outdated resource ... shall be updated explicitly using Offline API".
+    /// Chamar quando online (ex.: ao abrir o mapa) — offline vira no-op silencioso.
+    func updateOfflineResources() {
+        loadStylePack(styleURI, acceptExpired: false)
+        if routeCoordinates.count >= 2 {
+            loadRegion(id: overviewRegionId, coordinates: routeCoordinates, zoom: overviewZoom, acceptExpired: false)
+        }
+    }
+
     // MARK: - Internos
 
     /// Acha o ponto da rota mais próximo da posição atual e acumula ~80 km à frente.
@@ -92,16 +103,16 @@ final class OfflineRouteTileManager {
         return window
     }
 
-    private func loadStylePack(_ style: StyleURI) {
+    private func loadStylePack(_ style: StyleURI, acceptExpired: Bool = true) {
         guard let options = StylePackLoadOptions(
             glyphsRasterizationMode: .ideographsRasterizedLocally,
             metadata: ["name": "te-route-style"],
-            acceptExpired: true
+            acceptExpired: acceptExpired
         ) else { return }
         offlineManager.loadStylePack(for: style, loadOptions: options, progress: nil) { _ in }
     }
 
-    private func loadRegion(id: String, coordinates: [CLLocationCoordinate2D], zoom: ClosedRange<UInt8>) {
+    private func loadRegion(id: String, coordinates: [CLLocationCoordinate2D], zoom: ClosedRange<UInt8>, acceptExpired: Bool = true) {
         let descriptorOptions = TilesetDescriptorOptions(styleURI: styleURI, zoomRange: zoom, tilesets: nil)
         let descriptor = offlineManager.createTilesetDescriptor(for: descriptorOptions)
         let geometry = Geometry.lineString(LineString(coordinates))
@@ -109,7 +120,7 @@ final class OfflineRouteTileManager {
             geometry: geometry,
             descriptors: [descriptor],
             metadata: ["name": id],
-            acceptExpired: true
+            acceptExpired: acceptExpired
         ) else { return }
         tileStore.loadTileRegion(forId: id, loadOptions: loadOptions) { _ in }
     }
