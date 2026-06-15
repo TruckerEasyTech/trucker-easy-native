@@ -292,7 +292,7 @@ final class ValhallaRoutingService {
         // Valhalla truck costing options — maps directly to TruckProfile dimensions
         var costingOptions: [String: Any] = [
             "height": profile.heightMeters,             // meters
-            "width":  2.59,                             // standard semi width 8.5ft (TruckProfile has no width field)
+            "width":  profile.widthMeters,              // meters (driver profile; defaults to 2.59 = 8'6")
             "length": profile.lengthMeters,             // meters
             "weight": profile.weightTonnes * 0.907185,  // short tons → metric tonnes
             "axle_load": profile.axleWeightTonnes * 0.907185  // short tons → metric tonnes per axle
@@ -314,6 +314,9 @@ final class ValhallaRoutingService {
             ],
             "costing": "truck",
             "costing_options": ["truck": costingOptions],
+            // type 0 = depart now. Required for Valhalla to apply time-conditional
+            // restrictions (e.g. "no trucks 7–9am"); omitting it ignores them entirely.
+            "date_time": ["type": 0],
             "directions_options": [
                 "units": "miles",
                 "language": Self.valhallaInstructionLanguageTag()

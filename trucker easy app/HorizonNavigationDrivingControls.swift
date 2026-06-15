@@ -132,8 +132,10 @@ struct HorizonNavigationCorridorRail: View {
         switch item.kind {
         case .truckStop: return Color(hex: "#c2410c")
         case .weighStation:
-            if item.isOfficialStatus, item.status == .open { return Color(hex: "#16a34a") }
-            if item.isOfficialStatus, item.status == .closed { return Color(hex: "#ea580c") }
+            // Scale semantics: OPEN = red (prepare to enter), CLOSED = green (keep rolling).
+            if item.isOfficialStatus, item.status == .open { return Color(hex: "#dc2626") }
+            if item.isOfficialStatus, item.status == .closed { return Color(hex: "#16a34a") }
+            if item.status == .bypass { return Color(hex: "#2563eb") }
             if item.status == .monitoring { return Color(hex: "#f59e0b") }
             return Color(hex: "#57534e")
         case .restArea: return Color(hex: "#2563eb")
@@ -145,15 +147,18 @@ struct HorizonNavigationCorridorRail: View {
         switch s {
         case .open: return "OPEN"
         case .closed: return "CLOSED"
+        case .bypass: return "BYPASS"
         case .monitoring: return "MON"
         case .unknown: return "?"
         }
     }
 
     private func statusColor(_ s: ScaleAlertBanner.ScaleStatus) -> Color {
+        // Scale semantics: OPEN = red, CLOSED = green, BYPASS = blue, MONITORING = amber.
         switch s {
-        case .open: return Color(hex: "#4ade80")
-        case .closed: return Color(hex: "#fb923c")
+        case .open: return Color(hex: "#f87171")
+        case .closed: return Color(hex: "#4ade80")
+        case .bypass: return Color(hex: "#60a5fa")
         case .monitoring: return Color(hex: "#f59e0b")
         case .unknown: return AppTheme.Colors.textSecondary
         }

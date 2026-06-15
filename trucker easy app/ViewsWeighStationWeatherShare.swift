@@ -193,11 +193,33 @@ enum WeighStationStatusProvenance: Equatable {
     }
 }
 
+/// Aggregated recent driver reports for a station — drives the Community confidence badge.
+struct WeighStationCommunitySummary: Equatable {
+    enum Confidence: Equatable {
+        case high, medium, low
+    }
+
+    let status: WeighStationStatus
+    let outcome: WeighStationOpenOutcome?
+    /// Reports within the last 2 h agreeing with the latest status.
+    let recentCount: Int
+    let latestAt: Date
+
+    var confidence: Confidence {
+        let age = Date().timeIntervalSince(latestAt)
+        if recentCount >= 3 && age <= 3_600 { return .high }
+        if recentCount >= 2 || age <= 1_800 { return .medium }
+        return .low
+    }
+}
+
 struct WeighStationResolvedStatus: Equatable {
     let displayStatus: ScaleAlertBanner.ScaleStatus
     let provenance: WeighStationStatusProvenance
     /// Community hint when official data is missing — shown as advisory, not primary safety signal.
     let communityHint: WeighStationStatus?
+    /// Recent driver-report aggregation (count + age) backing the community signal.
+    var communitySummary: WeighStationCommunitySummary? = nil
 }
 
 // MARK: - WeighStation Status Service (Supabase-backed, crowdsourced)
@@ -254,11 +276,13 @@ final class WeighStationStatusService {
         govSiteOpen: Bool? = nil
     ) -> WeighStationResolvedStatus {
         let effectiveGov = Self.effectiveGovernmentStatus(weighStatus: govStatus, siteOpen: govSiteOpen)
+        let summary = communitySummary(for: stationName, near: coordinate)
         if let gov = Self.statusFromGovernmentField(effectiveGov) {
             return WeighStationResolvedStatus(
                 displayStatus: scaleStatus(from: gov),
                 provenance: .official(source: WeighStationStatusProvenance.prettySource(govSource)),
-                communityHint: latestCommunityHint(for: stationName, near: coordinate)
+                communityHint: latestCommunityHint(for: stationName, near: coordinate),
+                communitySummary: summary
             )
         }
 
@@ -266,22 +290,63 @@ final class WeighStationStatusService {
             return WeighStationResolvedStatus(
                 displayStatus: scaleStatus(from: partner.status),
                 provenance: .official(source: WeighStationStatusProvenance.prettySource(partner.source)),
-                communityHint: latestCommunityHint(for: stationName, near: coordinate)
+                communityHint: latestCommunityHint(for: stationName, near: coordinate),
+                communitySummary: summary
             )
         }
 
         if let crowd = latestCommunityHint(for: stationName, near: coordinate) {
             return WeighStationResolvedStatus(
-                displayStatus: .unknown,
+                displayStatus: communityDisplayStatus(for: crowd, summary: summary),
                 provenance: .community,
-                communityHint: crowd
+                communityHint: crowd,
+                communitySummary: summary
             )
         }
 
         return WeighStationResolvedStatus(
             displayStatus: .unknown,
             provenance: .locationOnly,
-            communityHint: nil
+            communityHint: nil,
+            communitySummary: nil
+        )
+    }
+
+    /// Community-led display: dominant status from the latest report; Open + bypass outcome shows BYPASS.
+    private func communityDisplayStatus(
+        for status: WeighStationStatus,
+        summary: WeighStationCommunitySummary?
+    ) -> ScaleAlertBanner.ScaleStatus {
+        if status == .open, summary?.outcome == .bypass { return .bypass }
+        return scaleStatus(from: status)
+    }
+
+    /// Aggregate driver reports for a station (name match first, then ~800 m geo match).
+    func communitySummary(
+        for stationName: String,
+        near coordinate: CLLocationCoordinate2D?
+    ) -> WeighStationCommunitySummary? {
+        var pool = reports[stationName] ?? []
+        if pool.isEmpty, let coord = coordinate {
+            let here = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            for (_, stationReports) in reports {
+                for report in stationReports {
+                    guard let lat = report.latitude, let lon = report.longitude else { continue }
+                    if here.distance(from: CLLocation(latitude: lat, longitude: lon)) <= 800 {
+                        pool.append(report)
+                    }
+                }
+            }
+        }
+        let sorted = pool.sorted { $0.reportedAt > $1.reportedAt }
+        guard let latest = sorted.first else { return nil }
+        let cutoff = Date().addingTimeInterval(-7_200)
+        let recentMatching = sorted.filter { $0.reportedAt >= cutoff && $0.status == latest.status }.count
+        return WeighStationCommunitySummary(
+            status: latest.status,
+            outcome: latest.outcome,
+            recentCount: recentMatching,
+            latestAt: latest.reportedAt
         )
     }
 
@@ -382,6 +447,7 @@ final class WeighStationStatusService {
                 latitude: Double? = nil,
                 longitude: Double? = nil,
                 poiPlaceId: UUID? = nil,
+                prepass: Bool? = nil,
                 by user: String = "You") {
         // 1. Update local state immediately for instant UI feedback
         let report = WeighStationReport(
@@ -409,7 +475,8 @@ final class WeighStationStatusService {
                 poi_place_id: poiPlaceId?.uuidString,
                 details: WeighStationReportDetailsPayload(
                     outcome: outcome?.rawValue.lowercased(),
-                    source: "trucker_easy_app"
+                    source: "trucker_easy_app",
+                    prepass: prepass
                 )
             )
             do {
@@ -509,6 +576,7 @@ struct WeighStationStatusSheet: View {
     @State private var service = WeighStationStatusService.shared
     @State private var selectedStatus: WeighStationStatus? = nil
     @State private var selectedOutcome: WeighStationOpenOutcome? = nil
+    @State private var prepassOn: Bool? = nil
     @State private var submitted = false
     @State private var nearbyTargets: [WeighStationReportTarget] = []
     @State private var selectedTargetId: UUID?
@@ -564,6 +632,14 @@ struct WeighStationStatusSheet: View {
                         // ── Step 2: Choose outcome (only when Open is picked) ──
                         if selectedStatus == .open {
                             stepTwoCard
+                                .padding(.horizontal, 20)
+                                .padding(.top, 14)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+
+                        // ── PrePass (optional, any status) ─────────────────
+                        if selectedStatus != nil {
+                            prepassCard
                                 .padding(.horizontal, 20)
                                 .padding(.top, 14)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -655,6 +731,7 @@ struct WeighStationStatusSheet: View {
             selectedTargetId = target.id
             selectedStatus = nil
             selectedOutcome = nil
+            prepassOn = nil
             submitted = false
         } label: {
             HStack(spacing: 12) {
@@ -814,6 +891,50 @@ struct WeighStationStatusSheet: View {
         )
     }
 
+    private var prepassCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Is the PrePass on?", systemImage: "dot.radiowaves.left.and.right")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.white)
+
+            HStack(spacing: 10) {
+                prepassChoice(label: "PrePass ON", icon: "checkmark.seal.fill", value: true, tint: AppTheme.Colors.success)
+                prepassChoice(label: "PrePass OFF", icon: "xmark.seal.fill", value: false, tint: AppTheme.Colors.danger)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.Colors.backgroundCard)
+        .cornerRadius(AppTheme.Radius.md)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .stroke(AppTheme.Colors.accent.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    private func prepassChoice(label: String, icon: String, value: Bool, tint: Color) -> some View {
+        let selected = prepassOn == value
+        return Button(action: {
+            // Toggle off if tapped again — PrePass is an optional hint, not required to submit.
+            prepassOn = selected ? nil : value
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 13, weight: .bold))
+            }
+            .foregroundColor(selected ? .white : tint)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(selected ? tint.opacity(0.85) : tint.opacity(0.10))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(selected ? tint : AppTheme.Colors.textSecondary.opacity(0.15), lineWidth: 1.5)
+            )
+        }
+    }
+
     private func outcomeOptionRow(_ outcome: WeighStationOpenOutcome) -> some View {
         let selected = selectedOutcome == outcome
         return Button(action: { selectedOutcome = outcome }) {
@@ -891,6 +1012,7 @@ struct WeighStationStatusSheet: View {
             Button(action: {
                 selectedStatus = nil
                 selectedOutcome = nil
+                prepassOn = nil
                 submitted = false
             }) {
                 Text("Report Again")
@@ -932,7 +1054,8 @@ struct WeighStationStatusSheet: View {
             for: target.name,
             latitude: target.latitude,
             longitude: target.longitude,
-            poiPlaceId: target.poiPlaceId
+            poiPlaceId: target.poiPlaceId,
+            prepass: prepassOn
         )
         withAnimation { submitted = true }
     }

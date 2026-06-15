@@ -14,6 +14,7 @@ struct TruckProfile: Codable, Equatable {
     var heightMeters: Double
     var weightTonnes: Double
     var lengthMeters: Double
+    var widthMeters: Double = 2.59   // 8'6" standard semi width; wider loads need a permit
     var axleWeightTonnes: Double
     var hasHazmat: Bool
     var truckType: TruckType
@@ -92,6 +93,29 @@ struct TruckProfile: Codable, Equatable {
 
     /// Default profile — standard 53' semi (most common US configuration)
     static let `default` = semiFiftyThree
+}
+
+// MARK: - Backward-compatible decoding
+//
+// `widthMeters` was added after profiles were already persisted. A profile saved
+// without the key must still decode (keeping the driver's other dimensions) instead
+// of failing and resetting to `.default`. Encoding stays synthesized over these keys.
+
+extension TruckProfile {
+    private enum CodingKeys: String, CodingKey {
+        case heightMeters, weightTonnes, lengthMeters, widthMeters, axleWeightTonnes, hasHazmat, truckType
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        heightMeters     = try c.decode(Double.self, forKey: .heightMeters)
+        weightTonnes     = try c.decode(Double.self, forKey: .weightTonnes)
+        lengthMeters     = try c.decode(Double.self, forKey: .lengthMeters)
+        widthMeters      = try c.decodeIfPresent(Double.self, forKey: .widthMeters) ?? 2.59
+        axleWeightTonnes = try c.decode(Double.self, forKey: .axleWeightTonnes)
+        hasHazmat        = try c.decode(Bool.self, forKey: .hasHazmat)
+        truckType        = try c.decode(TruckType.self, forKey: .truckType)
+    }
 }
 
 // MARK: - TruckType

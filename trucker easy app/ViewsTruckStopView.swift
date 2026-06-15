@@ -2024,7 +2024,7 @@ struct HOSSettingsSheet: View {
 // MARK: - Scale Alert Banner (shown on map overlay when weigh station is ahead)
 
 struct ScaleAlertBanner: View {
-    enum ScaleStatus { case open, closed, monitoring, unknown }
+    enum ScaleStatus { case open, closed, bypass, monitoring, unknown }
 
     let stationName: String
     let distanceMiles: Double
@@ -2033,57 +2033,123 @@ struct ScaleAlertBanner: View {
     let onDismiss: () -> Void
     var provenance: WeighStationStatusProvenance = .locationOnly
     var communityHint: WeighStationStatus? = nil
+    var communitySummary: WeighStationCommunitySummary? = nil
     var onReport: ((WeighStationStatus) -> Void)? = nil
     var onMoreDetails: (() -> Void)? = nil
 
-    @State private var pulse = false
+    @State private var expanded = false
     @State private var reportAcknowledged = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(statusColor.opacity(pulse ? 0.35 : 0.15))
-                        .frame(width: 40, height: 40)
-                        .animation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true), value: pulse)
-                    Image(systemName: "scalemass.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(statusColor)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            compactRow
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Text(String(format: "%.1f mi", distanceMiles))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(AppTheme.Colors.textSecondary)
-                        Text("—")
-                            .foregroundColor(AppTheme.Colors.textSecondary)
-                            .font(.system(size: 11))
-                        Text(stationName)
-                            .font(.system(size: 11))
-                            .foregroundColor(AppTheme.Colors.textSecondary)
-                            .lineLimit(1)
-                    }
+            if expanded {
+                expandedDetails
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(AppTheme.Colors.backgroundCard)
+        .cornerRadius(AppTheme.Radius.md)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .stroke(statusColor.opacity(0.45), lineWidth: 1.5)
+        )
+        .shadow(color: statusColor.opacity(0.18), radius: 6, y: 2)
+    }
 
-                    Text(statusLabel)
-                        .font(.system(size: 15, weight: .black))
-                        .foregroundColor(statusColor)
+    // MARK: Compact one-line row (default, non-intrusive)
 
-                    Text(provenanceSubtitle)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(provenanceColor)
-                        .lineLimit(2)
-                }
+    private var compactRow: some View {
+        Button {
+            withAnimation(.spring(response: 0.32)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "scalemass.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(statusColor)
 
-                Spacer()
+                // Dominant status — readable in <1 s
+                Text(statusWord)
+                    .font(.system(size: 17, weight: .black))
+                    .foregroundColor(statusColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Text(String(format: distanceMiles >= 10 ? "%.0f mi" : "%.1f mi", distanceMiles))
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+
+                sourceBadge
+
+                Spacer(minLength: 4)
+
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
 
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
+                        .font(.system(size: 17))
                         .foregroundColor(AppTheme.Colors.textSecondary)
                 }
+                .buttonStyle(.plain)
             }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Small capsule that separates OFFICIAL vs COMMUNITY at a glance.
+    private var sourceBadge: some View {
+        Text(sourceBadgeText)
+            .font(.system(size: 9, weight: .black))
+            .tracking(0.3)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundColor(sourceBadgeColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(sourceBadgeColor.opacity(0.14))
+            .clipShape(Capsule())
+    }
+
+    private var sourceBadgeText: String {
+        switch provenance {
+        case .official(let source):
+            return "\(lang.scaleOfficialSourceLabel.uppercased()) · \(source.uppercased())"
+        case .community:
+            return "\(lang.scaleCommunityShortLabel.uppercased()) · \(confidenceWord.uppercased())"
+        case .locationOnly:
+            return lang.scaleNoDataShortLabel.uppercased()
+        }
+    }
+
+    private var sourceBadgeColor: Color {
+        switch provenance {
+        case .official: return AppTheme.Colors.success
+        case .community: return Color(hex: "#f59e0b")
+        case .locationOnly: return AppTheme.Colors.textSecondary
+        }
+    }
+
+    // MARK: Expanded details (only after the driver taps)
+
+    @ViewBuilder
+    private var expandedDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().background(Color.white.opacity(0.08))
+
+            Text(stationName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+
+            Text(provenanceDetailText)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(sourceBadgeColor)
+                .lineLimit(3)
 
             if onReport != nil {
                 scaleReportRow
@@ -2103,16 +2169,45 @@ struct ScaleAlertBanner: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(AppTheme.Colors.backgroundCard)
-        .cornerRadius(AppTheme.Radius.md)
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                .stroke(statusColor.opacity(0.4), lineWidth: 1.5)
-        )
-        .shadow(color: statusColor.opacity(0.2), radius: 8, y: 2)
-        .onAppear { pulse = true }
+        .padding(.top, 8)
+    }
+
+    private var provenanceDetailText: String {
+        switch provenance {
+        case .official(let source):
+            var text = "\(lang.scaleOfficialSourceLabel) · \(source)"
+            if let summary = communitySummary {
+                text += "\n\(lang.scaleCommunityShortLabel): \(communityReportsLine(summary))"
+            }
+            return text
+        case .community:
+            if let summary = communitySummary {
+                return "\(lang.scaleCommunityShortLabel) · \(confidenceWord) · \(communityReportsLine(summary))\n\(lang.scaleStatusUnconfirmedLabel)"
+            }
+            return lang.scaleCommunityAdvisoryLabel
+        case .locationOnly:
+            return "\(lang.scaleStatusUnconfirmedLabel) — \(lang.scaleLocationOnlyHintLabel)"
+        }
+    }
+
+    private func communityReportsLine(_ summary: WeighStationCommunitySummary) -> String {
+        "\(summary.recentCount) \(lang.scaleRecentReportsWordLabel) · \(timeAgoShort(summary.latestAt))"
+    }
+
+    /// Language-neutral age: "now" / "12m" / "3h".
+    private func timeAgoShort(_ date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "<1m" }
+        if interval < 3_600 { return "\(Int(interval / 60))m" }
+        return "\(Int(interval / 3_600))h"
+    }
+
+    private var confidenceWord: String {
+        switch communitySummary?.confidence {
+        case .high:         return lang.scaleConfidenceHighLabel
+        case .medium:       return lang.scaleConfidenceMediumLabel
+        case .low, .none:   return lang.scaleConfidenceLowLabel
+        }
     }
 
     @ViewBuilder
@@ -2179,59 +2274,29 @@ struct ScaleAlertBanner: View {
         }
     }
 
+    /// Scale semantics: CLOSED = green (keep rolling), OPEN = red (prepare to enter),
+    /// BYPASS = blue, MONITORING = amber, UNKNOWN = gray.
     private var statusColor: Color {
-        switch provenance {
-        case .official:
-            switch status {
-            case .open:       return AppTheme.Colors.danger
-            case .closed:     return AppTheme.Colors.success
-            case .monitoring: return AppTheme.Colors.warning
-            case .unknown:    return AppTheme.Colors.warning
-            }
-        case .community, .locationOnly:
-            return AppTheme.Colors.warning
+        switch status {
+        case .open:       return AppTheme.Colors.danger
+        case .closed:     return AppTheme.Colors.success
+        case .bypass:     return Color(hex: "#3b82f6")
+        case .monitoring: return AppTheme.Colors.warning
+        case .unknown:    return AppTheme.Colors.textSecondary
         }
     }
 
-    private var statusLabel: String {
-        switch provenance {
-        case .official:
-            switch status {
-            case .open:       return lang.scaleOpenLabel
-            case .closed:     return lang.scaleClosedLabel
-            case .monitoring: return lang.scaleMonitoringLabel
-            case .unknown:    return lang.scaleAheadLabel
-            }
-        case .community, .locationOnly:
-            return lang.scaleStatusUnconfirmedLabel
+    /// Dominant single word for the compact row (last word of the localized label).
+    private var statusWord: String {
+        func lastWord(_ label: String, _ fallback: String) -> String {
+            label.split(separator: " ").last.map(String.init) ?? fallback
         }
-    }
-
-    private var provenanceSubtitle: String {
-        switch provenance {
-        case .official(let source):
-            return "\(lang.scaleOfficialSourceLabel) · \(source)"
-        case .community:
-            if let hint = communityHint {
-                let word: String
-                switch hint {
-                case .open: word = lang.scaleOpenLabel.split(separator: " ").last.map(String.init) ?? "OPEN"
-                case .closed: word = lang.scaleClosedLabel.split(separator: " ").last.map(String.init) ?? "CLOSED"
-                case .monitoring: word = lang.scaleMonitoringLabel.split(separator: " ").last.map(String.init) ?? "MONITOR"
-                }
-                return "\(lang.scaleCommunityAdvisoryLabel) · \(word)"
-            }
-            return lang.scaleCommunityAdvisoryLabel
-        case .locationOnly:
-            return lang.scaleLocationOnlyHintLabel
-        }
-    }
-
-    private var provenanceColor: Color {
-        switch provenance {
-        case .official: return AppTheme.Colors.success
-        case .community: return Color(hex: "#f59e0b")
-        case .locationOnly: return AppTheme.Colors.textSecondary
+        switch status {
+        case .open:       return lastWord(lang.scaleOpenLabel, "OPEN")
+        case .closed:     return lastWord(lang.scaleClosedLabel, "CLOSED")
+        case .bypass:     return lastWord(lang.scaleBypassLabel, "BYPASS")
+        case .monitoring: return lastWord(lang.scaleMonitoringLabel, "MONITOR")
+        case .unknown:    return lastWord(lang.scaleUnknownLabel, "UNKNOWN")
         }
     }
 }

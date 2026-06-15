@@ -737,6 +737,9 @@ struct DriverWellnessInsightPayload: Encodable {
 struct WeighStationReportDetailsPayload: Encodable {
     let outcome: String?
     let source: String
+    /// Whether the driver's PrePass/bypass transponder was on when passing — crowdsourced hint for
+    /// other drivers. Stored inside the `details` jsonb, so no schema migration is needed.
+    var prepass: Bool? = nil
 }
 
 struct WeighStationReportPayload: Encodable {
@@ -780,6 +783,7 @@ struct WeighStationReportDetailsRecord: Decodable {
     let outcome: String?
     let confirmations: Int?
     let source: String?
+    let prepass: Bool?
 }
 
 struct WeighStationReportRecord: Decodable, Identifiable {

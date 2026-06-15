@@ -253,6 +253,7 @@ struct HorizonNavigationInfoStrip: View {
         switch scaleAlertStatus {
         case .open:       return Color(hex: "#ef4444")
         case .closed:     return Color(hex: "#22d474")
+        case .bypass:     return Color(hex: "#3b82f6")
         case .monitoring: return Color(hex: "#f59e0b")
         case .unknown:    return AppTheme.Colors.textSecondary
         }
@@ -262,6 +263,7 @@ struct HorizonNavigationInfoStrip: View {
         switch scaleAlertStatus {
         case .open:       return "OPEN"
         case .closed:     return "CLOSED"
+        case .bypass:     return "BYPASS"
         case .monitoring: return "MONITOR"
         case .unknown:    return "AHEAD"
         }

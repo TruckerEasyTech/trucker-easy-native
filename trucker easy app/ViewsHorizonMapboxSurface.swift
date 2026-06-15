@@ -22,6 +22,75 @@ extension MapStyleOption {
     }
 }
 
+// MARK: - Route-snapped location provider (native interpolated puck)
+
+/// Custom location/heading provider that feeds Mapbox v11's native puck with map-matched
+/// (route-snapped) positions. Mapbox then interpolates position + heading at frame rate
+/// (60fps) between our emits, so the puck glides instead of jumping once per GPS fix.
+/// We emit the route corridor bearing (not raw GPS course) so rotation stays stable at low speed.
+final class RouteSnapLocationProvider: NSObject, LocationProvider, HeadingProvider {
+    // Observers are retained by the SDK's signal adapters elsewhere; hold them weakly here
+    // so we never keep the map/location stack alive.
+    private let locationObservers = NSHashTable<AnyObject>.weakObjects()
+    private let headingObservers = NSHashTable<AnyObject>.weakObjects()
+
+    private var lastLocation: MapboxMaps.Location?
+    private var heading: MapboxMaps.Heading?
+
+    // MARK: LocationProvider
+
+    func getLastObservedLocation() -> MapboxMaps.Location? {
+        lastLocation
+    }
+
+    func addLocationObserver(for observer: LocationObserver) {
+        locationObservers.add(observer)
+    }
+
+    func removeLocationObserver(for observer: LocationObserver) {
+        locationObservers.remove(observer)
+    }
+
+    // MARK: HeadingProvider
+
+    var latestHeading: MapboxMaps.Heading? {
+        heading
+    }
+
+    func add(headingObserver: HeadingObserver) {
+        headingObservers.add(headingObserver)
+    }
+
+    func remove(headingObserver: HeadingObserver) {
+        headingObservers.remove(headingObserver)
+    }
+
+    // MARK: Feed
+
+    /// Push a new target sample. Mapbox interpolates between consecutive emits, so we only
+    /// emit once per GPS fix and the renderer produces the smooth in-between frames.
+    func emit(coordinate: CLLocationCoordinate2D, bearing: CLLocationDirection, speed: CLLocationSpeed) {
+        // `makeExtra` is internal to MapboxMaps; omitting `extra` makes the SDK default the
+        // accuracy authorization to `.fullAccuracy` (see Location.accuracyAuthorization),
+        // which is what we want for a real-GPS driven puck.
+        let loc = MapboxMaps.Location(
+            coordinate: coordinate,
+            speed: max(0, speed),
+            bearing: bearing
+        )
+        let newHeading = MapboxMaps.Heading(direction: bearing, accuracy: 5)
+        lastLocation = loc
+        heading = newHeading
+
+        for observer in locationObservers.allObjects {
+            (observer as? LocationObserver)?.onLocationUpdateReceived(for: [loc])
+        }
+        for observer in headingObservers.allObjects {
+            (observer as? HeadingObserver)?.onHeadingUpdate(newHeading)
+        }
+    }
+}
+
 // MARK: - Horizon Mapbox surface (MapboxMaps v11)
 
 /// Hosts `MapboxMaps.MapView` after SwiftUI assigns real bounds (avoids Metal {64×64} / width=0 glitches).
@@ -81,10 +150,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     var truckRoute: TruckRoute? = nil
     var routeQuantumLineAccent: Bool = false
     var isNavigating: Bool = false
+    /// When true (reroute in flight) the old route line is faded so the real GPS position is never
+    /// shown alongside an incompatible polyline.
+    var dimRoute: Bool = false
     var onStyleChange: ((MapStyleOption) -> Void)? = nil
     var onControlsReady: (((zoomIn: () -> Void, zoomOut: () -> Void, recenter: () -> Void)) -> Void)? = nil
     var mapControls: MapControlActions? = nil
     var truckStops: [TruckStopItem] = []
+    /// Sinalização viária no corredor da rota (semáforos + PARE) — só durante a navegação na cidade.
+    var routeSignage: [RouteSignageItem] = []
     var onTruckStopTapped: ((TruckStopItem) -> Void)? = nil
 
     private func activeRouteCoordinates() -> [CLLocationCoordinate2D]? {
@@ -96,16 +170,17 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     }
 
     private func routeFingerprint() -> String {
+        let dim = dimRoute ? 1 : 0
         if let tr = truckRoute {
-            return "tr:\(tr.coordinates.count):\(Int(tr.distanceMeters)):q\(routeQuantumLineAccent ? 1 : 0)"
+            return "tr:\(tr.coordinates.count):\(Int(tr.distanceMeters)):q\(routeQuantumLineAccent ? 1 : 0):d\(dim)"
         }
         if let r = route {
-            return "mk:\(r.polyline.pointCount):\(Int(r.distance))"
+            return "mk:\(r.polyline.pointCount):\(Int(r.distance)):d\(dim)"
         }
         return "none"
     }
 
-    /// Idle map shows truck puck; during navigation only the lead chevron on the route is shown.
+    /// Idle map shows the navigation-arrow puck; during navigation only the lead chevron on the route is shown.
     /// Mapbox requires attribution when their renderer is used; keep logo off the driving HUD (bottom-left, under chrome).
     private static func tuckMapboxOrnaments(_ mapView: MapboxMaps.MapView, navigating: Bool) {
         var options = mapView.ornaments.options
@@ -119,14 +194,18 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         mapView.ornaments.options = options
     }
 
-    /// Custom truck puck (red cab) — replaces Mapbox default blue dot.
-    private func applyUserLocationPuck(on mapView: MapboxMaps.MapView, navigating: Bool) {
+    /// Conventional navigation-arrow puck (Google Maps/Waze style) — replaces Mapbox default blue dot.
+    /// The puck is now the navigation cursor in BOTH states: during navigation it is fed
+    /// route-snapped locations by `RouteSnapLocationProvider`, so Mapbox interpolates it at 60fps
+    /// (no custom annotation needed). `.heading` bearing rotates the puck to the stable route
+    /// corridor heading we emit (not the jittery raw GPS course).
+    private func applyUserLocationPuck(on mapView: MapboxMaps.MapView, navigating _: Bool) {
         var puckConfig = Puck2DConfiguration()
         puckConfig.showsAccuracyRing = false
-        puckConfig.topImage = HorizonMapboxPinImages.userTruckPuckImage()
-        puckConfig.scale = .constant(navigating ? 1.08 : 1.0)
+        puckConfig.topImage = HorizonMapboxPinImages.userNavigationArrowPuckImage()
+        puckConfig.scale = .constant(1.0)
         mapView.location.options.puckType = .puck2D(puckConfig)
-        mapView.location.options.puckBearing = .course
+        mapView.location.options.puckBearing = .heading
         mapView.location.options.puckBearingEnabled = true
     }
 
@@ -158,7 +237,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             coords: activeRouteCoordinates(),
             fingerprint: routeFingerprint(),
             quantumAccent: routeQuantumLineAccent,
-            fitCameraToRoute: !isNavigating
+            fitCameraToRoute: !isNavigating,
+            dimmed: dimRoute
         )
         coordinator.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts)
         if let fullLoc = locationManager.currentLocation {
@@ -238,20 +318,35 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         let routeGeometryChanged = coord.lastRouteFingerprint != fp
         if routeGeometryChanged {
             coord.lastRouteFingerprint = fp
-            coord.resetCameraFollowThrottle()
+            // O anchor da polyline precisa reiniciar na nova geometria para o puck "grudar" na nova linha.
             coord.resetLeadArrowAnchor()
             if isNavigating {
-                coord.requestInitialRouteCameraFit()
+                // Navegando, a rota pode mudar (reroute, ou só o flag `dimRoute` ligando/desligando).
+                // Apenas redesenha a linha — NÃO reseta o FollowPuck nem dá fit-to-bounds. Qualquer um
+                // dos dois arranca a câmera para uma visão geral da rota inteira e parece "reiniciar".
+                coord.refreshRoute(
+                    mapView: mapView,
+                    coords: activeRouteCoordinates(),
+                    fingerprint: fp,
+                    quantumAccent: routeQuantumLineAccent,
+                    fitCameraToRoute: false,
+                    dimmed: dimRoute
+                )
+            } else {
+                // Parado (preview da rota): recentraliza na rota inteira, como antes.
+                coord.resetCameraFollowThrottle()
+                coord.refreshRoute(
+                    mapView: mapView,
+                    coords: activeRouteCoordinates(),
+                    fingerprint: fp,
+                    quantumAccent: routeQuantumLineAccent,
+                    fitCameraToRoute: true,
+                    dimmed: dimRoute
+                )
             }
-            coord.refreshRoute(
-                mapView: mapView,
-                coords: activeRouteCoordinates(),
-                fingerprint: fp,
-                quantumAccent: routeQuantumLineAccent,
-                fitCameraToRoute: !isNavigating
-            )
         }
 
+        // Fit único só quando a navegação COMEÇA (pedido no bootstrap) — nunca em reroute mid-trip.
         if isNavigating, coord.consumeInitialRouteCameraFit(),
            let coords = activeRouteCoordinates(), coords.count >= 2 {
             coord.fitCameraToRouteBounds(mapView: mapView, coords: coords)
@@ -270,17 +365,17 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         }
 
 
-        coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts)
+        coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts,
+                            signage: isNavigating ? routeSignage : [])
+        // Feed the native interpolated puck. During navigation it gets route-snapped samples
+        // (stable corridor bearing); idle it gets raw GPS. The custom lead-arrow annotation is
+        // gone — the puck IS the cursor now, so make sure it stays cleared.
+        coord.clearRouteNavigationArrow()
         if isNavigating, let coords = activeRouteCoordinates(), coords.count >= 2,
            let user = locationManager.currentLocation {
-            coord.refreshRouteNavigationArrow(
-                mapView: mapView,
-                coords: coords,
-                user: user,
-                quantumAccent: routeQuantumLineAccent
-            )
-        } else {
-            coord.clearRouteNavigationArrow()
+            coord.emitRouteSnappedLocation(coords: coords, user: user)
+        } else if let user = locationManager.currentLocation {
+            coord.emitRawLocation(user: user)
         }
 
         if let fullLoc = locationManager.currentLocation {
@@ -320,6 +415,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
     final class Coordinator {
         weak var mapView: MapboxMaps.MapView?
+        /// Native interpolated puck data source — fed route-snapped (or raw-GPS, idle) samples.
+        let snapProvider = RouteSnapLocationProvider()
+        private var snapProviderInstalled = false
         var onTruckStopTapped: ((TruckStopItem) -> Void)?
         var onStyleChange: ((MapStyleOption) -> Void)?
         var lastRouteFingerprint: String = ""
@@ -353,8 +451,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             guard followPuckActive else { return }
             var opts = FollowPuckViewportStateOptions()
             opts.zoom = navigationZoom
-            opts.pitch = 45
-            opts.bearing = .course
+            opts.pitch = 0
+            opts.bearing = .constant(0)   // north-up: zoom changes never re-introduce rotation
             let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
             followPuckState = state
             mapView.viewport.transition(to: state)
@@ -376,8 +474,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 mapView.mapboxMap.setCamera(to: CameraOptions(
                     center: c,
                     zoom: navigationZoom,
-                    bearing: smoothedRouteBearing,
-                    pitch: 45
+                    bearing: 0,   // north-up recenter (no rotation)
+                    pitch: 0
                 ))
             } else if let c = lastKnownCoordinate {
                 let z: CGFloat = mapView.mapboxMap.cameraState.zoom
@@ -390,8 +488,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 guard !followPuckActive else { return }
                 var opts = FollowPuckViewportStateOptions()
                 opts.zoom = navigationZoom
-                opts.pitch = 45
-                opts.bearing = .course
+                // North-up: the map never spins (Trucker Path behavior the user asked for). Only the
+                // puck arrow rotates to the heading; the map stays flat + north-fixed = stable, no jitter.
+                opts.pitch = 0
+                opts.bearing = .constant(0)
                 let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
                 followPuckState = state
                 followPuckActive = true
@@ -423,6 +523,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         private var routeArrowManager: PointAnnotationManager?
         private var truckStopManager: PointAnnotationManager?
         private var alertManager: PointAnnotationManager?
+        private var signageManager: PointAnnotationManager?
+        private var lastSignageFingerprint: Int?
+        /// Cache do ícone por tipo (semáforo / PARE) — 2 variações, não uma render por ponto.
+        private var signageImageCache: [String: PointAnnotation.Image] = [:]
         /// Evita reconstruir os pins quando a lista não mudou. `refreshPoints` roda a cada
         /// `updateUIView` (timer HOS 1Hz + GPS); sem isto, regenerava dezenas de imagens
         /// Core Graphics por frame e travava a main thread (UI/abas sem resposta).
@@ -440,6 +544,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
         private var smoothedRouteCoord: CLLocationCoordinate2D?
         private var smoothedRouteBearing: Double = 0
+        /// Last bearing emitted to the puck — reused when GPS course is invalid (stationary).
+        private var lastEmittedBearing: CLLocationDirection = 0
 
         var hasRouteNavigationAnchor: Bool { smoothedRouteCoord != nil }
 
@@ -460,13 +566,21 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         func clearLeadNavigationArrow() { clearRouteNavigationArrow() }
 
         func installManagers(on mapView: MapboxMaps.MapView) {
+            // Drive the native puck from our route-snapped provider (once — the override persists
+            // across style reloads). Mapbox interpolates between the samples we emit at 60fps.
+            if !snapProviderInstalled {
+                mapView.location.override(provider: snapProvider)
+                snapProviderInstalled = true
+            }
             routeLineManager = mapView.annotations.makePolylineAnnotationManager(id: "horizon-route")
             routeArrowManager = mapView.annotations.makePointAnnotationManager(id: "horizon-route-lead-arrow")
             truckStopManager = mapView.annotations.makePointAnnotationManager(id: "horizon-stops")
             alertManager = mapView.annotations.makePointAnnotationManager(id: "horizon-alerts")
+            signageManager = mapView.annotations.makePointAnnotationManager(id: "horizon-signage")
             // Managers recriados começam vazios → força refreshPoints a re-adicionar os pins.
             lastStopsFingerprint = nil
             lastAlertsFingerprint = nil
+            lastSignageFingerprint = nil
         }
 
         func refreshRoute(
@@ -474,7 +588,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             coords: [CLLocationCoordinate2D]?,
             fingerprint _: String,
             quantumAccent: Bool,
-            fitCameraToRoute: Bool
+            fitCameraToRoute: Bool,
+            dimmed: Bool = false
         ) {
             if routeLineManager == nil {
                 installManagers(on: mapView)
@@ -485,10 +600,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 routeArrowManager?.annotations = []
                 return
             }
+            // During a reroute the old line is faded out so it never reads as the active route.
+            let casingOpacity = dimmed ? 0.18 : 1.0
+            let mainOpacity = dimmed ? 0.22 : 1.0
+
             var casing = PolylineAnnotation(lineCoordinates: coords)
             casing.lineColor = StyleColor(HorizonRouteColors.routeCasingUI)
             casing.lineWidth = 18
             casing.lineJoin = LineJoin.round
+            casing.lineOpacity = casingOpacity
             casing.lineSortKey = 0
 
             var main = PolylineAnnotation(lineCoordinates: coords)
@@ -498,6 +618,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             main.lineColor = StyleColor(mainUIColor)
             main.lineWidth = quantumAccent ? 15 : 14
             main.lineJoin = LineJoin.round
+            main.lineOpacity = mainOpacity
             main.lineSortKey = 1
 
             mgr.annotations = [casing, main]
@@ -524,57 +645,46 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             mapView.mapboxMap.setCamera(to: CameraOptions(center: center, zoom: zoom, bearing: 0, pitch: 0))
         }
 
-        /// Single chevron snapped to the route polyline — camera follows it smoothly (no GPS puck).
-        func refreshRouteNavigationArrow(
-            mapView: MapboxMaps.MapView,
+        /// Snaps GPS onto the route polyline and feeds the native puck provider with the
+        /// route-snapped coordinate + stable corridor bearing. Mapbox interpolates between
+        /// emits at 60fps, so the puck (now the cursor) glides smoothly along the road.
+        /// `smoothedRouteCoord`/`smoothedRouteBearing` are still updated so `recenterCamera`
+        /// and `hasRouteNavigationAnchor` keep working.
+        func emitRouteSnappedLocation(
             coords: [CLLocationCoordinate2D],
-            user: CLLocation,
-            quantumAccent: Bool
+            user: CLLocation
         ) {
-            guard let arrowMgr = routeArrowManager else { return }
-            guard coords.count >= 2 else {
-                arrowMgr.annotations = []
-                return
-            }
-
-            let now = Date()
-            if let prev = lastRouteArrowUserLoc {
-                let dt = now.timeIntervalSince(lastRouteArrowUpdateAt)
-                if dt < 0.08 && user.distance(from: prev) < 1.5 { return }
-            }
-            lastRouteArrowUserLoc = user
-            lastRouteArrowUpdateAt = now
+            guard coords.count >= 2 else { return }
 
             guard let snap = PolylineLeadArrow.snappedPosition(
                 coords: coords,
                 user: user,
                 anchorIndex: &lastLeadArrowPolyIndex
-            ) else {
-                arrowMgr.annotations = []
-                return
-            }
+            ) else { return }
 
-            let alpha = 0.42
-            if let prev = smoothedRouteCoord {
-                smoothedRouteCoord = lerpCoordinate(prev, snap.coordinate, alpha: alpha)
-                smoothedRouteBearing = lerpAngle(smoothedRouteBearing, snap.bearingDegrees, alpha: alpha)
-            } else {
-                smoothedRouteCoord = snap.coordinate
-                smoothedRouteBearing = snap.bearingDegrees
-            }
+            // Track an anchor for recenter/hasAnchor consumers (kept in sync with the snap).
+            smoothedRouteCoord = snap.coordinate
+            smoothedRouteBearing = snap.bearingDegrees
 
-            guard let display = smoothedRouteCoord else { return }
+            let speed = max(0, user.speed)
+            snapProvider.emit(
+                coordinate: snap.coordinate,
+                bearing: snap.bearingDegrees,
+                speed: speed
+            )
+        }
 
-            let img = HorizonMapboxPinImages.routeDirectionArrowImage(quantumAccent: quantumAccent)
-            var ann = PointAnnotation(id: "horizon-route-nav-arrow", coordinate: display)
-            ann.image = img
-            ann.iconAnchor = .center
-            ann.iconRotate = smoothedRouteBearing
-            ann.iconSize = 1.55
-            ann.symbolSortKey = 20
-            arrowMgr.annotations = [ann]
-
-            // Camera follow is handled by FollowPuck viewport during navigation.
+        /// Feeds the native puck with raw GPS while idle (no route). Mapbox still interpolates
+        /// between fixes, so the idle puck stays smooth. Uses the last known bearing when the
+        /// GPS course is invalid (course < 0 when stationary).
+        func emitRawLocation(user: CLLocation) {
+            let bearing: CLLocationDirection = user.course >= 0 ? user.course : lastEmittedBearing
+            lastEmittedBearing = bearing
+            snapProvider.emit(
+                coordinate: user.coordinate,
+                bearing: bearing,
+                speed: max(0, user.speed)
+            )
         }
 
         private func lerpCoordinate(
@@ -598,7 +708,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             return out
         }
 
-        func refreshPoints(mapView: MapboxMaps.MapView, truckStops: [TruckStopItem], alerts: [MapAlert]) {
+        func refreshPoints(mapView: MapboxMaps.MapView, truckStops: [TruckStopItem], alerts: [MapAlert],
+                           signage: [RouteSignageItem] = []) {
+            refreshSignage(mapView: mapView, signage: signage)
             guard let stopsMgr = truckStopManager, let alertMgr = alertManager else { return }
 
             var stopsHasher = Hasher()
@@ -650,12 +762,82 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 alertMgr.annotations = alertAnns
             }
         }
+
+        /// Renderiza a sinalização do corredor (semáforos + PARE). Some ao afastar o zoom (rodovia)
+        /// para não poluir; navegando na cidade o zoom fica ~16.5, então aparece naturalmente.
+        func refreshSignage(mapView: MapboxMaps.MapView, signage: [RouteSignageItem]) {
+            guard let mgr = signageManager else { return }
+            let zoom = mapView.mapboxMap.cameraState.zoom
+            let visible = zoom >= 13.5 ? signage : []
+
+            var hasher = Hasher()
+            for s in visible { hasher.combine(s.id) }
+            let fp = hasher.finalize()
+            guard fp != lastSignageFingerprint else { return }
+            lastSignageFingerprint = fp
+
+            var anns: [PointAnnotation] = []
+            anns.reserveCapacity(visible.count)
+            for s in visible {
+                var ann = PointAnnotation(id: s.id, coordinate: s.coordinate)
+                ann.iconAnchor = .center
+                let key = s.kind.rawValue
+                if let img = signageImageCache[key] ?? HorizonMapboxPinImages.signageImage(for: s.kind) {
+                    signageImageCache[key] = img
+                    ann.image = img
+                }
+                anns.append(ann)
+            }
+            mgr.annotations = anns
+        }
     }
 }
 
 // MARK: - Raster images for point annotations
 
 private enum HorizonMapboxPinImages {
+    /// Ícone de sinalização viária no corredor da rota: semáforo (3 luzes) ou PARE (octógono vermelho).
+    static func signageImage(for kind: RouteSignageItem.Kind) -> PointAnnotation.Image? {
+        let size: CGFloat = 26
+        let uiImage = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { ctx in
+            let c = ctx.cgContext
+            switch kind {
+            case .trafficSignal:
+                let body = CGRect(x: size * 0.32, y: size * 0.12, width: size * 0.36, height: size * 0.76)
+                let path = UIBezierPath(roundedRect: body, cornerRadius: size * 0.10)
+                c.setFillColor(UIColor(white: 0.12, alpha: 1).cgColor); c.addPath(path.cgPath); c.fillPath()
+                c.setStrokeColor(UIColor.white.cgColor); c.setLineWidth(1.2); c.addPath(path.cgPath); c.strokePath()
+                let r = size * 0.085
+                let cx = body.midX
+                let colors: [UIColor] = [.systemRed, .systemYellow, .systemGreen]
+                for (i, col) in colors.enumerated() {
+                    let cy = body.minY + body.height * 0.24 + CGFloat(i) * body.height * 0.26
+                    c.setFillColor(col.cgColor)
+                    c.fillEllipse(in: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+                }
+            case .stop:
+                let cxp = size / 2, cyp = size / 2, rad = size * 0.46
+                let oct = UIBezierPath()
+                for i in 0..<8 {
+                    let a = CGFloat.pi / 8 + CGFloat(i) * (.pi / 4)
+                    let pt = CGPoint(x: cxp + rad * cos(a), y: cyp + rad * sin(a))
+                    if i == 0 { oct.move(to: pt) } else { oct.addLine(to: pt) }
+                }
+                oct.close()
+                c.setFillColor(UIColor.systemRed.cgColor); c.addPath(oct.cgPath); c.fillPath()
+                c.setStrokeColor(UIColor.white.cgColor); c.setLineWidth(1.4); c.addPath(oct.cgPath); c.strokePath()
+                let txt = "STOP" as NSString
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: size * 0.26, weight: .heavy),
+                    .foregroundColor: UIColor.white
+                ]
+                let ts = txt.size(withAttributes: attrs)
+                txt.draw(at: CGPoint(x: cxp - ts.width / 2, y: cyp - ts.height / 2), withAttributes: attrs)
+            }
+        }
+        return PointAnnotation.Image(image: uiImage, name: "signage-\(kind.rawValue)", sdf: false)
+    }
+
     /// Up-facing chevron (north at 0° rotation) tinted to match the active route line.
     static func routeDirectionArrowImage(quantumAccent: Bool) -> PointAnnotation.Image {
         let fill: UIColor = quantumAccent
@@ -748,20 +930,34 @@ private enum HorizonMapboxPinImages {
         }
     }
 
-    /// Red cab + white trailer puck (competitor-style); replaces default blue dot.
-    static func userTruckPuckImage() -> UIImage {
+    /// Conventional navigation arrow (drawn pointing up = 0° rotation = north).
+    /// Mapbox's Puck2D rotates it to the GPS course with built-in interpolation,
+    /// so it always points along the direction of travel — never sideways.
+    static func userNavigationArrowPuckImage() -> UIImage {
         let size = CGSize(width: 44, height: 44)
         return UIGraphicsImageRenderer(size: size).image { ctx in
             let c = ctx.cgContext
-            c.setShadow(offset: CGSize(width: 0, height: 2), blur: 3, color: UIColor.black.withAlphaComponent(0.45).cgColor)
+            // Outer white ring + shadow so the puck pops on any map style.
+            c.setShadow(offset: CGSize(width: 0, height: 2), blur: 4, color: UIColor.black.withAlphaComponent(0.45).cgColor)
             c.setFillColor(UIColor.white.cgColor)
-            c.fill(CGRect(x: 8, y: 14, width: 18, height: 14))
-            c.setStrokeColor(UIColor(white: 0.85, alpha: 1).cgColor)
-            c.setLineWidth(1)
-            c.stroke(CGRect(x: 8, y: 14, width: 18, height: 14))
-            c.setFillColor(UIColor(red: 0.86, green: 0.15, blue: 0.12, alpha: 1).cgColor)
-            c.fill(CGRect(x: 24, y: 16, width: 14, height: 12))
+            c.fillEllipse(in: CGRect(x: 3, y: 3, width: 38, height: 38))
             c.setShadow(offset: .zero, blur: 0, color: nil)
+            // Inner BLUE disc — deliberately a different hue from the ORANGE route line so the cursor
+            // reads as a distinct arrow and never blends into "a line of the same color" behind it.
+            let puckBlue = UIColor(red: 0.13, green: 0.45, blue: 0.96, alpha: 1)
+            c.setFillColor(puckBlue.cgColor)
+            c.fillEllipse(in: CGRect(x: 6, y: 6, width: 32, height: 32))
+            // White chevron pointing forward (up at 0° rotation; Mapbox rotates it to the heading).
+            c.translateBy(x: size.width / 2, y: size.height / 2)
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: 0, y: -11))
+            path.addLine(to: CGPoint(x: 8.5, y: 9))
+            path.addLine(to: CGPoint(x: 0, y: 3.5))
+            path.addLine(to: CGPoint(x: -8.5, y: 9))
+            path.close()
+            c.setFillColor(UIColor.white.cgColor)
+            c.addPath(path.cgPath)
+            c.fillPath()
         }
     }
 

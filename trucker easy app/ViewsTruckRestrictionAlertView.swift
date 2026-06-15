@@ -11,7 +11,7 @@ import MapKit
 
 // MARK: - Truck Restriction Warning Model
 struct TruckRestrictionWarning: Identifiable, Equatable {
-    let id = UUID()
+    let id: String
     let type: WarningType
     let message: String
     var coordinate: CLLocationCoordinate2D?
@@ -43,11 +43,24 @@ struct TruckRestrictionWarning: Identifiable, Equatable {
         }
     }
     
-    // Inicializador direto
-    init(type: WarningType, message: String, coordinate: CLLocationCoordinate2D?) {
+    // Inicializador direto.
+    // `stableKey` sobrepõe a identidade derivada para warnings cuja `coordinate` é a posição
+    // AO VIVO do caminhão (violações de compliance) — sem ele o id mudaria a cada fix de GPS e o
+    // "fechar" (X) nunca grudaria. Notices fixos na rota omitem `stableKey` e usam (type|message|≈coord).
+    init(type: WarningType, message: String, coordinate: CLLocationCoordinate2D?, stableKey: String? = nil) {
         self.type = type
         self.message = message
         self.coordinate = coordinate
+        self.id = stableKey ?? Self.makeStableID(type: type, message: message, coordinate: coordinate)
+    }
+
+    private static func makeStableID(type: WarningType, message: String, coordinate: CLLocationCoordinate2D?) -> String {
+        guard let c = coordinate else { return "\(type.rawValue)|\(message)" }
+        // Bucket de ~111 m: uma restrição fixa mantém o mesmo id entre re-avaliações, enquanto duas
+        // restrições distintas do mesmo tipo continuam separadas (segurança: nunca fundir 2 pontes).
+        let lat = (c.latitude * 1000).rounded() / 1000
+        let lon = (c.longitude * 1000).rounded() / 1000
+        return "\(type.rawValue)|\(message)|\(lat)|\(lon)"
     }
 
     static func == (lhs: TruckRestrictionWarning, rhs: TruckRestrictionWarning) -> Bool {
@@ -172,7 +185,7 @@ struct TruckRestrictionAlertView: View {
 struct TruckRestrictionsOverlay: View {
     let warnings: [TruckRestrictionWarning]
     let currentLocation: CLLocation?
-    @Binding var dismissedWarningIds: Set<UUID>
+    @Binding var dismissedWarningIds: Set<String>
     
     var body: some View {
         VStack(spacing: 12) {
@@ -227,12 +240,12 @@ struct TruckRestrictionsOverlay: View {
 @MainActor
 class TruckRestrictionWarningManager {
     var activeWarnings: [TruckRestrictionWarning] = []
-    var dismissedWarningIds: Set<UUID> = []
+    var dismissedWarningIds: Set<String> = []
     
     private let warningDistance: Double = 5000
     private let regulationRefreshInterval: TimeInterval = 300
     private let regulationRefreshDistanceMeters: Double = 20_000
-    private var lastAnnouncedId: UUID?
+    private var lastAnnouncedId: String?
     private var currentRoute: TruckRoute?
     private var currentSpecs: TruckSpecifications?
     private var currentRegulations: RegulationProfile = .generic

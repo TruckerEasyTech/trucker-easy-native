@@ -44,6 +44,15 @@ SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 PAUSE_SECONDS = float(os.environ.get("OVERPASS_PAUSE_SECONDS", "25"))
 BATCH_SIZE = int(os.environ.get("SUPABASE_BATCH_SIZE", "200"))
 
+# Road signage (traffic signals + stop signs) for in-city route-aware navigation.
+# OPT-IN: these nodes are EXTREMELY dense (millions across US+CA). Enable only when ingesting
+# the metro/city tiles you actually navigate, never for a nationwide sweep, or it will blow up
+# the poi_places table and trip Overpass timeouts. Set INGEST_SIGNAGE=1 to include them.
+INGEST_SIGNAGE = os.environ.get("INGEST_SIGNAGE", "0").lower() in ("1", "true", "yes")
+SIGNAGE_QUERY_LINES = """  node["highway"="traffic_signals"]({south},{west},{north},{east});
+  node["highway"="stop"]({south},{west},{north},{east});
+"""
+
 OVERPASS_QUERY = """
 [out:json][timeout:180];
 (
@@ -93,6 +102,10 @@ def classify_poi(tags: dict[str, str]) -> str | None:
         return "truck_stop"
     if tags.get("highway") == "services" and tags.get("hgv") == "yes":
         return "services"
+    if tags.get("highway") == "traffic_signals":
+        return "traffic_signals"
+    if tags.get("highway") == "stop":
+        return "stop"
     if tags.get("amenity") == "fuel":
         name = tags.get("name") or tags.get("brand") or tags.get("operator") or ""
         network = detect_network(name, tags.get("brand"), tags.get("operator"))
@@ -154,7 +167,12 @@ def element_to_row(el: dict[str, Any], country: str) -> dict[str, Any] | None:
 
 def fetch_overpass(bbox: list[float]) -> dict[str, Any]:
     south, west, north, east = bbox
-    query = OVERPASS_QUERY.format(
+    template = OVERPASS_QUERY
+    if INGEST_SIGNAGE:
+        # Inject the signage node queries just before the union's closing "\n);" (the only place
+        # ");" sits at the start of a line — every query line ends with ");" instead).
+        template = template.replace("\n);", "\n" + SIGNAGE_QUERY_LINES + ");", 1)
+    query = template.format(
         south=south, west=west, north=north, east=east
     )
     headers = {"User-Agent": "TruckerEasyPOIIngest/1.0 (contact: ops@truckereasy.com)"}

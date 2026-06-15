@@ -100,6 +100,7 @@ struct HorizonView: View {
     @State private var isLoadingNearby = false
 
     @State private var truckStopService = TruckStopService.shared
+    @State private var routeSignageService = RouteSignageService.shared
     @State private var showingTruckStops = false
     @State private var selectedTruckStop: TruckStopItem? = nil
     @State private var showingTruckStopDetail = false
@@ -142,13 +143,10 @@ struct HorizonView: View {
     @State private var isCalculatingRoute = false
     @State private var routeError: String?
     @State private var showingRouteError = false
-    @State private var routingNotice: String?
-    @State private var showingRoutingNotice = false
     @AppStorage("truckSafeOnlyMode") private var truckSafeOnlyMode = AppAccessPolicy.enforceTruckOnlyRouting
     @State private var pendingFallbackRoute: TruckRoute?
     @State private var pendingFallbackProvider: RoutingService.RoutingProvider = .unknown
     @State private var showingFallbackConfirmation = false
-    @State private var hasAcceptedFallbackThisSession = false
 
     @State private var bottomSheetExpanded = false
     @State private var launchSafeScreenHeight: CGFloat = UIScreen.main.bounds.height
@@ -164,9 +162,48 @@ struct HorizonView: View {
     @State private var navigationPOIsHidden = false
 
     /// POIs on map (always during navigation unless driver taps Hide).
+    ///
+    /// Trucker Path–style: during navigation we keep POIs visible in a ~40 mi window
+    /// AHEAD of the driver (truck stops, rest areas, weigh, fuel, repair), prioritising
+    /// those on/near the heading and nearest first, then cap the count so Mapbox stays
+    /// smooth on the 8GB M1. We never auto-hide here — only the explicit "Hide POIs"
+    /// toggle clears the layer. Selection updates as the rig advances because the source
+    /// list (`nearbyStops`) is refreshed every ~2 km while navigating.
     private var mapTruckStopsForDisplay: [TruckStopItem] {
-        navigationPOIsHidden ? [] : truckStopService.nearbyStops
+        guard !navigationPOIsHidden else { return [] }
+        let stops = truckStopService.nearbyStops
+        guard !stops.isEmpty else { return [] }
+
+        // Idle: keep the nearest cluster around the rig so the map isn't bare.
+        guard isNavigating, let loc = locationManager.currentLocation else {
+            return Array(
+                stops.sorted { $0.distanceMeters < $1.distanceMeters }
+                    .prefix(Self.idlePoiDisplayCap)
+            )
+        }
+
+        let aheadWindowMeters = 64_373.0 // ~40 mi lookahead corridor
+        let heading = locationManager.currentHeading?.trueHeading
+        let origin = loc.coordinate
+
+        let candidates = stops.filter { stop in
+            guard stop.distanceMeters <= aheadWindowMeters else { return false }
+            // Anything very close stays (could be just ahead even if bearing is noisy at low speed).
+            if stop.distanceMeters <= 1_200 { return true }
+            guard let heading else { return true }
+            let diff = abs(angleDeltaDegrees(heading, origin.bearing(to: stop.coordinate)))
+            return diff <= 80 // keep the corridor ahead; drop POIs behind the driver
+        }
+
+        return Array(
+            candidates.sorted { $0.distanceMeters < $1.distanceMeters }
+                .prefix(Self.navigationPoiDisplayCap)
+        )
     }
+
+    /// Pin caps keep Mapbox annotation churn cheap on the 8GB M1.
+    private static let navigationPoiDisplayCap = 20
+    private static let idlePoiDisplayCap = 24
 
     /// Upcoming truck stops + weigh ahead (Trucker Path–style corridor rail).
     private var corridorRailItems: [HorizonCorridorRailItem] {
@@ -309,6 +346,9 @@ struct HorizonView: View {
     @State private var scaleAlertGovSiteOpen: Bool?
     @State private var scaleAlertProvenance: WeighStationStatusProvenance = .locationOnly
     @State private var scaleAlertCommunityHint: WeighStationStatus?
+    @State private var scaleAlertCommunitySummary: WeighStationCommunitySummary?
+    /// Staged alerts already fired ("stationKey#tier") — first at 50 mi, update at 20 mi, final at 5 mi.
+    @State private var scaleAlertNotifiedTierKeys: Set<String> = []
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
@@ -689,8 +729,6 @@ struct HorizonView: View {
             }
             .alert(lang.horizonRouteErrorTitle, isPresented: $showingRouteError) { Button(lang.okLabel) {} }
                 message: { Text(routeError ?? lang.horizonRouteErrorCouldNotCalculate) }
-            .alert(lang.horizonRoutingNoticeTitle, isPresented: $showingRoutingNotice) { Button(lang.okLabel) {} }
-                message: { Text(routingNotice ?? lang.horizonRoutingNoticeDefault) }
             .confirmationDialog(lang.horizonTruckSafeUnavailableTitle, isPresented: $showingFallbackConfirmation, titleVisibility: .visible) {
                 Button(lang.horizonContinueWithFallbackGPS) { applyPendingFallbackRoute() }
                 Button(lang.cancelLabel, role: .cancel) { pendingFallbackRoute = nil; pendingFallbackProvider = .unknown; bottomSheetExpanded = false }
@@ -745,11 +783,13 @@ struct HorizonView: View {
                         truckRoute: truckRoute,
                         routeQuantumLineAccent: routeQuantumMapLineAccent,
                         isNavigating: isNavigating,
+                        dimRoute: navigationEngine.shouldDimOldRoute,
                         onStyleChange: { selectedMapStyle = $0 },
                         onControlsReady: { zoomIn, zoomOut, recenter in
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
                         truckStops: isNavigating ? mapTruckStopsForDisplay : [],
+                        routeSignage: isNavigating ? routeSignageService.onRouteSignage : [],
                         onTruckStopTapped: { stop in selectedTruckStop = stop }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -827,6 +867,7 @@ struct HorizonView: View {
                     step: routeSteps[safeStepIndex],
                     nextStepInstruction: routeSteps.indices.contains(safeStepIndex + 1)
                         ? routeSteps[safeStepIndex + 1].instructions : nil,
+                    liveManeuverDistanceMeters: navigationEngine.distanceToNextStep,
                     formatDistance: { m in regionalSettings.formatDistance(m) },
                     roadLine: navigationRoadLine,
                     totalDistanceText: regionalSettings.formatDistance(activeDistanceMeters),
@@ -979,6 +1020,7 @@ struct HorizonView: View {
                     onDismiss: { withAnimation { showingScaleAlert = false } },
                     provenance: scaleAlertProvenance,
                     communityHint: scaleAlertCommunityHint,
+                    communitySummary: scaleAlertCommunitySummary,
                     onReport: { submitScaleReport($0) },
                     onMoreDetails: { openScaleDetailsSheet() }
                 )
@@ -1017,6 +1059,7 @@ struct HorizonView: View {
                                  onDismiss: { withAnimation { showingScaleAlert = false } },
                                  provenance: scaleAlertProvenance,
                                  communityHint: scaleAlertCommunityHint,
+                                 communitySummary: scaleAlertCommunitySummary,
                                  onReport: { submitScaleReport($0) },
                                  onMoreDetails: { openScaleDetailsSheet() })
                     .frame(maxWidth: 320)
@@ -1620,6 +1663,8 @@ struct HorizonView: View {
         locationManager.setNavigationMode(navigating)
         if !navigating {
             lastScaleVoiceKey = nil
+            scaleAlertNotifiedTierKeys.removeAll()
+            routeSignageService.clear()
             hosContext.endRouteSession()
             return
         }
@@ -1654,6 +1699,9 @@ struct HorizonView: View {
         navigationEngine.updateLocation(loc)
         restrictionWarningManager.updateLocation(loc)
         truckWarnings = restrictionWarningManager.activeWarnings
+        if isNavigating, let coords = truckRoute?.coordinates, coords.count >= 2 {
+            routeSignageService.refresh(location: loc, routeCoordinates: coords)
+        }
         evaluateTruckSpeedCompliance(using: loc)
         evaluateGeofenceEvents(using: loc)
         hosContext.feedSpeed(fleetTelemetryService.preferredSpeedMph(gpsSpeedMph: gpsSpeedMph))
@@ -1779,6 +1827,10 @@ struct HorizonView: View {
             : activeDurationSeconds
         guard etaSeconds > 60 else { return }
 
+        // Mantém o ETA vivo no contexto DOT: o chip DOT (barra inferior + pill) muda de cor
+        // (verde → âmbar → vermelho) quando a chegada estoura o limite de direção. Sem modal.
+        hosContext.beginRouteSession(estimatedDrivingSeconds: etaSeconds)
+
         let margin = hosContext.drivingRemaining - etaSeconds
         let level = margin <= 0 ? 2 : (margin < 1800 ? 1 : 0)
         guard hosEtaAnnouncedLevel != level else { return }
@@ -1792,11 +1844,8 @@ struct HorizonView: View {
         default: phrase = lang.hosEtaComfortablePhrase(spareMinutes: minutes)
         }
         VoiceNavigationManager.shared.announceHosEta(phrase, lang: lang)
-        if level == 2 {
-            // Estoura o limite: além da voz, aviso visual.
-            routingNotice = phrase
-            showingRoutingNotice = true
-        }
+        // Sem pop-up: a violação prevista aparece de forma discreta no chip DOT
+        // (cor vermelha via DotHosContext.barColor) e nos detalhes do DotHosDetailSheet.
         #if DEBUG
         print("[HOS-ETA] level=\(level) marginMin=\(Int(margin / 60)) etaMin=\(Int(etaSeconds / 60))")
         #endif
@@ -2254,6 +2303,8 @@ struct HorizonView: View {
                 #if DEBUG
                 print("[Route] Reroute skipped — cooldown active (\(Int(30 - Date().timeIntervalSince(lastRerouteAt)))s remaining)")
                 #endif
+                // Re-arm detection and restore the route line so we retry on the next divergence.
+                navigationEngine.cancelPendingReroute()
                 return
             }
             lastRerouteAt = Date()
@@ -2261,6 +2312,7 @@ struct HorizonView: View {
                 #if DEBUG
                 print("[Route] Reroute skipped — destination coordinate unavailable")
                 #endif
+                navigationEngine.cancelPendingReroute()
                 return
             }
             // #region agent log
@@ -2301,17 +2353,10 @@ struct HorizonView: View {
         destinationCoordinate: CLLocationCoordinate2D? = nil
     ) {
         bottomSheetExpanded = false
-        let isFirstFallback = !hasAcceptedFallbackThisSession
-        hasAcceptedFallbackThisSession = true
-        if isFirstFallback {
-            if route.provenance?.quantumStopOrderFromAPI == true {
-                routingNotice =
-                    lang.horizonRoutingNoticeQuantum(provider: provider.rawValue, solver: route.provenance?.solverUsed ?? "solver")
-            } else {
-                routingNotice = lang.horizonRoutingNoticeSimple(provider: provider.rawValue)
-            }
-            showingRoutingNotice = true
-        }
+        // Sem modal "Routing Notice": fallback de provider é aplicado silenciosamente.
+        #if DEBUG
+        print("[Route] fallback provider applied: \(provider.rawValue)")
+        #endif
         applyRoute(route, destinationCoordinate: destinationCoordinate)
     }
 
@@ -2319,7 +2364,6 @@ struct HorizonView: View {
     private func applyPendingFallbackRoute() {
         guard let pending = pendingFallbackRoute else { return }
         pendingFallbackRoute = nil; pendingFallbackProvider = .unknown
-        hasAcceptedFallbackThisSession = true
         applyRoute(pending)
     }
 
@@ -2506,15 +2550,29 @@ struct HorizonView: View {
         scaleAlertStatus = resolved.displayStatus
         scaleAlertProvenance = resolved.provenance
         scaleAlertCommunityHint = resolved.communityHint ?? status
+        scaleAlertCommunitySummary = resolved.communitySummary
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     /// Auto scale detection — no driver action. Wider corridor + GPS course when navigating.
+    /// Navigating: 50 mi alert horizon so staged notifications (50 → 20 → 5 mi) can fire.
     private func scaleDetectionProfile(for location: CLLocation) -> (alertMeters: Double, searchMeters: Double, headingTolerance: Double) {
         if isNavigating {
-            return (12_000, 48_000, 100)
+            return (80_467, 96_561, 100)
         }
         return (5_000, 24_140, 70)
+    }
+
+    /// Staged alert tier: 3 = first heads-up (≤50 mi), 2 = update (≤20 mi), 1 = final (≤5 mi).
+    /// Idle uses a single close-range tier. Returns nil when out of alert range.
+    private func scaleAlertTier(forDistanceMeters meters: Double) -> Int? {
+        if isNavigating {
+            if meters <= 8_047 { return 1 }
+            if meters <= 32_187 { return 2 }
+            if meters <= 80_467 { return 3 }
+            return nil
+        }
+        return meters <= 5_000 ? 1 : nil
     }
 
     private func isScaleAhead(
@@ -2653,8 +2711,20 @@ struct HorizonView: View {
                 scaleAlertStatus = resolved.displayStatus
                 scaleAlertProvenance = resolved.provenance
                 scaleAlertCommunityHint = resolved.communityHint
-                withAnimation(.spring(response: 0.4)) { showingScaleAlert = true }
-                if isNavigating {
+                scaleAlertCommunitySummary = resolved.communitySummary
+
+                // Staged notifications: fire once per tier (50 / 20 / 5 mi), never repeat
+                // inside a tier — a dismissed banner stays dismissed until the next tier.
+                let tier = scaleAlertTier(forDistanceMeters: distMeters)
+                let stationKey = poiPlaceId?.uuidString ?? stationName
+                let tierKey = "\(stationKey)#\(tier ?? 0)"
+                let isNewTier = tier != nil && !scaleAlertNotifiedTierKeys.contains(tierKey)
+                if isNewTier {
+                    if scaleAlertNotifiedTierKeys.count > 64 { scaleAlertNotifiedTierKeys.removeAll() }
+                    scaleAlertNotifiedTierKeys.insert(tierKey)
+                    withAnimation(.spring(response: 0.4)) { showingScaleAlert = true }
+                }
+                if isNavigating, isNewTier {
                     let distText = regionalSettings.formatDistance(distMeters)
                     let statusNote: String?
                     switch scaleAlertProvenance {
@@ -2662,7 +2732,7 @@ struct HorizonView: View {
                         switch scaleAlertStatus {
                         case .open: statusNote = lang.voiceScaleOfficialOpenPhrase
                         case .closed: statusNote = lang.voiceScaleOfficialClosedPhrase
-                        case .monitoring, .unknown: statusNote = nil
+                        case .bypass, .monitoring, .unknown: statusNote = nil
                         }
                     case .community:
                         if let hint = scaleAlertCommunityHint {
@@ -2677,9 +2747,8 @@ struct HorizonView: View {
                     case .locationOnly:
                         statusNote = lang.voiceScaleUnconfirmedPhrase
                     }
-                    let voiceKey = "\(poiPlaceId?.uuidString ?? stationName)-\(Int(distMeters / 800))"
-                    if lastScaleVoiceKey != voiceKey {
-                        lastScaleVoiceKey = voiceKey
+                    if lastScaleVoiceKey != tierKey {
+                        lastScaleVoiceKey = tierKey
                         VoiceNavigationManager.shared.announceScaleAheadWithStatus(
                             stationName: stationName,
                             distanceText: distText,
@@ -2917,10 +2986,6 @@ struct HorizonView: View {
     ) {
         guard SupabaseClient.shared.isAuthenticated,
               let driverId = SupabaseClient.shared.currentDriverId else {
-            routingNotice = regionalSettings.currentLanguage == .portuguese
-                ? "Faça login para enviar status de parking."
-                : "Sign in to report parking status."
-            showingRoutingNotice = true
             #if DEBUG
             print("[ParkingReport] skipped remote sync: driver is not authenticated")
             #endif
@@ -2963,12 +3028,9 @@ struct HorizonView: View {
                 do {
                     try await SupabaseClient.shared.submitRoadReport(fallback)
                 } catch {
-                    await MainActor.run {
-                        routingNotice = regionalSettings.currentLanguage == .portuguese
-                            ? "Não foi possível enviar o status agora. Tente novamente depois."
-                            : "Could not send status right now. Try again later."
-                        showingRoutingNotice = true
-                    }
+                    #if DEBUG
+                    print("[ParkingReport] fallback sync failed: \(error.localizedDescription)")
+                    #endif
                 }
                 #if DEBUG
                 print("[ParkingReport] structured sync failed, fallback attempted: \(error.localizedDescription)")
@@ -3485,8 +3547,7 @@ struct HorizonView: View {
             } catch {
                 if !isReroute { isCalculatingRoute = false }
                 if isReroute {
-                    routingNotice = lang.horizonRerouteFailedMessage
-                    showingRoutingNotice = true
+                    // Sem modal: reroute falhou mantém a rota atual e tenta de novo no cooldown.
                     if case RoutingServiceError.allProvidersFailed = error {
                         lastRerouteAt = Date().addingTimeInterval(150)
                     }

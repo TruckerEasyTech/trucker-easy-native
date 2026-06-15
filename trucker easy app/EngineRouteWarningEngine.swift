@@ -94,7 +94,10 @@ struct RouteWarningEngine {
             return TruckRestrictionWarning(
                 type: type,
                 message: message,
-                coordinate: location
+                coordinate: location,
+                // Compliance é sobre o caminhão (não um ponto da rota): a `coordinate` é a posição
+                // ao vivo. Chave estável por tipo+mensagem para o dismiss persistir entre GPS ticks.
+                stableKey: "compliance|\(type.rawValue)|\(message)"
             )
         }
     }

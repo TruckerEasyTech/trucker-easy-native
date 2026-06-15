@@ -192,7 +192,9 @@ final class DotHosContext {
     private var routeAwareBarColor: Color {
         let remaining = criticalRemainingSeconds
         let eta = routeEtaSeconds
-        if isActiveViolation || remaining < eta * 0.12 { return Color(hex: "#ef4444") }
+        // Vermelho fixo quando a chegada prevista estoura o tempo legal restante
+        // (substitui o antigo modal "Routing Notice" — indicador discreto, sem pop-up).
+        if isActiveViolation || remaining < eta { return Color(hex: "#ef4444") }
         if needsMandatoryBreak || remaining < eta * 1.30 { return Color(hex: "#f59e0b") }
         return Color(hex: "#22c55e")
     }
@@ -444,6 +446,75 @@ struct DotHosBar: View {
             withAnimation(.easeInOut(duration: min(0.45, interval * 0.8))) { flash.toggle() }
         }
         if let ft = flashTimer { RunLoop.main.add(ft, forMode: .common) }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: 3b — DotHosMiniWidget  (compact glance widget, top-right while navigating)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compact always-visible HOS widget for the navigation screen (top-right corner).
+/// Shows Drive and Shift time remaining, each with a thin progress bar
+/// (green = drive, amber = shift). Read-only — no tap, no pop-ups.
+struct DotHosMiniWidget: View {
+    let hosContext: DotHosContext
+
+    private let driveColor = Color(hex: "#22c55e")
+    private let shiftColor = Color(hex: "#f59e0b")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            miniRow(
+                time: hosContext.formattedDrivingRemaining,
+                label: "drive",
+                timeColor: driveColor,
+                barColor: driveColor,
+                fraction: hosContext.drivingRemainingFraction
+            )
+            miniRow(
+                time: hosContext.formattedShiftRemaining,
+                label: "shift",
+                timeColor: Color(hex: "#cbd5e1"),
+                barColor: shiftColor,
+                fraction: hosContext.shiftRemainingFraction
+            )
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(width: 96)
+        .background(Color(hex: "#0d1117").opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Drive time left \(hosContext.formattedDrivingRemaining), shift time left \(hosContext.formattedShiftRemaining)")
+    }
+
+    private func miniRow(time: String, label: String, timeColor: Color, barColor: Color, fraction: Double) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(time)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(timeColor)
+                Text(label)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(Color(hex: "#94a3b8"))
+                Spacer(minLength: 0)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.10))
+                    Capsule()
+                        .fill(barColor)
+                        .frame(width: max(3, geo.size.width * CGFloat(min(1, max(0, fraction)))))
+                }
+            }
+            .frame(height: 3)
+        }
     }
 }
 

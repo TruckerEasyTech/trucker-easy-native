@@ -397,7 +397,7 @@ struct TruckNavigationMapView: View {
     
     // MARK: - Warning Callbacks
     
-    @State private var lastAnnouncedWarningId: UUID?
+    @State private var lastAnnouncedWarningId: String?
     
     private func handleNewWarnings(_ warnings: [TruckRestrictionWarning]) {
         guard let location = locationManager.currentLocation else { return }

@@ -692,6 +692,127 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    var scaleBypassLabel: String {
+        // "Bypass" is a road term — keep in English across languages
+        switch self {
+        case .english:      return "Scale BYPASS"
+        case .portuguese:   return "Balança BYPASS"
+        case .spanish:      return "Báscula BYPASS"
+        case .spanishLatam: return "Báscula BYPASS"
+        case .french:       return "Balance BYPASS"
+        case .german:       return "Waage BYPASS"
+        case .hindi:        return "तराजू BYPASS"
+        case .arabic:       return "الميزان BYPASS"
+        case .russian:      return "Весовая BYPASS"
+        case .polish:       return "Waga BYPASS"
+        }
+    }
+
+    var scaleUnknownLabel: String {
+        switch self {
+        case .english:      return "Status UNKNOWN"
+        case .portuguese:   return "Status DESCONHECIDO"
+        case .spanish:      return "Estado DESCONOCIDO"
+        case .spanishLatam: return "Estado DESCONOCIDO"
+        case .french:       return "Statut INCONNU"
+        case .german:       return "Status UNBEKANNT"
+        case .hindi:        return "स्थिति अज्ञात"
+        case .arabic:       return "الحالة مجهولة"
+        case .russian:      return "Статус НЕИЗВЕСТЕН"
+        case .polish:       return "Status NIEZNANY"
+        }
+    }
+
+    var scaleCommunityShortLabel: String {
+        switch self {
+        case .english:      return "Community"
+        case .portuguese:   return "Comunidade"
+        case .spanish:      return "Comunidad"
+        case .spanishLatam: return "Comunidad"
+        case .french:       return "Communauté"
+        case .german:       return "Community"
+        case .hindi:        return "समुदाय"
+        case .arabic:       return "المجتمع"
+        case .russian:      return "Сообщество"
+        case .polish:       return "Społeczność"
+        }
+    }
+
+    var scaleNoDataShortLabel: String {
+        switch self {
+        case .english:      return "No data"
+        case .portuguese:   return "Sem dados"
+        case .spanish:      return "Sin datos"
+        case .spanishLatam: return "Sin datos"
+        case .french:       return "Aucune donnée"
+        case .german:       return "Keine Daten"
+        case .hindi:        return "डेटा नहीं"
+        case .arabic:       return "لا بيانات"
+        case .russian:      return "Нет данных"
+        case .polish:       return "Brak danych"
+        }
+    }
+
+    var scaleConfidenceHighLabel: String {
+        switch self {
+        case .english:      return "High"
+        case .portuguese:   return "Alta"
+        case .spanish:      return "Alta"
+        case .spanishLatam: return "Alta"
+        case .french:       return "Élevée"
+        case .german:       return "Hoch"
+        case .hindi:        return "उच्च"
+        case .arabic:       return "عالية"
+        case .russian:      return "Высокая"
+        case .polish:       return "Wysoka"
+        }
+    }
+
+    var scaleConfidenceMediumLabel: String {
+        switch self {
+        case .english:      return "Medium"
+        case .portuguese:   return "Média"
+        case .spanish:      return "Media"
+        case .spanishLatam: return "Media"
+        case .french:       return "Moyenne"
+        case .german:       return "Mittel"
+        case .hindi:        return "मध्यम"
+        case .arabic:       return "متوسطة"
+        case .russian:      return "Средняя"
+        case .polish:       return "Średnia"
+        }
+    }
+
+    var scaleConfidenceLowLabel: String {
+        switch self {
+        case .english:      return "Low"
+        case .portuguese:   return "Baixa"
+        case .spanish:      return "Baja"
+        case .spanishLatam: return "Baja"
+        case .french:       return "Faible"
+        case .german:       return "Niedrig"
+        case .hindi:        return "कम"
+        case .arabic:       return "منخفضة"
+        case .russian:      return "Низкая"
+        case .polish:       return "Niska"
+        }
+    }
+
+    var scaleRecentReportsWordLabel: String {
+        switch self {
+        case .english:      return "recent reports"
+        case .portuguese:   return "reportes recentes"
+        case .spanish:      return "reportes recientes"
+        case .spanishLatam: return "reportes recientes"
+        case .french:       return "signalements récents"
+        case .german:       return "aktuelle Meldungen"
+        case .hindi:        return "हाल की रिपोर्टें"
+        case .arabic:       return "بلاغات حديثة"
+        case .russian:      return "недавних отчётов"
+        case .polish:       return "ostatnie zgłoszenia"
+        }
+    }
+
     // MARK: - Navigation / Map labels
     var myLocationLabel: String {
         switch self {

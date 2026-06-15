@@ -48,6 +48,10 @@ final class NavigationEngine {
     var eta: Date?
     var isOffRoute: Bool = false
 
+    /// When true, the UI should immediately dim/remove the old route polyline so we never show the
+    /// real GPS position alongside an incompatible route while a reroute is in flight.
+    var shouldDimOldRoute: Bool = false
+
     var onStepChanged: ((Int, RouteStep) -> Void)?
     var onNeedsReroute: (() async -> Void)?
     var onArrival: (() -> Void)?
@@ -61,15 +65,53 @@ final class NavigationEngine {
     private let offRouteThreshold: Double = 120
     private let arrivalThreshold: Double = 50    // 30m too tight — trucks need more stopping distance
 
+    // MARK: Fast off-route tuning
+    /// Beyond this the position is clearly on another road, not GPS drift — qualifies for fast reroute.
+    private let hardOffRouteThreshold: Double = 60
+    /// Confirm off-route within a few seconds (instead of waiting for long distances) when the
+    /// vehicle is consistently outside the corridor AND moving away from the route.
+    private let fastOffRouteSeconds: TimeInterval = 6
+    /// Minimum GPS confidence required to trust the real position enough to recalculate.
+    private let minConfidenceForReroute: Double = 0.55
+
     private var lastSpokenStepIndex: Int = -1
     private var lastLocation: CLLocation?
     private var offRouteStreak: Int = 0
+
+    // MARK: Fast off-route / confidence state
+    /// When the current off-route episode began (first reading past the corridor). nil = on route.
+    private var offRouteSince: Date?
+    /// Distance-to-route of the previous fix — lets us tell if the driver is diverging or recovering.
+    private var lastDistanceToRoute: Double = 0
+    /// Smoothed GPS confidence (0…1) from accuracy + speed + heading consistency.
+    private var confidence: Double = 1
+    private var lastHeadingForConfidence: Double = -1
+    /// Furthest route vertex the driver has reached — used to detect a passed/missed maneuver.
+    private var maxReachedRouteIndex: Int = 0
+
+    /// In-memory ring of recent off-route episodes for later analysis (capped).
+    private(set) var offRouteEvents: [OffRouteEvent] = []
+
+    struct OffRouteEvent {
+        let timestamp: Date
+        let coordinate: CLLocationCoordinate2D
+        let distanceToRouteMeters: Double
+        let confidence: Double
+        let reason: String
+        /// Seconds from first off-route reading until reroute was requested.
+        let secondsToReroute: TimeInterval
+    }
 
     /// Incremental polyline search anchor — avoids scanning thousands of coordinates every GPS tick (main-thread jank).
     private var lastClosestCoordinateIndex: Int = 0
 
     /// Prefix distance along polyline to each vertex — built once per route so ETA updates stay O(1) per GPS tick.
     private var vertexDistanceFromStart: [Double] = []
+
+    /// Cumulative road distance from the route start to the END of each step (Valhalla step lengths),
+    /// built once per route. Lets distance-to-next-turn count down smoothly and accurately instead of
+    /// the old uniform-density index estimate (which drifted badly on compressed/uneven polylines).
+    private var stepCumulativeEndDistance: [Double] = []
 
     var currentInstruction: String? {
         activeRoute?.steps[safe: currentStepIndex]?.instruction
@@ -81,9 +123,17 @@ final class NavigationEngine {
         state = .navigating
         lastSpokenStepIndex = -1
         isOffRoute = false
+        shouldDimOldRoute = false
         offRouteStreak = 0
+        offRouteSince = nil
+        lastDistanceToRoute = 0
+        confidence = 1
+        lastHeadingForConfidence = -1
+        maxReachedRouteIndex = 0
         lastClosestCoordinateIndex = 0
         vertexDistanceFromStart = Self.computePrefixDistances(route.coordinates)
+        var stepAcc = 0.0
+        stepCumulativeEndDistance = route.steps.map { stepAcc += $0.distanceMeters; return stepAcc }
 
         if route.durationSeconds > 0 {
             eta = Date().addingTimeInterval(route.durationSeconds)
@@ -102,9 +152,16 @@ final class NavigationEngine {
         currentStepIndex = 0
         lastSpokenStepIndex = -1
         isOffRoute = false
+        shouldDimOldRoute = false
         offRouteStreak = 0
+        offRouteSince = nil
+        lastDistanceToRoute = 0
+        confidence = 1
+        lastHeadingForConfidence = -1
+        maxReachedRouteIndex = 0
         lastClosestCoordinateIndex = 0
         vertexDistanceFromStart = []
+        stepCumulativeEndDistance = []
         eta = nil
         distanceToNextStep = 0
         distanceRemaining = 0
@@ -155,31 +212,22 @@ final class NavigationEngine {
         let (closestPoint, closestIndex) = findClosestPointOnRoute(to: location, route: route)
         let distanceToRoute = location.distance(from: closestPoint)
 
-        if distanceToRoute > offRouteThreshold && state == .navigating {
-            offRouteStreak += 1
-            // Require a few consecutive GPS updates past threshold to avoid jitter reroutes.
-            if offRouteStreak >= 3 {
-                agentLogNavigationEngine(
-                    runId: "post-fix",
-                    hypothesisId: "H6",
-                    location: "UtilitiesNavigationEngine.swift:updateLocation",
-                    message: "Off-route confirmed; requesting reroute",
-                    data: [
-                        "distanceToRouteM": Int(distanceToRoute),
-                        "thresholdM": Int(offRouteThreshold),
-                        "streak": offRouteStreak
-                    ]
-                )
-                handleOffRoute()
-                offRouteStreak = 0
-            }
+        // Update GPS confidence (accuracy + speed + heading consistency) before deciding anything.
+        updateConfidence(location)
+        // Track furthest point reached along the route so we can detect a missed maneuver.
+        if closestIndex > maxReachedRouteIndex { maxReachedRouteIndex = closestIndex }
+
+        if state == .navigating {
+            evaluateOffRoute(location: location, route: route, distanceToRoute: distanceToRoute, routeIndex: closestIndex)
         } else if isOffRoute && distanceToRoute <= offRouteThreshold {
+            // Back inside the corridor — clear off-route state.
             isOffRoute = false
             state = .navigating
             offRouteStreak = 0
-        } else {
-            offRouteStreak = 0
+            offRouteSince = nil
         }
+
+        lastDistanceToRoute = distanceToRoute
 
         let nextTurnDistance = calculateDistanceToNextStep(from: location, route: route, startIndex: closestIndex)
         distanceToNextStep = nextTurnDistance
@@ -281,13 +329,23 @@ final class NavigationEngine {
         return out
     }
 
+    /// Road distance (m) to the next maneuver. Accurate path: cumulative distance to the end of the
+    /// current step minus how far along the polyline the driver already is — so the banner counts
+    /// down "0.5 mi → 0.4 → … → now" as the truck approaches the turn. Falls back to the old
+    /// straight-line estimate only if the per-step / prefix tables aren't ready yet (transient).
     private func calculateDistanceToNextStep(from location: CLLocation, route: TruckRoute, startIndex: Int) -> Double {
-        guard currentStepIndex < route.steps.count, route.distanceMeters > 0 else { return 0 }
-
+        if currentStepIndex < stepCumulativeEndDistance.count,
+           startIndex >= 0, startIndex < vertexDistanceFromStart.count {
+            let turnAlongRoute = stepCumulativeEndDistance[currentStepIndex]
+            let userAlongRoute = vertexDistanceFromStart[startIndex]
+            return max(0, turnAlongRoute - userAlongRoute)
+        }
+        // Fallback (tables not built): straight-line to an estimated step-end coordinate.
+        guard currentStepIndex < route.steps.count, route.distanceMeters > 0,
+              !route.coordinates.isEmpty else { return 0 }
         let stepDistance = route.steps[currentStepIndex].distanceMeters
         let coordsPerMeter = Double(route.coordinates.count) / route.distanceMeters
         let estimatedIndex = min(startIndex + Int(stepDistance * coordsPerMeter), route.coordinates.count - 1)
-
         let stepCoordinate = route.coordinates[estimatedIndex]
         let stepLocation = CLLocation(latitude: stepCoordinate.latitude, longitude: stepCoordinate.longitude)
         return location.distance(from: stepLocation)
@@ -371,14 +429,143 @@ final class NavigationEngine {
         }
     }
 
-    private func handleOffRoute() {
+    // MARK: - GPS confidence
+
+    /// Simple confidence score (0…1) blending horizontal accuracy, speed, and heading consistency.
+    /// Low confidence = the fix may be a glitch, so we should NOT yank the driver off the route on it.
+    private func updateConfidence(_ location: CLLocation) {
+        // Accuracy: ≤10m → 1.0, ≥60m → ~0.0 (trucks need a clean fix before we trust "wrong road").
+        let acc = location.horizontalAccuracy
+        let accScore: Double = acc < 0 ? 0 : max(0, min(1, (60 - acc) / 50))
+
+        // Speed: a moving vehicle gives a far more trustworthy position than a parked one.
+        let speed = location.speed // m/s; negative when invalid
+        let speedScore: Double = speed < 0 ? 0.4 : min(1, max(0.3, speed / 8))
+
+        // Heading consistency: erratic heading jumps between fixes signal multipath / urban canyon.
+        var headingScore = 1.0
+        let course = location.course
+        if course >= 0 {
+            if lastHeadingForConfidence >= 0 {
+                var delta = abs(course - lastHeadingForConfidence).truncatingRemainder(dividingBy: 360)
+                if delta > 180 { delta = 360 - delta }
+                headingScore = delta > 90 ? 0.4 : 1.0
+            }
+            lastHeadingForConfidence = course
+        }
+
+        let instant = (accScore * 0.55) + (speedScore * 0.25) + (headingScore * 0.20)
+        // Smooth so a single noisy fix can't whipsaw the decision.
+        confidence = (confidence * 0.5) + (instant * 0.5)
+    }
+
+    // MARK: - Off-route evaluation
+
+    private func evaluateOffRoute(location: CLLocation, route: TruckRoute, distanceToRoute: Double, routeIndex: Int) {
+        let inCorridor = distanceToRoute <= offRouteThreshold
+        let diverging = distanceToRoute > lastDistanceToRoute + 1   // moving further from the route
+
+        if inCorridor {
+            // Comfortably inside the corridor — reset all off-route accumulators.
+            offRouteStreak = 0
+            offRouteSince = nil
+            return
+        }
+
+        // Outside the corridor: start/continue the off-route clock.
+        if offRouteSince == nil { offRouteSince = Date() }
+        offRouteStreak += 1
+        let elapsed = Date().timeIntervalSince(offRouteSince ?? Date())
+
+        // Only act on positions we actually trust — otherwise wait for a cleaner fix.
+        guard confidence >= minConfidenceForReroute else { return }
+
+        // (1) Missed-exit / passed-maneuver: clearly off the road, past the upcoming maneuver, and
+        //     diverging. Recalculate immediately instead of waiting for long distances.
+        if distanceToRoute > hardOffRouteThreshold && diverging && hasPassedUpcomingManeuver(routeIndex: routeIndex, route: route) {
+            requestReroute(reason: "missed_maneuver", location: location, distanceToRoute: distanceToRoute, elapsed: elapsed)
+            return
+        }
+
+        // (2) Fast confirmation: consistently outside the corridor for a few seconds while diverging.
+        if elapsed >= fastOffRouteSeconds && offRouteStreak >= 3 && diverging {
+            requestReroute(reason: "fast_diverging", location: location, distanceToRoute: distanceToRoute, elapsed: elapsed)
+            return
+        }
+
+        // (3) Conservative fallback: far past the legacy threshold and confirmed by several fixes.
+        if distanceToRoute > offRouteThreshold && offRouteStreak >= 3 {
+            requestReroute(reason: "threshold", location: location, distanceToRoute: distanceToRoute, elapsed: elapsed)
+        }
+    }
+
+    /// True when the GPS has advanced past where the next maneuver point sits on the polyline —
+    /// i.e. the driver drove past the turn they were supposed to take.
+    private func hasPassedUpcomingManeuver(routeIndex: Int, route: TruckRoute) -> Bool {
+        guard currentStepIndex < route.steps.count, route.distanceMeters > 0, route.coordinates.count > 1 else { return false }
+        let stepDistance = route.steps[currentStepIndex].distanceMeters
+        let coordsPerMeter = Double(route.coordinates.count) / route.distanceMeters
+        let maneuverIndex = min(lastClosestCoordinateIndex + Int(stepDistance * coordsPerMeter), route.coordinates.count - 1)
+        // We consider the maneuver "passed" once our furthest reached index is at/after it.
+        return maxReachedRouteIndex >= maneuverIndex && routeIndex >= maneuverIndex
+    }
+
+    private func requestReroute(reason: String, location: CLLocation, distanceToRoute: Double, elapsed: TimeInterval) {
+        logOffRouteEvent(reason: reason, location: location, distanceToRoute: distanceToRoute, secondsToReroute: elapsed)
+        offRouteStreak = 0
+        offRouteSince = nil
+        handleOffRoute(reason: reason)
+    }
+
+    private func logOffRouteEvent(reason: String, location: CLLocation, distanceToRoute: Double, secondsToReroute: TimeInterval) {
+        let event = OffRouteEvent(
+            timestamp: Date(),
+            coordinate: location.coordinate,
+            distanceToRouteMeters: distanceToRoute,
+            confidence: confidence,
+            reason: reason,
+            secondsToReroute: secondsToReroute
+        )
+        offRouteEvents.append(event)
+        if offRouteEvents.count > 50 { offRouteEvents.removeFirst(offRouteEvents.count - 50) }
+
+        agentLogNavigationEngine(
+            runId: "off-route-metric",
+            hypothesisId: "H6",
+            location: "UtilitiesNavigationEngine.swift:evaluateOffRoute",
+            message: "Off-route confirmed; requesting reroute",
+            data: [
+                "reason": reason,
+                "lat": location.coordinate.latitude,
+                "lon": location.coordinate.longitude,
+                "distanceToRouteM": Int(distanceToRoute),
+                "confidence": Double(String(format: "%.2f", confidence)) ?? confidence,
+                "secondsToReroute": Double(String(format: "%.1f", secondsToReroute)) ?? secondsToReroute
+            ]
+        )
+    }
+
+    /// Called by the UI when a reroute request can't proceed right now (cooldown / missing destination).
+    /// Returns to navigating so the off-route detector can re-arm and retry, and restores the route line.
+    func cancelPendingReroute() {
+        guard state == .rerouting else { return }
+        isOffRoute = false
+        shouldDimOldRoute = false
+        state = .navigating
+        offRouteStreak = 0
+        offRouteSince = nil
+    }
+
+    private func handleOffRoute(reason: String) {
         guard !isOffRoute else { return }
 
         isOffRoute = true
         state = .rerouting
+        // Tell the UI to drop the now-incompatible route immediately (no real-position + wrong-line mix).
+        shouldDimOldRoute = true
 
         #if DEBUG
-        print("[Navigation] ⚠️ User is off-route! Requesting reroute...")
+        print("[Navigation] ⚠️ Off-route (\(reason))! Requesting reroute...")
         #endif
 
         Task {

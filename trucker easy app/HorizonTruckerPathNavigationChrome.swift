@@ -11,6 +11,9 @@ import MapKit
 struct HorizonTruckerPathNavigationChrome: View {
     let step: DisplayRouteStep
     var nextStepInstruction: String?
+    /// Live road distance (m) to the upcoming maneuver, from NavigationEngine — counts down each GPS
+    /// fix. When nil/0 the bar falls back to the step's static Valhalla length.
+    var liveManeuverDistanceMeters: Double? = nil
     let formatDistance: (Double) -> String
     let roadLine: String
     let totalDistanceText: String
@@ -58,6 +61,7 @@ struct HorizonTruckerPathNavigationChrome: View {
                     TruckerPathTopManeuverBar(
                         step: step,
                         nextStepInstruction: nextStepInstruction,
+                        liveManeuverDistanceMeters: liveManeuverDistanceMeters,
                         formatDistance: formatDistance,
                         onToggleSteps: onToggleSteps
                     )
@@ -90,6 +94,14 @@ struct HorizonTruckerPathNavigationChrome: View {
                 )
                 .padding(.bottom, max(safeBottom, 6))
             }
+            .overlay(alignment: .topTrailing) {
+                // Compact HOS glance widget — Drive/Shift remaining, read-only (no tap).
+                if let hosContext {
+                    DotHosMiniWidget(hosContext: hosContext)
+                        .padding(.trailing, 8)
+                        .padding(.top, safeTop + (showLaneBar ? 118 : 96))
+                }
+            }
             .overlay(alignment: .trailing) {
                 TruckerPathRightControls(
                     selectedMapStyle: $selectedMapStyle,
@@ -100,7 +112,8 @@ struct HorizonTruckerPathNavigationChrome: View {
                     onRecenter: onRecenter
                 )
                 .padding(.trailing, 8)
-                .padding(.top, safeTop + (showLaneBar ? 118 : 96))
+                // Extra top room keeps the zoom/recenter column clear of the HOS mini widget.
+                .padding(.top, safeTop + (showLaneBar ? 118 : 96) + (hosContext != nil ? 64 : 0))
                 .padding(.bottom, safeBottom + 92)
             }
             .ignoresSafeArea(edges: .top)
@@ -112,6 +125,7 @@ struct HorizonTruckerPathNavigationChrome: View {
 private struct TruckerPathTopManeuverBar: View {
     let step: DisplayRouteStep
     var nextStepInstruction: String?
+    var liveManeuverDistanceMeters: Double? = nil
     let formatDistance: (Double) -> String
     let onToggleSteps: () -> Void
 
@@ -133,7 +147,11 @@ private struct TruckerPathTopManeuverBar: View {
     }
 
     private var distanceText: String {
-        step.distance > 0 ? formatDistance(step.distance) : "—"
+        // Prefer the live counting-down distance to the turn; fall back to the static step length.
+        if let live = liveManeuverDistanceMeters, live > 0 {
+            return formatDistance(live)
+        }
+        return step.distance > 0 ? formatDistance(step.distance) : "—"
     }
 
     private var exitShield: String? {
