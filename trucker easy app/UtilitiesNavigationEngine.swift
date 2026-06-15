@@ -209,10 +209,20 @@ final class NavigationEngine {
 
         if let lastCoord = route.coordinates.last {
             let destination = CLLocation(latitude: lastCoord.latitude, longitude: lastCoord.longitude)
-            if location.distance(from: destination) < arrivalThreshold {
+            let nearDest = location.distance(from: destination) < arrivalThreshold
+            // Anti-falso-positivo: só declara "chegou" se já percorreu ~80% da rota (por índice) E
+            // está a <50m do fim. Antes bastava estar a 50m do último ponto → disparava "chegou" cedo
+            // quando a rota passava perto do destino no meio/início. Agora exige progresso REAL.
+            let progressedToEnd = maxReachedRouteIndex >= Int(Double(route.coordinates.count) * 0.8)
+            if nearDest, progressedToEnd {
                 handleArrival()
                 return
             }
+            #if DEBUG
+            if nearDest, !progressedToEnd {
+                print("[Navigation] ⚠️ perto do destino mas só \(maxReachedRouteIndex)/\(route.coordinates.count) percorrido — NÃO declarou chegada (anti-falso-positivo)")
+            }
+            #endif
         }
 
         let (closestPoint, closestIndex) = findClosestPointOnRoute(to: location, route: route)
