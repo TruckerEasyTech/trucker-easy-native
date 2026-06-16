@@ -34,10 +34,14 @@ final class RadioService {
 
     /// URLs testadas ao vivo (16/06/2026) — HTTP 200, content-type audio. Nada inventado.
     static let defaultStations: [RadioStation] = [
-        RadioStation(id: "npr",    name: "NPR News",            genre: "Notícias",
+        RadioStation(id: "bbcws",  name: "BBC World Service",     genre: "Mundo · Copa",
+                     streamURL: "https://stream.live.vc.bbcmedia.co.uk/bbc_world_service"),
+        RadioStation(id: "npr",    name: "NPR News",              genre: "Notícias",
                      streamURL: "https://npr-ice.streamguys1.com/live.mp3"),
         RadioStation(id: "somafm", name: "SomaFM · Groove Salad", genre: "Música",
-                     streamURL: "https://ice1.somafm.com/groovesalad-128-mp3")
+                     streamURL: "https://ice1.somafm.com/groovesalad-128-mp3"),
+        RadioStation(id: "kexp",   name: "KEXP Seattle",          genre: "Música",
+                     streamURL: "https://kexp-mp3-128.streamguys1.com/kexp128.mp3")
     ]
 
     /// Substitui a lista (ex.: estações vindas da nuvem — Copa/jogo — sem precisar de release).
