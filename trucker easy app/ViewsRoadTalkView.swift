@@ -48,11 +48,12 @@ struct RoadTalkView: View {
     @State private var selectedSection: RoadTalkSection = .ptt
 
     enum RoadTalkSection: CaseIterable {
-        case ptt, news, report, community, chat
+        case ptt, radio, news, report, community, chat
 
         func label(lang: AppLanguage) -> String {
             switch self {
             case .ptt:       return "📻 Ch.19"
+            case .radio:     return CommunityTheme.current.isCopa ? "🎧 Copa" : "🎧 Rádio"
             case .news:      return lang.roadTalkNewsLabel
             case .report:    return lang.roadTalkReportLabel
             case .community: return lang.roadTalkCommunityLabel
@@ -72,10 +73,15 @@ struct RoadTalkView: View {
                     // MARK: Header
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(lang.tabRoadTalk)
-                                .font(AppTheme.Typography.heroTitle())
-                                .foregroundColor(.white)
-                            Text(lang.roadTalkSubtitle)
+                            HStack(spacing: 8) {
+                                Text(lang.tabRoadTalk)
+                                    .font(AppTheme.Typography.heroTitle())
+                                    .foregroundColor(.white)
+                                // Tema Copa 2026 (auto-reverte pra logística após 19/07) — só um toque visual.
+                                Image(systemName: CommunityTheme.current.icon)
+                                    .foregroundColor(CommunityTheme.current.accent)
+                            }
+                            Text(CommunityTheme.current.isCopa ? CommunityTheme.current.subtitle : lang.roadTalkSubtitle)
                                 .font(AppTheme.Typography.caption())
                                 .foregroundColor(AppTheme.Colors.textSecondary)
                         }
@@ -110,6 +116,8 @@ struct RoadTalkView: View {
 
                     // Content
                     switch selectedSection {
+                    case .radio:
+                        RadioView(theme: CommunityTheme.current)
                     case .news:
                         ScrollView(showsIndicators: false) {
                             LogisticsNewsFeed()
@@ -129,6 +137,66 @@ struct RoadTalkView: View {
                 }
             }
             .navigationBarHidden(true)
+        }
+    }
+}
+
+// MARK: - Rádio (ouvir ao vivo — Copa 2026 / notícias / música)
+private struct RadioView: View {
+    let theme: CommunityTheme
+    @State private var radio = RadioService.shared
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) {
+                if theme.isCopa {
+                    HStack(spacing: 10) {
+                        Image(systemName: "soccerball").font(.system(size: 22))
+                        Text("Copa 2026 está rolando! Sintonize e ouça os jogos na estrada. 🌎⚽")
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                    }
+                    .foregroundColor(.white)
+                    .padding(14)
+                    .background(theme.accent.opacity(0.92))
+                    .cornerRadius(14)
+                }
+
+                ForEach(radio.stations) { station in
+                    let isCurrent = radio.currentStation == station
+                    Button(action: { radio.toggle(station) }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: isCurrent && radio.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .font(.system(size: 34))
+                                .foregroundColor(theme.accent)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(station.name).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
+                                Text(station.genre).font(.system(size: 12)).foregroundColor(AppTheme.Colors.textSecondary)
+                            }
+                            Spacer()
+                            if isCurrent && radio.isBuffering {
+                                ProgressView().tint(theme.accent)
+                            } else if isCurrent && radio.isPlaying {
+                                Image(systemName: "waveform").foregroundColor(theme.accent)
+                            }
+                        }
+                        .padding(14)
+                        .background(AppTheme.Colors.backgroundCard)
+                        .cornerRadius(14)
+                        .overlay(RoundedRectangle(cornerRadius: 14)
+                            .stroke(isCurrent ? theme.accent.opacity(0.6) : Color.clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text("Estações são atualizáveis sem novo update do app — a do jogo entra quando o stream estiver no ar.")
+                    .font(.system(size: 11))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, AppTheme.Spacing.md)
+            .padding(.vertical, AppTheme.Spacing.md)
         }
     }
 }
