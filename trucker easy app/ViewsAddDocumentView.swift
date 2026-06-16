@@ -462,6 +462,18 @@ struct AddDocumentView: View {
         )
         document.documentData = documentData
         modelContext.insert(document)
+
+        // Backup REAL na nuvem (Supabase Storage), best-effort — não bloqueia o save local nem o
+        // dismiss. Sem login / sem rede → fica só local (cloudPath nil), sem erro pro motorista.
+        if let data = documentData {
+            Task { @MainActor in
+                let fileName = "\(document.id.uuidString).jpg"
+                if let path = try? await SupabaseClient.shared.uploadDriverDocument(
+                    data: data, fileName: fileName, contentType: "image/jpeg") {
+                    document.cloudPath = path
+                }
+            }
+        }
         dismiss()
     }
 }

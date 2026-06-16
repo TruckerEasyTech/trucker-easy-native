@@ -123,6 +123,31 @@ final class SupabaseClient {
         return h
     }
 
+    // MARK: - Storage (upload de documentos)
+
+    /// Faz upload REAL de um documento pro Storage privado (bucket `driver-documents`) e devolve o
+    /// path salvo. O path começa com o uid do motorista (exigido pela RLS). Requer login.
+    @discardableResult
+    func uploadDriverDocument(data: Data, fileName: String, contentType: String) async throws -> String {
+        try validateConfiguration()
+        guard let uid = currentDriverId, accessToken != nil else {
+            throw SupabaseError.missingConfiguration("Faça login para fazer backup dos documentos na nuvem.")
+        }
+        let path = "\(uid)/\(fileName)"
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/storage/v1/object/driver-documents/\(path)") else {
+            throw SupabaseError.invalidURL
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        commonHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")   // sobrescreve o application/json
+        req.setValue("true", forHTTPHeaderField: "x-upsert")
+        req.httpBody = data
+        let (respData, response) = try await session.data(for: req)
+        try validateResponse(response, data: respData)
+        return path
+    }
+
     // MARK: - Generic GET
 
     func select<T: Decodable>(

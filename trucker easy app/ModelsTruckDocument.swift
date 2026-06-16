@@ -26,6 +26,8 @@ final class TruckDocument {
     var issueDate: Date
     var expirationDate: Date?
     var documentData: Data?
+    /// Caminho no Supabase Storage (bucket driver-documents) após backup na nuvem. nil = só local.
+    var cloudPath: String?
     var notes: String
     var reminderEnabled: Bool
     var reminderDaysBefore: Int
