@@ -811,18 +811,13 @@ struct TruckingNewsView: View {
 
         guard !NewsAPIConfig.apiKey.isEmpty,
               NewsAPIConfig.apiKey != "YOUR_NEWSAPI_KEY" else {
-            await MainActor.run {
-                loadMockNews()
-                isLoading = false
-            }
+            // Sem chave NewsAPI → usa RSS REAL (FreightWaves/Transport Topics). Não fica vazio nem inventa.
+            await loadNewsFromRSS()
             return
         }
 
         guard let url = URL(string: NewsAPIConfig.endpoint) else {
-            await MainActor.run {
-                loadMockNews()
-                isLoading = false
-            }
+            await loadNewsFromRSS()
             return
         }
 
@@ -843,11 +838,11 @@ struct TruckingNewsView: View {
                     } else {
                         errorMessage = error?.localizedDescription ?? "Failed to load news"
                     }
-                    loadMockNews()
+                    Task { await loadNewsFromRSS() }
                     return
                 }
                 articles = parsed.articles.filter { $0.title != "[Removed]" && !$0.title.isEmpty }
-                if articles.isEmpty { loadMockNews() }
+                if articles.isEmpty { Task { await loadNewsFromRSS() } }
             }
         }.resume()
     }
@@ -912,6 +907,109 @@ struct TruckingNewsView: View {
         if errorMessage == nil {
             errorMessage = "Notícias indisponíveis no momento."
         }
+    }
+
+    /// News REAL de feeds RSS free (sem chave), usada quando o NewsAPI não está configurado.
+    /// Fontes testadas ao vivo (HTTP 200): FreightWaves, Transport Topics. Nada fabricado.
+    private func loadNewsFromRSS() async {
+        let feeds = [
+            ("FreightWaves", "https://www.freightwaves.com/news/feed"),
+            ("Transport Topics", "https://www.ttnews.com/rss.xml")
+        ]
+        var collected: [NewsArticle] = []
+        for (sourceName, urlString) in feeds {
+            guard let url = URL(string: urlString) else { continue }
+            var req = URLRequest(url: url, timeoutInterval: 10)
+            req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+                         forHTTPHeaderField: "User-Agent")
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  (resp as? HTTPURLResponse)?.statusCode == 200 else { continue }
+            collected.append(contentsOf: RSSNewsParser(sourceName: sourceName).parse(data))
+        }
+        await MainActor.run {
+            isLoading = false
+            if collected.isEmpty {
+                articles = []
+                if errorMessage == nil { errorMessage = "Notícias indisponíveis no momento." }
+            } else {
+                articles = Array(collected.prefix(40))
+                errorMessage = nil
+            }
+        }
+    }
+}
+
+/// Parser RSS 2.0 mínimo → NewsArticle. Robusto a CDATA. Datas reais do feed (sem fabricar).
+private final class RSSNewsParser: NSObject, XMLParserDelegate {
+    private let sourceName: String
+    private var items: [NewsArticle] = []
+    private var element = ""
+    private var inItem = false
+    private var title = "", link = "", desc = "", pubDate = ""
+
+    init(sourceName: String) { self.sourceName = sourceName }
+
+    func parse(_ data: Data) -> [NewsArticle] {
+        let p = XMLParser(data: data)
+        p.delegate = self
+        p.parse()
+        return items
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+                qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        element = elementName
+        if elementName == "item" { inItem = true; title = ""; link = ""; desc = ""; pubDate = "" }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        guard inItem else { return }
+        switch element {
+        case "title": title += string
+        case "link": link += string
+        case "description": desc += string
+        case "pubDate": pubDate += string
+        default: break
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        guard inItem, let s = String(data: CDATABlock, encoding: .utf8) else { return }
+        switch element {
+        case "title": title += s
+        case "description": desc += s
+        case "link": link += s
+        default: break
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?,
+                qualifiedName qName: String?) {
+        guard elementName == "item" else { return }
+        inItem = false
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        let cleanDesc = desc.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        items.append(NewsArticle(
+            id: UUID(),
+            title: t,
+            description: String(cleanDesc.prefix(220)),
+            url: link.trimmingCharacters(in: .whitespacesAndNewlines),
+            urlToImage: nil,
+            publishedAt: Self.isoDate(from: pubDate),
+            source: .init(name: sourceName)
+        ))
+    }
+
+    /// RFC822 (pubDate do RSS) → ISO8601. Se não parsear, devolve a string crua do feed (honesto, sem inventar).
+    private static func isoDate(from rfc822: String) -> String {
+        let raw = rfc822.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
+        if let d = fmt.date(from: raw) { return ISO8601DateFormatter().string(from: d) }
+        return raw.isEmpty ? "" : raw
     }
 }
 
