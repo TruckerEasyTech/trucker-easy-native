@@ -904,25 +904,14 @@ struct TruckingNewsView: View {
         }
     }
 
+    /// Fonte de notícias indisponível (sem chave / erro / vazio). NÃO fabricar notícias —
+    /// antes isto inventava títulos/fontes/datas (ex.: "FreightWaves · 2026-03-01"), que o motorista
+    /// lia como real. A aba fica VAZIA com aviso honesto; melhor vazia do que mentindo.
     private func loadMockNews() {
-        articles = [
-            NewsArticle(id: UUID(), title: "Trucking Industry Sees Record Freight Demand in 2026",
-                        description: "Carriers report increased load volumes across major corridors as supply chain stabilizes.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-03-01T10:00:00Z", source: .init(name: "FreightWaves")),
-            NewsArticle(id: UUID(), title: "New ELD Mandate Updates: What Drivers Need to Know",
-                        description: "FMCSA releases updated guidelines for electronic logging devices effective Q2 2026.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-28T08:00:00Z", source: .init(name: "FMCSA News")),
-            NewsArticle(id: UUID(), title: "Fuel Prices Drop Ahead of Spring Season",
-                        description: "Diesel prices fall 8 cents per gallon as refineries boost output.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-27T14:30:00Z", source: .init(name: "TruckingInfo")),
-            NewsArticle(id: UUID(), title: "Driver Shortage Eases as New CDL Graduates Hit the Road",
-                        description: "FMCSA reports 12% increase in new CDL licenses issued in Q1 2026.",
-                        url: "https://truckereasy.com", urlToImage: nil,
-                        publishedAt: "2026-02-25T11:00:00Z", source: .init(name: "Commercial Carrier Journal")),
-        ]
+        articles = []
+        if errorMessage == nil {
+            errorMessage = "Notícias indisponíveis no momento."
+        }
     }
 }
 

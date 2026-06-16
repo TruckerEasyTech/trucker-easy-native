@@ -645,7 +645,9 @@ final class TruckStopService {
             case .parkingFull:
                 nearbyStops[idx].amenities.parkingAvailable = 0
             case .parkingAvailable:
-                nearbyStops[idx].amenities.parkingAvailable = (nearbyStops[idx].amenities.parkingSlots ?? 50) / 2
+                // Não inventar total (era `?? 50`). Só estima a partir de um total REAL; sem total
+                // conhecido, fica nil (desconhecido) em vez de um número fabricado.
+                nearbyStops[idx].amenities.parkingAvailable = nearbyStops[idx].amenities.parkingSlots.map { $0 / 2 }
             default:
                 break
             }

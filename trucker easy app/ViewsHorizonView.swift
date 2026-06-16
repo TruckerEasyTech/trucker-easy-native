@@ -3021,16 +3021,10 @@ struct HorizonView: View {
             #endif
             return
         }
-        let total = stop.amenities.parkingSlots ?? 50
-        let available: Int
-        switch status {
-        case .many:
-            available = max(15, Int(Double(total) * 0.65))
-        case .some:
-            available = max(3, Int(Double(total) * 0.20))
-        case .full:
-            available = 0
-        }
+        // Não fabricar contagem a partir do status qualitativo (era 65%/20% de um total `?? 50`
+        // inventado, enviado ao backend como nº real). O status (many/some/full) é o dado REAL do
+        // motorista; a contagem exata não é conhecida → nil. Só 'full' = 0 vaga é honesto.
+        let available: Int? = (status == .full) ? 0 : nil
 
         let structured = TruckStopParkingReportPayload(
             poi_place_id: stop.dataSource == .supabase ? stop.id : nil,
@@ -3040,7 +3034,7 @@ struct HorizonView: View {
             longitude: stop.coordinate.longitude,
             status: status.rawValue.lowercased(),
             available_slots: available,
-            total_slots: total
+            total_slots: stop.amenities.parkingSlots
         )
 
         Task {
