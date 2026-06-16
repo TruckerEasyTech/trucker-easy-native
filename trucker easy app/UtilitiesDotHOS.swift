@@ -128,6 +128,8 @@ final class DotHosContext {
         needsMandatoryBreak = false
         isViolation         = false
         routeEtaSeconds     = 0
+        movingSpeedSum      = 0
+        movingSpeedSamples  = 0
         saveState()
     }
 
@@ -152,6 +154,20 @@ final class DotHosContext {
 
     func feedSpeed(_ mph: Double) {
         currentSpeedMph = mph
+        // Média móvel da velocidade REAL em movimento (>5 mph) — substitui o chute de 55mph na
+        // reachability dos truck stops. Acumula só dirigindo; reseta no resetDay.
+        if mph >= drivingSpeedThreshold {
+            movingSpeedSum += mph
+            movingSpeedSamples += 1
+        }
+    }
+
+    private var movingSpeedSum: Double = 0
+    private var movingSpeedSamples: Int = 0
+    /// Velocidade média REAL em movimento (mph). nil até ~30 amostras de direção real — NÃO chuta.
+    var averageDrivingSpeedMph: Double? {
+        guard movingSpeedSamples >= 30 else { return nil }
+        return movingSpeedSum / Double(movingSpeedSamples)
     }
 
     // MARK: - Derived helpers

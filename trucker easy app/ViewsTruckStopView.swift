@@ -229,8 +229,11 @@ struct TruckStopItem: Identifiable {
     }
 
     // HOS-reachability: is this stop reachable within the given hours remaining?
-    func isReachable(withHoursRemaining hours: Double, avgSpeedMph: Double = 55) -> Bool {
-        let maxMiles = hours * avgSpeedMph
+    func isReachable(withHoursRemaining hours: Double, avgSpeedMph: Double?) -> Bool {
+        // Velocidade média REAL do motorista (telemetria). Sem dado ainda (1os ~30s) → 50mph
+        // conservador, não os 55 otimistas de antes. Depois disso, 100% real (terreno/trânsito dele).
+        let speed = avgSpeedMph ?? 50
+        let maxMiles = hours * speed
         let stopMiles = distanceMeters / 1609.34
         return stopMiles <= maxMiles
     }
@@ -363,9 +366,9 @@ struct HOSState {
         return AppTheme.Colors.success
     }
 
-    /// Max distance (miles) driveable at avg speed
-    func reachableMiles(avgSpeedMph: Double = 55) -> Double {
-        driveTimeRemainingHours * avgSpeedMph
+    /// Max distance (miles) driveable at the driver's REAL average speed (telemetria; 50 conservador se vazio).
+    func reachableMiles(avgSpeedMph: Double?) -> Double {
+        driveTimeRemainingHours * (avgSpeedMph ?? 50)
     }
 }
 
@@ -610,7 +613,7 @@ final class TruckStopService {
 
     /// Stops reachable given current HOS
     var reachableStops: [TruckStopItem] {
-        nearbyStops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours) }
+        nearbyStops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours, avgSpeedMph: hos.averageDrivingSpeedMph) }
     }
 
     /// Merge partner operational parking signals (official/provider feed).
@@ -877,7 +880,7 @@ struct TruckStopsPanel: View {
 
     var displayedStops: [TruckStopItem] {
         if showOnlyReachable {
-            let reachable = stops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours) }
+            let reachable = stops.filter { $0.isReachable(withHoursRemaining: hos.driveTimeRemainingHours, avgSpeedMph: hos.averageDrivingSpeedMph) }
             return reachable.isEmpty ? stops : reachable
         }
         return stops
@@ -980,7 +983,7 @@ struct TruckStopRow: View {
     let onSelect: () -> Void
 
     private var isReachable: Bool {
-        stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours)
+        stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours, avgSpeedMph: hos.averageDrivingSpeedMph)
     }
 
     var body: some View {
@@ -1314,7 +1317,7 @@ struct TruckStopDetailSheet: View {
     // MARK: - HOS Banner
 
     private var hosBanner: some View {
-        let reachable = stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours)
+        let reachable = stop.isReachable(withHoursRemaining: hos.driveTimeRemainingHours, avgSpeedMph: hos.averageDrivingSpeedMph)
         return HStack(spacing: 10) {
             Image(systemName: reachable ? "clock.badge.checkmark.fill" : "clock.badge.exclamationmark.fill")
                 .font(.system(size: 16, weight: .bold))
