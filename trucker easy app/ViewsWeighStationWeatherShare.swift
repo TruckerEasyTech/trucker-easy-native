@@ -1912,8 +1912,10 @@ final class LogisticsNewsService {
             }
         }
 
-        // Curated fallback — always available, never empty
-        return curatedFallbackNews(for: effectiveCountry)
+        // Sem feed real → VAZIO (honesto). Antes retornava `curatedFallbackNews`, com fontes e
+        // timestamps SINTÉTICOS ("CDOT · 15 min atrás") apresentados ao motorista como reais/recentes.
+        // Melhor seção vazia do que notícia fabricada. (curatedFallbackNews fica como dead code.)
+        return []
     }
 
     /// Downloads and parses an RSS 2.0 / Atom feed, returns nil on any failure.
