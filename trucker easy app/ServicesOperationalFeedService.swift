@@ -122,7 +122,7 @@ final class OperationalFeedService {
             switch signal.status.lowercased() {
             case "open": status = .open
             case "closed": status = .closed
-            default: status = .monitoring
+            default: continue   // status desconhecido → NÃO fabricar "monitoring"; pular (honesto)
             }
             service.setPartnerStatus(
                 status,

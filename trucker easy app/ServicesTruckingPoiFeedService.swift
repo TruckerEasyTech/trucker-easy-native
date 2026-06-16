@@ -101,7 +101,7 @@ final class TruckingPoiFeedService {
         switch match.status.lowercased() {
         case "open": return .open
         case "closed": return .closed
-        default: return .monitoring
+        default: return nil   // desconhecido → sem badge falso de "monitoring"
         }
     }
 
@@ -113,7 +113,7 @@ final class TruckingPoiFeedService {
                 switch signal.status.lowercased() {
                 case "open": status = .open
                 case "closed": status = .closed
-                default: status = .monitoring
+                default: continue   // desconhecido → não fabricar "monitoring"; pular
                 }
                 WeighStationStatusService.shared.setPartnerStatus(
                     status,

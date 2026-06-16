@@ -497,9 +497,9 @@ final class TruckStopService {
         let parkingAvailable: Int? = {
             if let gov = row.gov_parking_available { return gov }
             if let reported = row.parking_available { return reported }
+            // Não fabricar contagem de vagas a partir de status qualitativo (era 65%/20% inventado,
+            // exibido como nº real). "full" = 0 vaga é honesto; "many"/"some" não dá número real → nil.
             switch row.parking_status?.lowercased() {
-            case "many": return parkingTotal.map { max(1, Int(Double($0) * 0.65)) }
-            case "some": return parkingTotal.map { max(1, Int(Double($0) * 0.20)) }
             case "full": return 0
             default: return nil
             }
