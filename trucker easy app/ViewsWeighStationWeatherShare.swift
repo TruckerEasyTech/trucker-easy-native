@@ -1890,10 +1890,11 @@ final class LogisticsNewsService {
         let feedURLs: [String]
         switch effectiveCountry {
         case "US":
+            // Feeds free, sem chave, que RESPONDEM 200 (testados ao vivo 16/06). FMCSA e Overdrive
+            // dão 403 (bloqueiam bot) — trocados pelos que funcionam de verdade.
             feedURLs = [
-                // Keep only the most reliable official feed to avoid noisy network/socket logs
-                // from secondary endpoints that are intermittently blocked in sandboxed iOS runtime.
-                "https://www.fmcsa.dot.gov/newsroom/rss/all-news.xml"
+                "https://www.freightwaves.com/news/feed",
+                "https://www.ttnews.com/rss.xml"
             ]
         case "CA":
             feedURLs = ["https://www.tc.gc.ca/en/news/rss.xml"]
@@ -1922,7 +1923,7 @@ final class LogisticsNewsService {
     private func fetchRSSFeed(from url: URL, country: String) async -> [LogisticsNewsItem]? {
         do {
             var request = URLRequest(url: url, timeoutInterval: 8)
-            request.setValue("TruckerEasy/2.0 (iOS)", forHTTPHeaderField: "User-Agent")
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse,
                   (200...299).contains(http.statusCode) else { return nil }
