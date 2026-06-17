@@ -248,7 +248,19 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> HorizonMapboxMapHostView {
-        let initOptions = MapInitOptions(styleURI: selectedMapStyle.mapboxStyleURI)
+        // NUNCA iniciar no globo (zoom 0 / [0,0]) — era a causa da "tela global" travada quando o
+        // GPS demorava. Centra JÁ na posição conhecida (incl. a cached/A-GPS do iOS) em zoom de rua.
+        // Sem nenhuma localização ainda, cai num centro continental razoável (não o planeta inteiro).
+        let initialCamera: CameraOptions
+        if let coord = locationManager.currentLocation?.coordinate {
+            initialCamera = CameraOptions(center: coord, zoom: 14, bearing: 0, pitch: 0)
+        } else {
+            initialCamera = CameraOptions(
+                center: CLLocationCoordinate2D(latitude: 39.5, longitude: -98.35), // centro dos EUA
+                zoom: 3.5, bearing: 0, pitch: 0
+            )
+        }
+        let initOptions = MapInitOptions(cameraOptions: initialCamera, styleURI: selectedMapStyle.mapboxStyleURI)
         let host = HorizonMapboxMapHostView(mapInitOptions: initOptions)
         let coordinator = context.coordinator
         host.onMapViewReady = { [self] mapView in

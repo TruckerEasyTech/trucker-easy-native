@@ -99,6 +99,15 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
             requestPermission()
             return
         }
+        // A-GPS / fallback INSTANTÂNEO (igual Google/Apple Maps): o iOS já tem a última posição
+        // conhecida em cache (torre de celular / Wi-Fi / GPS). Usa ela NA HORA, sem esperar o 1º
+        // fix de satélite — evita a "tela global" e a espera por um GPS perfeito. O fix preciso
+        // chega em seguida e substitui via didUpdateLocations.
+        if currentLocation == nil, let cached = manager.location,
+           cached.horizontalAccuracy >= 0, abs(cached.timestamp.timeIntervalSinceNow) < 600 {
+            currentLocation = cached
+            locationFixEpoch &+= 1
+        }
         manager.startUpdatingLocation()
         if CLLocationManager.headingAvailable() {
             manager.startUpdatingHeading()
