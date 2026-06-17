@@ -194,7 +194,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     /// real da chrome idle / barra de navegação).
     private static func tuckMapboxOrnaments(_ mapView: MapboxMaps.MapView, bottomInset: CGFloat) {
         var options = mapView.ornaments.options
-        let inset = max(bottomInset, 16)
+        let inset = max(bottomInset, 16) + 14   // folga extra acima do sheet (sem encostar)
         options.logo.position = .bottomLeading
         options.logo.margins = CGPoint(x: 8, y: inset)
         options.attributionButton.position = .bottomLeading

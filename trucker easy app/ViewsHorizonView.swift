@@ -257,6 +257,20 @@ struct HorizonView: View {
             .first?.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.top ?? 52
     }
 
+    /// Safe-area inferior real do device (home indicator) — base p/ posicionar ornamentos sobre o mapa.
+    private var deviceSafeBottomInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.bottom ?? 34
+    }
+
+    /// Inset do logo/atribuição do Mapbox em NAVEGAÇÃO: a barra de trip é ancorada em ~2×safeBottom
+    /// acima da base + ~64pt de altura. Espelha o clearance conhecido dos controles da direita
+    /// (safeBottom+92) p/ o logo ficar ACIMA da barra de trip, nunca sobreposto.
+    private var navMapboxOrnamentInset: CGFloat {
+        deviceSafeBottomInset * 2 + 84
+    }
+
     /// Altura estimada do topo em navegação (barra compacta + faixas opcionais).
     private var navigationTopChromeHeight: CGFloat {
         guard isNavigating else { return 110 }
@@ -832,7 +846,7 @@ struct HorizonView: View {
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
                         weatherRadarEnabled: weatherRadarEnabled,
-                        mapboxBottomInset: isNavigating ? (navigatingMapChromeBottomInset + 8) : idleMapControlsBottomInset,
+                        mapboxBottomInset: isNavigating ? navMapboxOrnamentInset : idleMapControlsBottomInset,
                         truckStops: isNavigating ? mapTruckStopsForDisplay : [],
                         routeSignage: isNavigating ? routeSignageService.onRouteSignage : [],
                         cameras: showTrafficCameras ? trafficCameraService.cameras : [],
