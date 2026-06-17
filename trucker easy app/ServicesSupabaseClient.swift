@@ -403,6 +403,24 @@ final class SupabaseClient {
         try await upsert(into: SupabaseConfig.Tables.roadReports, value: report)
     }
 
+    /// Crowdsourcing de diesel: motorista reporta o preço de um posto (escrita autenticada).
+    func submitFuelPriceReport(_ report: FuelPriceReportPayload) async throws {
+        try await upsert(into: SupabaseConfig.Tables.fuelPriceReports, value: report)
+    }
+
+    /// Lê o AGREGADO público (último preço por posto, recente) via RPC SECURITY DEFINER — o moat:
+    /// o que um motorista reportou, os outros veem. Vazio = sem report real (nunca inventa).
+    func fetchDieselPricesNear(latitude: Double, longitude: Double, radiusKm: Double = 25,
+                              maxAgeHours: Int = 48, limit: Int = 80) async throws -> [CrowdDieselPrice] {
+        struct P: Encodable {
+            let p_lat: Double; let p_lon: Double; let p_radius_km: Double
+            let p_max_age_hours: Int; let p_limit: Int
+        }
+        return try await rpc("fuel_prices_near",
+                             params: P(p_lat: latitude, p_lon: longitude, p_radius_km: radiusKm,
+                                       p_max_age_hours: maxAgeHours, p_limit: limit))
+    }
+
     func submitTruckStopParkingReport(_ report: TruckStopParkingReportPayload) async throws {
         try await upsert(into: SupabaseConfig.Tables.truckStopParkingReports, value: report)
     }
@@ -654,6 +672,34 @@ struct RoadReportPayload: Encodable {
     let latitude: Double
     let longitude: Double
     let location_name: String?
+}
+
+/// Report de preço de diesel pelo motorista (crowdsourcing). Só dado real digitado por ele.
+struct FuelPriceReportPayload: Encodable {
+    let poi_place_id: String?
+    let driver_id: String?
+    let latitude: Double
+    let longitude: Double
+    let station_name: String?
+    let network: String?
+    let diesel_price_usd: Double
+    let evidence_type: String   // "manual" (digitado) por enquanto
+    let reported_at: String
+}
+
+/// Agregado público da RPC fuel_prices_near — último preço por posto + frescura + nº de reports.
+struct CrowdDieselPrice: Decodable, Identifiable {
+    let poi_place_id: String?
+    let station_name: String?
+    let network: String?
+    let latitude: Double
+    let longitude: Double
+    let diesel_price_usd: Double
+    let reported_at: String?       // ISO8601 (o rpc() usa decoder simples; parse no app)
+    let report_count: Int
+
+    var id: String { poi_place_id ?? String(format: "%.5f,%.5f", latitude, longitude) }
+    var reportedDate: Date? { reported_at.flatMap { ISO8601DateFormatter().date(from: $0) } }
 }
 
 struct TruckStopParkingReportPayload: Encodable {

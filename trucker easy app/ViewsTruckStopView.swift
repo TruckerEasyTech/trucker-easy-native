@@ -644,6 +644,28 @@ final class TruckStopService {
         }
     }
 
+    /// Crowdsourcing de diesel: aplica o preço REAL reportado por motoristas no posto mais próximo.
+    /// Só substitui o valor atual (scraped) se o report do crowd for MAIS FRESCO. Nunca inventa.
+    func applyCrowdDieselPrices(_ prices: [CrowdDieselPrice]) {
+        guard !prices.isEmpty else { return }
+        for price in prices {
+            let loc = CLLocation(latitude: price.latitude, longitude: price.longitude)
+            guard let idx = nearbyStops.enumerated()
+                .map({ ($0.offset, CLLocation(latitude: $0.element.coordinate.latitude, longitude: $0.element.coordinate.longitude)) })
+                .map({ ($0.0, loc.distance(from: $0.1)) })
+                .filter({ $0.1 <= 800 })
+                .sorted(by: { $0.1 < $1.1 })
+                .first?.0 else { continue }
+            let crowdDate = price.reportedDate
+            let existingDate = nearbyStops[idx].amenities.dieselUpdatedAt
+            let crowdIsFresher = existingDate == nil || (crowdDate.map { existingDate! < $0 } ?? false)
+            if crowdIsFresher {
+                nearbyStops[idx].amenities.dieselPrice = price.diesel_price_usd
+                nearbyStops[idx].amenities.dieselUpdatedAt = crowdDate
+            }
+        }
+    }
+
     /// Add a crowdsource report to a stop
     func addReport(to stopID: UUID, report: CrowdsourceReport) {
         if let idx = nearbyStops.firstIndex(where: { $0.id == stopID }) {
@@ -1125,6 +1147,7 @@ struct TruckStopDetailSheet: View {
     let stop: TruckStopItem
     let hos: HOSState
     let onNavigate: (TruckStopItem) -> Void
+    var onReportPrice: ((TruckStopItem) -> Void)? = nil
 
     @State private var showingCrowdsource = false
     @State private var crowdsourceReports: [CrowdsourceReport] = []
@@ -1144,6 +1167,22 @@ struct TruckStopDetailSheet: View {
                         hosBanner
                             .padding(.horizontal, AppTheme.Spacing.md)
                             .padding(.top, AppTheme.Spacing.md)
+
+                        // MARK: Reportar/atualizar preço do diesel (crowdsourcing — só dado real do motorista)
+                        if onReportPrice != nil {
+                            Button { onReportPrice?(stop) } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "fuelpump.fill")
+                                    Text(stop.amenities.dieselPrice != nil ? "Atualizar preço do diesel" : "Reportar preço do diesel")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundColor(Color(hex: "#f59e0b"))
+                                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                                .background(Color(hex: "#f59e0b").opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .padding(.horizontal, 16).padding(.top, 10)
+                        }
 
                         // MARK: Section: Parking
                         amenitySection(

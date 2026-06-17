@@ -41,6 +41,8 @@ struct HorizonView: View {
     @AppStorage("showTrafficCameras") private var showTrafficCameras = false
     @State private var trafficCameraService = TrafficCameraService.shared
     @State private var selectedCamera: TrafficCamera?
+    @State private var lastDieselFetchAt: Date = .distantPast
+    @State private var fuelReportStation: TruckStopItem?
     @State private var mapAlerts: [MapAlert] = []
     @State private var route: MKRoute?
     @State private var truckRoute: TruckRoute?
@@ -616,6 +618,29 @@ struct HorizonView: View {
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(item: $fuelReportStation) { stop in
+                FuelPriceReportSheet(
+                    stationName: stop.name,
+                    coordinate: stop.coordinate,
+                    poiPlaceID: nil,
+                    network: String(describing: stop.network),
+                    lang: lang,
+                    onSubmitted: {
+                        // Re-puxa o agregado já pra o report aparecer pro próprio motorista.
+                        if let loc = locationManager.currentLocation {
+                            lastDieselFetchAt = .distantPast
+                            Task {
+                                if let prices = try? await SupabaseClient.shared.fetchDieselPricesNear(
+                                    latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude) {
+                                    truckStopService.applyCrowdDieselPrices(prices)
+                                }
+                            }
+                        }
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
             .onChange(of: jurisdictionPolicyService.gpsHosRegion) { _, region in
                 // Compliance P0: a regra de HOS segue o país do GPS ao vivo. Cruzou US<->CA, troca
                 // 11h/14h <-> 13h/16h sem o motorista mexer em nada. Unidades/moeda NÃO mudam.
@@ -662,6 +687,13 @@ struct HorizonView: View {
             .sheet(item: $selectedTruckStop) { stop in
                 TruckStopDetailSheet(stop: stop, hos: liveHOSState, onNavigate: { truckStop in
                     calculateRoute(to: truckStop.coordinate, address: truckStop.name); showingTruckStops = false
+                }, onReportPrice: { s in
+                    // Fecha o detalhe e abre o report de preço (evita race de sheet aninhado).
+                    selectedTruckStop = nil
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        fuelReportStation = s
+                    }
                 })
                 .presentationDetents([.large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
             }
@@ -1782,6 +1814,15 @@ struct HorizonView: View {
                 await jurisdictionPolicyService.refreshIfNeeded(for: loc)
                 await operationalFeedService.refreshIfNeeded(for: loc.coordinate)
                 if showTrafficCameras { await trafficCameraService.refreshIfNeeded(near: loc) }
+                // Crowdsourcing de diesel: puxa o agregado público (último preço real por posto)
+                // e aplica nos truck stops. Vazio = sem report (nunca inventa). Throttle ~5min.
+                if Date().timeIntervalSince(lastDieselFetchAt) > 300 {
+                    lastDieselFetchAt = Date()
+                    if let prices = try? await SupabaseClient.shared.fetchDieselPricesNear(
+                        latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude) {
+                        truckStopService.applyCrowdDieselPrices(prices)
+                    }
+                }
                 await MainActor.run {
                     syncRegionalPolicyFromLocation()
                     operationalFeedService.applyWeighSignals()
