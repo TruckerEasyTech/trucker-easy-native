@@ -154,19 +154,9 @@ struct HorizonBottomSheet: View {
             } else {
                 isExpanded = false
             }
-            // #region agent log
-            #if DEBUG
-            print("[DBG][SEARCH][H-s1] searchFocused=\(focused) isExpanded=\(isExpanded)")
-            #endif
-            // #endregion
         }
         .onChange(of: destination) { _, newValue in
             searchDebounceTask?.cancel()
-            // #region agent log
-            #if DEBUG
-            print("[DBG][SEARCH][H-s1] destinationChanged len=\(newValue.count) showSuggestions=\(showSuggestions)")
-            #endif
-            // #endregion
             if newValue.count < 2 {
                 searchSuggestions = []
                 // Campo vazio + histórico → mantém o dropdown com os destinos recentes.
@@ -187,11 +177,6 @@ struct HorizonBottomSheet: View {
             if audioEngine == nil {
                 audioEngine = AVAudioEngine()
             }
-            // #region agent log
-            #if DEBUG
-            print("[DBG][BS][H-ui-5] HorizonBottomSheet onAppear ready speech/audio")
-            #endif
-            // #endregion
         }
     }
 
@@ -270,11 +255,6 @@ struct HorizonBottomSheet: View {
                 .focused($searchFocused)
                 .onSubmit {
                     if !destination.isEmpty {
-                        // #region agent log
-                        #if DEBUG
-                        print("[DBG][SEARCH][H-s2] onSubmit destination='\(destination)'")
-                        #endif
-                        // #endregion
                         submitDestination()
                     }
                 }
@@ -451,11 +431,6 @@ struct HorizonBottomSheet: View {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
-            // #region agent log
-            #if DEBUG
-            print("[DBG][AUD][H-audio-3] invalid input format channels=\(inputFormat.channelCount) rate=\(Int(inputFormat.sampleRate))")
-            #endif
-            // #endregion
             return
         }
         recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
@@ -494,21 +469,11 @@ struct HorizonBottomSheet: View {
             guard buffer.frameLength > 0 else { return }
             let byteSize = buffer.audioBufferList.pointee.mBuffers.mDataByteSize
             guard byteSize > 0 else {
-                // #region agent log
-                #if DEBUG
-                print("[DBG][AUD][H-audio-1] skip empty AVAudioBuffer byteSize=0")
-                #endif
-                // #endregion
                 return
             }
             self.recognitionRequest?.append(buffer)
         }
         isAudioTapInstalled = true
-        // #region agent log
-        #if DEBUG
-        print("[DBG][AUD][H-audio-3] tap installed sampleRate=\(Int(recordingFormat.sampleRate))")
-        #endif
-        // #endregion
 
         audioEngine.prepare()
         try? audioEngine.start()
@@ -574,11 +539,6 @@ struct HorizonBottomSheet: View {
         searchFocused = false
         destination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destination.isEmpty else { return }
-        // #region agent log
-        #if DEBUG
-        print("[DBG][SEARCH][H-s2] submitDestination trimmed='\(destination)' suggestions=\(searchSuggestions.count)")
-        #endif
-        // #endregion
 
         // Prefer coordinate-based routing from ranked suggestions
         // to avoid global geocoding picking a wrong far-away place.

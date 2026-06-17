@@ -7,27 +7,6 @@ import Foundation
 import CoreLocation
 import Observation
 
-private func agentLogNavigationEngine(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    DeveloperDebugLog.appendNDJSONLine(line)
-}
 
 @Observable
 @MainActor
@@ -180,16 +159,6 @@ final class NavigationEngine {
         guard clamped != currentStepIndex else { return }
         currentStepIndex = clamped
         lastSpokenStepIndex = -1
-        agentLogNavigationEngine(
-            runId: "post-fix",
-            hypothesisId: "H5",
-            location: "UtilitiesNavigationEngine.swift:syncStepIndexFromUI",
-            message: "UI synced step index",
-            data: [
-                "newIndex": clamped,
-                "steps": route.steps.count
-            ]
-        )
         if let step = route.steps[safe: currentStepIndex] {
             onStepChanged?(currentStepIndex, step)
         }
@@ -560,20 +529,6 @@ final class NavigationEngine {
         offRouteEvents.append(event)
         if offRouteEvents.count > 50 { offRouteEvents.removeFirst(offRouteEvents.count - 50) }
 
-        agentLogNavigationEngine(
-            runId: "off-route-metric",
-            hypothesisId: "H6",
-            location: "UtilitiesNavigationEngine.swift:evaluateOffRoute",
-            message: "Off-route confirmed; requesting reroute",
-            data: [
-                "reason": reason,
-                "lat": location.coordinate.latitude,
-                "lon": location.coordinate.longitude,
-                "distanceToRouteM": Int(distanceToRoute),
-                "confidence": Double(String(format: "%.2f", confidence)) ?? confidence,
-                "secondsToReroute": Double(String(format: "%.1f", secondsToReroute)) ?? secondsToReroute
-            ]
-        )
     }
 
     /// Called by the UI when a reroute request can't proceed right now (cooldown / missing destination).

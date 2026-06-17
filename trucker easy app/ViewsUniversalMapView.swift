@@ -5,27 +5,6 @@ import MapKit
 import MapboxMaps
 #endif
 
-private func agentLogUniversal(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    DeveloperDebugLog.appendNDJSONLine(line)
-}
 
 /// A universal map view that uses Mapbox when available, and falls back to Apple MapKit otherwise.
 public struct UniversalMapView: View {
@@ -85,33 +64,8 @@ public struct UniversalMapView: View {
         .mapStyle(.standard(elevation: .realistic))
         .ignoresSafeArea()
         .onAppear {
-            // #region agent log
-            agentLogUniversal(
-                runId: "baseline",
-                hypothesisId: "H2",
-                location: "ViewsUniversalMapView.swift:onAppear",
-                message: "UniversalMapView appeared",
-                data: [
-                    "polylineCount": polyline.count,
-                    "hasUserLocation": userLocation != nil,
-                    "hasDestination": destination != nil
-                ]
-            )
-            // #endregion
         }
         .onChange(of: polyline.count) { _, count in
-            // #region agent log
-            agentLogUniversal(
-                runId: "baseline",
-                hypothesisId: "H2",
-                location: "ViewsUniversalMapView.swift:onChange(polylineCount)",
-                message: "UniversalMapView polyline count changed",
-                data: [
-                    "polylineCount": count,
-                    "hasDestination": destination != nil
-                ]
-            )
-            // #endregion
         }
         .onChange(of: recenterTrigger) { _, _ in
             if let center = userLocation ?? destination {

@@ -98,29 +98,6 @@ final class RoutingService {
         }
     }
 
-    // #region agent log
-    private func agentLogRouting(
-        runId: String,
-        hypothesisId: String,
-        location: String,
-        message: String,
-        data: [String: Any] = [:]
-    ) {
-        let payload: [String: Any] = [
-            "sessionId": "ff95f6",
-            "runId": runId,
-            "hypothesisId": hypothesisId,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-        ]
-        guard let json = try? JSONSerialization.data(withJSONObject: payload),
-              var line = String(data: json, encoding: .utf8) else { return }
-        line.append("\n")
-        DeveloperDebugLog.appendNDJSONLine(line)
-    }
-    // #endregion
 
     // MARK: - Truck Route Request
     //
@@ -201,17 +178,6 @@ final class RoutingService {
                         #endif
                         guard Self.isRoutePlausible(origin: origin, destination: destination, route: valRoute) else {
                             failureReasons.append("Valhalla: implausible route rejected")
-                            agentLogRouting(
-                                runId: "baseline",
-                                hypothesisId: "H8",
-                                location: "RoutingService.swift:calculateTruckRoute",
-                                message: "Rejected implausible Valhalla route",
-                                data: [
-                                    "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                                    "routeMeters": Int(valRoute.distanceMeters),
-                                    "destinationName": destinationName
-                                ]
-                            )
                             throw RoutingServiceError.noRoute
                         }
                         #if DEBUG
@@ -265,17 +231,6 @@ final class RoutingService {
                 )
                 guard Self.isRoutePlausible(origin: origin, destination: destination, route: osrmRoute) else {
                     failureReasons.append("OSRM: implausible route rejected")
-                    agentLogRouting(
-                        runId: "baseline",
-                        hypothesisId: "H8",
-                        location: "RoutingService.swift:calculateTruckRoute",
-                        message: "Rejected implausible OSRM route",
-                        data: [
-                            "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                            "routeMeters": Int(osrmRoute.distanceMeters),
-                            "destinationName": destinationName
-                        ]
-                    )
                     throw RoutingServiceError.noRoute
                 }
                 lastProvider = .osrm
@@ -314,17 +269,6 @@ final class RoutingService {
             )
             guard Self.isRoutePlausible(origin: origin, destination: destination, route: mkRoute) else {
                 failureReasons.append("MapKit: implausible route rejected")
-                agentLogRouting(
-                    runId: "baseline",
-                    hypothesisId: "H8",
-                    location: "RoutingService.swift:calculateTruckRoute",
-                    message: "Rejected implausible MapKit route",
-                    data: [
-                        "crowMeters": Int(Self.crowDistanceMeters(from: origin, to: destination)),
-                        "routeMeters": Int(mkRoute.distanceMeters),
-                        "destinationName": destinationName
-                    ]
-                )
                 throw RoutingServiceError.noRoute
             }
             lastProvider = .mapKit
@@ -379,18 +323,6 @@ final class RoutingService {
             startedAt: startedAt,
             detail: detail
         )
-        // #region agent log
-        agentLogRouting(
-            runId: "baseline",
-            hypothesisId: "H9",
-            location: "RoutingService.swift:calculateTruckRoute",
-            message: "All providers failed; route rejected for safety",
-            data: [
-                "destinationName": destinationName,
-                "failureDetail": detail
-            ]
-        )
-        // #endregion
         throw RoutingServiceError.allProvidersFailed(detail)
     }
 

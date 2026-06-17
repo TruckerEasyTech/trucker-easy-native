@@ -11,27 +11,6 @@ import MapKit
 import CoreLocation
 import AVFoundation
 
-private func agentLogLegacy(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    DeveloperDebugLog.appendNDJSONLine(line)
-}
 
 // RootEntryView and TruckerEasyApp removed — app uses trucker_easy_appApp → AppEntryView
 
@@ -363,18 +342,6 @@ struct LegacyTruckNavigationMapView: View {
         .navigationTitle("🚛 Navigation")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            // #region agent log
-            agentLogLegacy(
-                runId: "baseline",
-                hypothesisId: "H1",
-                location: "ViewsTruckNavigationApp.swift:task",
-                message: "LegacyTruckNavigationMapView appeared",
-                data: [
-                    "hasDestination": destination != nil,
-                    "hasCurrentRoute": currentRoute != nil
-                ]
-            )
-            // #endregion
             await locationManager.requestLocation()
             
             // ✅ CORREÇÃO 4: Carregar cobertura da região
@@ -399,18 +366,6 @@ struct LegacyTruckNavigationMapView: View {
             }
         }
         .onChange(of: isCalculatingRoute) { _, newValue in
-            // #region agent log
-            agentLogLegacy(
-                runId: "baseline",
-                hypothesisId: "H3",
-                location: "ViewsTruckNavigationApp.swift:onChange(isCalculatingRoute)",
-                message: "Legacy isCalculatingRoute changed",
-                data: [
-                    "isCalculatingRoute": newValue,
-                    "hasCurrentRoute": currentRoute != nil
-                ]
-            )
-            // #endregion
         }
         .alert("Route Error", isPresented: .constant(routeError != nil)) {
             Button("OK") {
@@ -550,18 +505,6 @@ struct LegacyTruckNavigationMapView: View {
         isCalculatingRoute = true
         routeError = nil
         defer { isCalculatingRoute = false }
-        // #region agent log
-        agentLogLegacy(
-            runId: "baseline",
-            hypothesisId: "H2",
-            location: "ViewsTruckNavigationApp.swift:calculateRoute:start",
-            message: "Legacy route calculation started",
-            data: [
-                "hasOrigin": true,
-                "hasDestination": true
-            ]
-        )
-        // #endregion
         
         do {
             // Calculate route with warnings
@@ -573,19 +516,6 @@ struct LegacyTruckNavigationMapView: View {
             )
             
             currentRoute = route
-            // #region agent log
-            agentLogLegacy(
-                runId: "baseline",
-                hypothesisId: "H2",
-                location: "ViewsTruckNavigationApp.swift:calculateRoute:success",
-                message: "Legacy route calculation success",
-                data: [
-                    "provider": RoutingService.shared.lastProvider.rawValue,
-                    "coordinatesCount": route.coordinates.count,
-                    "stepsCount": route.steps.count
-                ]
-            )
-            // #endregion
             
             // Load warnings into manager
             await warningManager.loadWarnings(
@@ -625,18 +555,6 @@ struct LegacyTruckNavigationMapView: View {
             currentRoute = nil
             hapticManager.warning()
             #endif
-            // #region agent log
-            agentLogLegacy(
-                runId: "baseline",
-                hypothesisId: "H2",
-                location: "ViewsTruckNavigationApp.swift:calculateRoute:catch",
-                message: "Legacy route calculation failed and emergency route applied",
-                data: [
-                    "error": error.localizedDescription,
-                    "emergencyCoordinatesCount": currentRoute?.coordinates.count ?? 0
-                ]
-            )
-            // #endregion
         }
     }
 

@@ -24,38 +24,6 @@ private func horizonLogDebugWorkingDirectory() {
 }
 #endif
 
-private func agentLogHorizon(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    #if DEBUG
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    guard let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
-    let logURL = cachesDir.appendingPathComponent("debug-horizon-ff95f6.ndjson", isDirectory: false)
-    let path = logURL.path
-    if let handle = FileHandle(forWritingAtPath: path) {
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: Data(line.utf8))
-        try? handle.close()
-    } else {
-        try? line.write(toFile: path, atomically: true, encoding: .utf8)
-    }
-    #endif
-}
 
 // MARK: - Horizon View (Tab 1) — Map + Load Management
 struct HorizonView: View {
@@ -538,21 +506,6 @@ struct HorizonView: View {
                 // Atualiza o style pack offline do Mapbox p/ a versão atual (Offline API) — limpa o
                 // aviso "outdated resource mapbox://styles/mapbox/standard shall be updated".
                 OfflineRouteTileManager.shared.updateOfflineResources()
-                // #region agent log
-                agentLogHorizon(
-                    runId: "baseline",
-                    hypothesisId: "H1",
-                    location: "ViewsHorizonView.swift:onAppear",
-                    message: "HorizonView appeared",
-                    data: [
-                        "isNavigating": isNavigating,
-                        "hasTruckRoute": truckRoute != nil,
-                        "hasMapKitRoute": route != nil,
-                        "launchSafeScreenHeight": launchSafeScreenHeight,
-                        "isIdleBottomSheetReady": isIdleBottomSheetReady
-                    ]
-                )
-                // #endregion
                 // Clear ALL old route caches to prevent stale data from causing issues
                 for key in ["offlineRouteCache_v1", "offlineRouteCache_v2"] {
                     UserDefaults.standard.removeObject(forKey: key)
@@ -1618,19 +1571,6 @@ struct HorizonView: View {
                 .shadow(color: .black.opacity(0.4), radius: 12, y: -4)
         )
         .onAppear {
-            // #region agent log
-            agentLogHorizon(
-                runId: "ui-integration-1",
-                hypothesisId: "H-ui-bottom-bar",
-                location: "ViewsHorizonView.swift:etaBar",
-                message: "bottom telemetry bar visible",
-                data: [
-                    "durationSec": activeDurationSeconds,
-                    "distanceMeters": activeDistanceMeters,
-                    "arrivalClock": formatArrivalClock()
-                ]
-            )
-            // #endregion
         }
         .animation(.spring(response: 0.4), value: currentTollResult != nil)
     }
@@ -2017,22 +1957,6 @@ struct HorizonView: View {
             lastIdleRouteDedupeKey = key
             lastIdleRouteDedupeAt = now
         }
-        // #region agent log
-        agentLogHorizon(
-            runId: "baseline",
-            hypothesisId: "H10",
-            location: "ViewsHorizonView.swift:calculateRoute(to:coordinate,address)",
-            message: "Coordinate route request started",
-            data: [
-                "address": address,
-                "originLat": origin.coordinate.latitude,
-                "originLon": origin.coordinate.longitude,
-                "destLat": coordinate.latitude,
-                "destLon": coordinate.longitude,
-                "straightLineMeters": Int(origin.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)))
-            ]
-        )
-        // #endregion
         if !isReroute { isCalculatingRoute = true; bottomSheetExpanded = false }
         #if DEBUG
         print("[Route] \(isReroute ? "REROUTE" : "NEW") → \(address) from \(String(format: "%.5f,%.5f", origin.coordinate.latitude, origin.coordinate.longitude))")
@@ -2093,20 +2017,6 @@ struct HorizonView: View {
                 let sortedByDistance = response.mapItems.sorted {
                     origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) < origin.distance(from: CLLocation(latitude: $1.placemark.coordinate.latitude, longitude: $1.placemark.coordinate.longitude))
                 }
-                // #region agent log
-                agentLogHorizon(
-                    runId: "baseline",
-                    hypothesisId: "H10",
-                    location: "ViewsHorizonView.swift:calculateRoute(to:address)",
-                    message: "Address geocode candidates ranked by proximity",
-                    data: [
-                        "query": address,
-                        "candidateCount": sortedByDistance.count,
-                        "nearestMeters": Int(sortedByDistance.first.map { origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) } ?? -1),
-                        "farthestMeters": Int(sortedByDistance.last.map { origin.distance(from: CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude)) } ?? -1)
-                    ]
-                )
-                // #endregion
                 guard let first = sortedByDistance.first else {
                     throw RoutingServiceError.geocodeFailed(address)
                 }
@@ -2115,20 +2025,6 @@ struct HorizonView: View {
                 guard destinationDistance < 1_500_000 else {
                     throw RoutingServiceError.geocodeFailed("Destination too far from current location (\(Int(destinationDistance/1000)) km)")
                 }
-                // #region agent log
-                agentLogHorizon(
-                    runId: "baseline",
-                    hypothesisId: "H10",
-                    location: "ViewsHorizonView.swift:calculateRoute(to:address)",
-                    message: "Selected geocode candidate for routing",
-                    data: [
-                        "selectedName": destinationName,
-                        "selectedLat": first.placemark.coordinate.latitude,
-                        "selectedLon": first.placemark.coordinate.longitude,
-                        "selectedDistanceMeters": Int(destinationDistance)
-                    ]
-                )
-                // #endregion
                 let coord = first.placemark.coordinate
                 await MainActor.run {
                     if reroute {
@@ -2208,18 +2104,6 @@ struct HorizonView: View {
     private func syncNavigationStepIndexFromUI(_ newIndex: Int) {
         currentStepIndex = newIndex
         navigationEngine.syncStepIndexFromUI(newIndex)
-        // #region agent log
-        agentLogHorizon(
-            runId: "post-fix",
-            hypothesisId: "H5",
-            location: "ViewsHorizonView.swift:syncNavigationStepIndexFromUI",
-            message: "UI step change synced to NavigationEngine",
-            data: [
-                "newIndex": newIndex,
-                "stepsCount": routeSteps.count
-            ]
-        )
-        // #endregion
     }
 
     // MARK: - Apply Route (FIX #3: validates before applying)
@@ -2230,21 +2114,6 @@ struct HorizonView: View {
         suppressUIErrors: Bool = false,
         destinationCoordinate: CLLocationCoordinate2D? = nil
     ) {
-        // #region agent log
-        agentLogHorizon(
-            runId: "baseline",
-            hypothesisId: "H2",
-            location: "ViewsHorizonView.swift:applyRoute",
-            message: "Horizon applyRoute called",
-            data: [
-                "provider": RoutingService.shared.lastProvider.rawValue,
-                "coordinatesCount": result.coordinates.count,
-                "stepsCount": result.steps.count,
-                "distanceMeters": Int(result.distanceMeters),
-                "suppressUIErrors": suppressUIErrors
-            ]
-        )
-        // #endregion
         #if DEBUG
         print("[ApplyRoute] ✅ coords=\(result.coordinates.count), steps=\(result.steps.count), dist=\(Int(result.distanceMeters))m, name='\(result.destinationName)'")
         #endif
@@ -2437,19 +2306,6 @@ struct HorizonView: View {
                 navigationEngine.cancelPendingReroute()
                 return
             }
-            // #region agent log
-            agentLogHorizon(
-                runId: "baseline",
-                hypothesisId: "H12",
-                location: "ViewsHorizonView.swift:onNeedsReroute",
-                message: "Reroute using authoritative destination coordinate",
-                data: [
-                    "destLat": dest.latitude,
-                    "destLon": dest.longitude,
-                    "destinationName": result.destinationName
-                ]
-            )
-            // #endregion
             calculateRoute(to: dest, address: result.destinationName)
         }
         navigationEngine.onArrival = {

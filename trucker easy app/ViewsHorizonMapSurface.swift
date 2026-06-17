@@ -2,27 +2,6 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
-private func agentLogMapSurface(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    DeveloperDebugLog.appendNDJSONLine(line)
-}
 
 // MARK: - HorizonMapSurface
 //
@@ -97,11 +76,6 @@ struct HorizonMapSurface: UIViewRepresentable {
     // MARK: - Make the MKMapView
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
-        // #region agent log
-        #if DEBUG
-        print("[DBG][MAP][H-map-1] makeUIView start")
-        #endif
-        // #endregion
         map.overrideUserInterfaceStyle = .light  // Force light map so it's always visible
         map.delegate = context.coordinator
         map.showsUserLocation = true
@@ -150,11 +124,6 @@ struct HorizonMapSurface: UIViewRepresentable {
             }
         ))
 
-        // #region agent log
-        #if DEBUG
-        print("[DBG][MAP][H-map-1] makeUIView ready")
-        #endif
-        // #endregion
 
         return map
     }
@@ -221,20 +190,6 @@ struct HorizonMapSurface: UIViewRepresentable {
         // Only update overlays when the active polyline identity changes.
         let newPolyline = activePolyline
         if coord.currentRoutePolyline !== newPolyline {
-            // #region agent log
-            agentLogMapSurface(
-                runId: "baseline",
-                hypothesisId: "H4",
-                location: "ViewsHorizonMapSurface.swift:updateUIView:polylineChanged",
-                message: "HorizonMapSurface active polyline changed",
-                data: [
-                    "hasNewPolyline": newPolyline != nil,
-                    "newPolylinePointCount": newPolyline?.pointCount ?? 0,
-                    "isNavigating": isNavigating,
-                    "trackingMode": map.userTrackingMode.rawValue
-                ]
-            )
-            // #endregion
             // Remove old route overlays
             let oldRouteOverlays = map.overlays.filter { $0 is RouteOverlay }
             map.removeOverlays(oldRouteOverlays)
@@ -596,13 +551,6 @@ struct HorizonMapSurface: UIViewRepresentable {
                     view?.transform = CGAffineTransform(rotationAngle: radians)
                 }
             }
-            // #region agent log
-            #if DEBUG
-            if Int(angle) % 45 == 0 {
-                print("[DBG][MAP][H-map-2] user arrow rotated angle=\(Int(angle))")
-            }
-            #endif
-            // #endregion
         }
 
         // MARK: Detect user panning away during navigation — schedule re-engage

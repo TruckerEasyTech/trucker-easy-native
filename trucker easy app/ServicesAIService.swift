@@ -3,27 +3,6 @@ import Foundation
 import FoundationModels
 #endif
 
-private func agentLogAIService(
-    runId: String,
-    hypothesisId: String,
-    location: String,
-    message: String,
-    data: [String: Any] = [:]
-) {
-    let payload: [String: Any] = [
-        "sessionId": "ff95f6",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": Int(Date().timeIntervalSince1970 * 1000)
-    ]
-    guard let json = try? JSONSerialization.data(withJSONObject: payload),
-          var line = String(data: json, encoding: .utf8) else { return }
-    line.append("\n")
-    DeveloperDebugLog.appendNDJSONLine(line)
-}
 
 // MARK: - AI Service
 // Primary:  Apple Foundation Models (on-device, private, iOS 18+)
@@ -64,13 +43,6 @@ final class AIService {
             let model = SystemLanguageModel.default
             switch model.availability {
             case .available:
-                agentLogAIService(
-                    runId: "post-fix",
-                    hypothesisId: "H7",
-                    location: "ServicesAIService.swift:streamResponse",
-                    message: "Using Foundation Models provider",
-                    data: [:]
-                )
                 return streamWithFoundationModels(message: message, context: context)
             case .unavailable(.appleIntelligenceNotEnabled):
                 onDeviceIssue = "Apple Intelligence is turned OFF — enable it in Settings → Apple Intelligence & Siri, then try again"
@@ -84,26 +56,12 @@ final class AIService {
         }
         #endif
         if apiKey.isEmpty {
-            agentLogAIService(
-                runId: "post-fix",
-                hypothesisId: "H7",
-                location: "ServicesAIService.swift:streamResponse",
-                message: "AI unavailable: \(onDeviceIssue) + missing OpenRouterAPIKey",
-                data: ["foundationModelsAvailable": false]
-            )
             return AsyncThrowingStream { continuation in
                 continuation.finish(throwing: AIError.serviceUnavailable(
                     "\(onDeviceIssue). Cloud fallback is also off (OpenRouterAPIKey missing)."
                 ))
             }
         }
-        agentLogAIService(
-            runId: "post-fix",
-            hypothesisId: "H7",
-            location: "ServicesAIService.swift:streamResponse",
-            message: "Using OpenRouter provider",
-            data: ["foundationModelsAvailable": false, "hasOpenRouterKey": true]
-        )
         return streamWithOpenRouter(message: message, context: context)
     }
 
