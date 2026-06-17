@@ -561,6 +561,9 @@ final class RoutingService {
             let routeMeters = route.distanceMeters
             let polyMeters = polylineLengthMeters(route.coordinates)
 
+            // Geometria vazia = rota inválida (não navegável, MKPolyline degenerado). Rejeita
+            // antes de cachear/retornar, mesmo que distanceMeters venha >0 de um provider bugado.
+            guard route.coordinates.count >= 2 else { return false }
             guard routeMeters > 0, routeMeters.isFinite else { return false }
             if crow < 1_000 && routeMeters > 80_000 { return false }
             if crow < 15_000 && routeMeters > 500_000 { return false }
@@ -772,9 +775,11 @@ final class RoutingService {
 
         // MARK: - Offline Route Cache (up to 10 recent routes, 7-day expiry)
 
-        private static let maxCachedRoutes = 10
-        private static let cacheExpirySeconds: TimeInterval = 7 * 24 * 3600
-        private static let cacheKey = "offlineRouteCache_v3"
+        // nonisolated: constantes imutáveis acessadas pela fila de persistência (nonisolated).
+        // Sem isto, o Swift 6 trata como acesso main-actor a partir de contexto nonisolated (race).
+        nonisolated private static let maxCachedRoutes = 10
+        nonisolated private static let cacheExpirySeconds: TimeInterval = 7 * 24 * 3600
+        nonisolated private static let cacheKey = "offlineRouteCache_v3"
 
         private func cacheRoute(
             _ route: TruckRoute,

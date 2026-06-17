@@ -44,8 +44,8 @@ private func agentLogHorizon(
     guard let json = try? JSONSerialization.data(withJSONObject: payload),
           var line = String(data: json, encoding: .utf8) else { return }
     line.append("\n")
-    let logURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        .appendingPathComponent("debug-horizon-ff95f6.ndjson", isDirectory: false)
+    guard let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+    let logURL = cachesDir.appendingPathComponent("debug-horizon-ff95f6.ndjson", isDirectory: false)
     let path = logURL.path
     if let handle = FileHandle(forWritingAtPath: path) {
         _ = try? handle.seekToEnd()
