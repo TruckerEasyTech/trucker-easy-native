@@ -3554,11 +3554,13 @@ struct HorizonView: View {
             } catch {
                 if !isReroute { isCalculatingRoute = false }
                 if isReroute {
-                    // Sem modal: reroute falhou mantém a rota atual e tenta de novo no cooldown.
-                    if case RoutingServiceError.allProvidersFailed = error {
-                        lastRerouteAt = Date().addingTimeInterval(150)
-                    }
-                    print("[Route] reroute failed: \(error.localizedDescription)")
+                    // Reroute falhou: RE-ARMA a detecção pra TENTAR DE NOVO. Sem isto, o engine
+                    // ficava preso em .rerouting e o motorista seguia perdido sem recálculo. A rota
+                    // antiga reaparece (não fica em branco) e retentamos no cooldown normal (30s) —
+                    // não na antiga penalidade de 2.5min que deixava o driver sem rota.
+                    lastRerouteAt = Date()
+                    navigationEngine.cancelPendingReroute()
+                    print("[Route] reroute failed (vai retentar em ~30s): \(error.localizedDescription)")
                 } else {
                     bottomSheetExpanded = false
                     routeError = lang.horizonRoutingFailureMessage(error)

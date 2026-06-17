@@ -477,6 +477,15 @@ final class NavigationEngine {
         offRouteStreak += 1
         let elapsed = Date().timeIntervalSince(offRouteSince ?? Date())
 
+        // SEGURANÇA — nunca deixar o driver perdido: muito longe da rota (>240m) por tempo
+        // sustentado e vários fixes consecutivos NÃO é ruído de GPS, é desvio real. Recalcula
+        // INDEPENDENTE da confiança; senão, com sinal fraco (cânion/área remota) a confiança fica
+        // baixa e o reroute nunca dispararia — o motorista seguiria perdido sem rota nova.
+        if distanceToRoute > offRouteThreshold * 2 && elapsed >= 12 && offRouteStreak >= 5 {
+            requestReroute(reason: "safety_far_sustained", location: location, distanceToRoute: distanceToRoute, elapsed: elapsed)
+            return
+        }
+
         // Only act on positions we actually trust — otherwise wait for a cleaner fix.
         guard confidence >= minConfidenceForReroute else { return }
 
