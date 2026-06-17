@@ -29,6 +29,7 @@ struct DriverProfileView: View {
     @State private var showingEditName       = false
     @State private var showingFoodPrefs      = false
     @State private var showingLanguage       = false
+    @State private var showingVoicePicker    = false
     @State private var showingPrivacy        = false
     @State private var showingHelp           = false
     @State private var showingBypassHistory  = false
@@ -100,6 +101,7 @@ struct DriverProfileView: View {
         }
         .sheet(isPresented: $showingFoodPrefs)      { FoodPreferencesSheet() }
         .sheet(isPresented: $showingLanguage)        { LanguageSelectionSheet(regionalSettings: regionalSettings) }
+        .sheet(isPresented: $showingVoicePicker)     { VoiceSelectionSheet(regionalSettings: regionalSettings) }
         .sheet(isPresented: $showingPrivacy)         { PrivacyPolicySheet() }
         .sheet(isPresented: $showingHelp)            { HelpSupportSheet() }
         .sheet(isPresented: $showingBypassHistory)   { BypassHistorySheet() }
@@ -503,6 +505,15 @@ struct DriverProfileView: View {
                     ProfileRow(icon: "globe", iconColor: AppTheme.Colors.accent,
                                title: lang.languageLabel,
                                subtitle: regionalSettings.currentLanguage.rawValue + "  " + regionalSettings.currentLanguage.flagEmoji)
+                }
+
+                Divider().background(AppTheme.Colors.backgroundCard)
+
+                // Navigation voice
+                Button(action: { showingVoicePicker = true }) {
+                    ProfileRow(icon: "speaker.wave.2.fill", iconColor: AppTheme.Colors.accent,
+                               title: "Voz da navegação",
+                               subtitle: VoiceNavigationManager.shared.isEnabled ? "Escolher voz e ouvir amostra" : "Desativada")
                 }
 
                 Divider().background(AppTheme.Colors.backgroundCard)

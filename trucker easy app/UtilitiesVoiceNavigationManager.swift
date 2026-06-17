@@ -23,6 +23,16 @@ final class VoiceNavigationManager {
         }
     }
 
+    /// Voz escolhida manualmente pelo motorista (identifier do AVSpeechSynthesisVoice). Sobrepõe a
+    /// seleção automática, mas só p/ o idioma correspondente. Vazio = automático (melhor disponível).
+    var preferredVoiceIdentifier: String {
+        get { UserDefaults.standard.string(forKey: "navVoiceIdentifier") ?? "" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "navVoiceIdentifier")
+            voiceCache.removeAll()   // re-resolve com a nova escolha
+        }
+    }
+
     // MARK: - Private
     private var _isEnabled: Bool
     private let synthesizer = AVSpeechSynthesizer()
@@ -191,6 +201,19 @@ final class VoiceNavigationManager {
         let all = AVSpeechSynthesisVoice.speechVoices()
         let lang = languageCode.lowercased()
 
+        // Voz escolhida pelo motorista tem prioridade — desde que ainda instalada E do mesmo idioma
+        // (não usa uma voz en p/ falar pt). Se não bater, cai na seleção automática abaixo.
+        let preferredId = preferredVoiceIdentifier
+        if !preferredId.isEmpty,
+           let chosen = all.first(where: { $0.identifier == preferredId }),
+           chosen.language.lowercased().hasPrefix(String(lang.prefix(2))) {
+            voiceCache[languageCode] = chosen
+            #if DEBUG
+            print("[Voice] Manual: \(chosen.name) [\(chosen.language)] quality:\(chosen.quality.rawValue)")
+            #endif
+            return chosen
+        }
+
         // Exact locale first (e.g. "en-us"), then language prefix (e.g. "en")
         let exact  = all.filter { $0.language.lowercased() == lang }
         let prefix = all.filter { $0.language.lowercased().hasPrefix(String(lang.prefix(2))) }
@@ -269,5 +292,43 @@ final class VoiceNavigationManager {
         #if DEBUG
         print("[Voice] ▶︎ \"\(text)\"  voice:\(utterance.voice?.name ?? "?")")
         #endif
+    }
+
+    // MARK: - Voice picker support
+
+    /// Vozes instaladas p/ um idioma (prefixo "en", "pt"…), mais natural/melhor qualidade primeiro.
+    func installedVoices(forLanguagePrefix prefix: String) -> [AVSpeechSynthesisVoice] {
+        let p = String(prefix.lowercased().prefix(2))
+        let pool = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.lowercased().hasPrefix(p) }
+        return pool.sorted { a, b in
+            let qa = qualityRank(a.quality), qb = qualityRank(b.quality)
+            if qa != qb { return qa > qb }
+            if naturalnessRank(a) != naturalnessRank(b) { return naturalnessRank(a) < naturalnessRank(b) }
+            return a.name < b.name
+        }
+    }
+
+    /// Rótulo de qualidade p/ a UI ("Premium" / "Avançada" / "Padrão").
+    func qualityLabel(_ quality: AVSpeechSynthesisVoiceQuality) -> String {
+        switch quality {
+        case .premium:  return "Premium"
+        case .enhanced: return "Avançada"
+        default:        return "Padrão"
+        }
+    }
+
+    /// Toca uma amostra com a voz dada (preview no seletor), com a mesma cadência suave da navegação.
+    func previewVoice(identifier: String, sample: String) {
+        guard let voice = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.identifier == identifier }) else { return }
+        synthesizer.stopSpeaking(at: .immediate)
+        let u = AVSpeechUtterance(string: sample)
+        u.voice = voice
+        u.rate = AVSpeechUtteranceDefaultSpeechRate * 0.96
+        u.pitchMultiplier = 0.98
+        u.volume = 1.0
+        u.preUtteranceDelay = 0.05
+        u.postUtteranceDelay = 0.1
+        synthesizer.speak(u)
     }
 }
