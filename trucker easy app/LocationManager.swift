@@ -151,6 +151,21 @@ class LocationManager: NSObject, CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
+        #if DEBUG
+        // Log de uma-vez (só na mudança de autorização) pra confirmar o nível no console.
+        switch manager.authorizationStatus {
+        case .authorizedAlways:
+            print("[Location] permissão = SEMPRE ✅ — navegação em 2º plano (tela bloqueada) funciona")
+        case .authorizedWhenInUse:
+            print("[Location] permissão = AO USAR ⚠️ — GPS PAUSA com a tela bloqueada; escalando p/ 'Sempre'")
+        case .denied, .restricted:
+            print("[Location] permissão = NEGADA ❌ — sem GPS")
+        case .notDetermined:
+            print("[Location] permissão = ainda não decidida")
+        @unknown default:
+            break
+        }
+        #endif
         if manager.authorizationStatus == .authorizedWhenInUse {
             manager.requestAlwaysAuthorization()
         }
