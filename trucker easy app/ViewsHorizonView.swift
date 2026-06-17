@@ -37,6 +37,7 @@ struct HorizonView: View {
 
     @State private var locationManager = LocationManager()
     @State private var selectedMapStyle: MapStyleOption = .globe
+    @AppStorage("weatherRadarEnabled") private var weatherRadarEnabled = false
     @State private var mapAlerts: [MapAlert] = []
     @State private var route: MKRoute?
     @State private var truckRoute: TruckRoute?
@@ -784,6 +785,7 @@ struct HorizonView: View {
                         onControlsReady: { zoomIn, zoomOut, recenter in
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
+                        weatherRadarEnabled: weatherRadarEnabled,
                         truckStops: isNavigating ? mapTruckStopsForDisplay : [],
                         routeSignage: isNavigating ? routeSignageService.onRouteSignage : [],
                         onTruckStopTapped: { stop in selectedTruckStop = stop }
@@ -1193,6 +1195,16 @@ struct HorizonView: View {
                         HorizonMapControlsPanel(
                             onZoomIn: { mapZoomIn?() }, onZoomOut: { mapZoomOut?() }, onRecenter: { mapRecenter?() }
                         )
+                        // Radar de chuva REAL (NEXRAD/NOAA) — toggle. Dado de governo, grátis, auto-atualiza.
+                        Button(action: { withAnimation(.spring(response: 0.3)) { weatherRadarEnabled.toggle() } }) {
+                            Image(systemName: "cloud.rain.fill").font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(weatherRadarEnabled ? .white : Color(hex: "#5aa9e6"))
+                                .frame(width: 44, height: 44)
+                                .background(weatherRadarEnabled ? Color(hex: "#5aa9e6") : Color(hex: "#1a1a1f"))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#5aa9e6").opacity(0.5), lineWidth: 0.5))
+                                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                        }
                         Button(action: { withAnimation(.spring(response: 0.3)) { showingAIChat.toggle() } }) {
                             Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold))
                                 .foregroundColor(showingAIChat ? .white : Color(hex: "#c9a84c"))

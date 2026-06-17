@@ -156,6 +156,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     var onStyleChange: ((MapStyleOption) -> Void)? = nil
     var onControlsReady: (((zoomIn: () -> Void, zoomOut: () -> Void, recenter: () -> Void)) -> Void)? = nil
     var mapControls: MapControlActions? = nil
+    /// Radar de chuva REAL (NEXRAD via IEM/NOAA) sobreposto no mapa — dado de governo, grátis,
+    /// auto-atualizado (o endpoint serve sempre o mosaico mais recente). Toggle do motorista.
+    var weatherRadarEnabled: Bool = false
     var truckStops: [TruckStopItem] = []
     /// Sinalização viária no corredor da rota (semáforos + PARE) — só durante a navegação na cidade.
     var routeSignage: [RouteSignageItem] = []
@@ -308,6 +311,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         Self.tuckMapboxOrnaments(mapView, navigating: isNavigating)
         let coord = context.coordinator
         coord.isNavigatingMode = isNavigating
+        coord.syncWeatherRadar(enabled: weatherRadarEnabled, on: mapView)
         coord.onTruckStopTapped = onTruckStopTapped
         coord.onStyleChange = onStyleChange
 
@@ -439,6 +443,64 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         var wasNavigatingMode = false
         private var needsInitialRouteCameraFit = false
         private var followPuckAllowedAfter: Date = .distantPast
+        private var weatherRadarEnabled = false
+        private var weatherRadarTimer: Timer?
+
+        // MARK: - Weather radar (NEXRAD real, NOAA via Iowa Mesonet — grátis, sem chave, auto-atualiza)
+        private let weatherRadarSourceId = "weather-radar-src"
+        private let weatherRadarLayerId = "weather-radar-layer"
+
+        func syncWeatherRadar(enabled: Bool, on mapView: MapboxMaps.MapView) {
+            guard enabled != weatherRadarEnabled else { return }
+            weatherRadarEnabled = enabled
+            if enabled {
+                addWeatherRadar(on: mapView)
+                // Auto-atualização: re-carrega o mosaico mais recente a cada 5 min enquanto ligado.
+                weatherRadarTimer?.invalidate()
+                weatherRadarTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self, weak mapView] _ in
+                    guard let self, let mapView, self.weatherRadarEnabled else { return }
+                    self.refreshWeatherRadar(on: mapView)
+                }
+            } else {
+                weatherRadarTimer?.invalidate(); weatherRadarTimer = nil
+                removeWeatherRadar(on: mapView)
+            }
+        }
+
+        private func addWeatherRadar(on mapView: MapboxMaps.MapView) {
+            let map = mapView.mapboxMap
+            guard !map.layerExists(withId: weatherRadarLayerId) else { return }
+            do {
+                if !map.sourceExists(withId: weatherRadarSourceId) {
+                    var source = RasterSource(id: weatherRadarSourceId)
+                    // NEXRAD (EUA) — radar NOAA via Iowa Environmental Mesonet. XYZ, grátis, sem chave,
+                    // serve SEMPRE o mosaico mais recente (dado real, nunca fabricado).
+                    source.tiles = ["https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png"]
+                    source.tileSize = 256
+                    source.attribution = "NOAA / Iowa Environmental Mesonet"
+                    try map.addSource(source)
+                }
+                var layer = RasterLayer(id: weatherRadarLayerId, source: weatherRadarSourceId)
+                layer.rasterOpacity = .constant(0.55)
+                try map.addLayer(layer)
+            } catch {
+                #if DEBUG
+                print("[WeatherRadar] addLayer falhou: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        private func removeWeatherRadar(on mapView: MapboxMaps.MapView) {
+            let map = mapView.mapboxMap
+            if map.layerExists(withId: weatherRadarLayerId) { try? map.removeLayer(withId: weatherRadarLayerId) }
+            if map.sourceExists(withId: weatherRadarSourceId) { try? map.removeSource(withId: weatherRadarSourceId) }
+        }
+
+        private func refreshWeatherRadar(on mapView: MapboxMaps.MapView) {
+            // Remove + re-adiciona força o Mapbox a buscar os tiles atuais (mosaico mais recente).
+            removeWeatherRadar(on: mapView)
+            addWeatherRadar(on: mapView)
+        }
 
         func requestInitialRouteCameraFit() {
             needsInitialRouteCameraFit = true
