@@ -4089,6 +4089,20 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Banner honesto: sem sinal durante a navegação. O GPS é local (continua), a rota está em
+    /// cache; só o RECÁLCULO online está indisponível. Nunca esconder o estado offline do motorista.
+    var horizonOfflineFollowRoute: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Offline · GPS live, follow the route"
+        case .portuguese: return "Offline · GPS ativo, siga a rota"
+        case .spanish, .spanishLatam: return "Sin conexión · GPS activo, siga la ruta"
+        case .french: return "Hors ligne · GPS actif, suivez l'itinéraire"
+        case .german: return "Offline · GPS aktiv, der Route folgen"
+        case .polish: return "Offline · GPS aktywny, jedź trasą"
+        case .russian: return "Офлайн · GPS работает, следуйте маршруту"
+        }
+    }
+
     var horizonNearbyWeighStationDefault: String {
         switch self {
         case .english, .hindi, .arabic: return "Nearby Weigh Station"

@@ -446,6 +446,7 @@ struct HorizonView: View {
     @State private var countryCompliance = CountryComplianceManager.shared
     @State private var fleetTelemetryService = FleetTelemetryService.shared
     @State private var jurisdictionPolicyService = JurisdictionPolicyService.shared
+    @State private var networkReachability = NetworkReachability.shared
     @State private var operationalFeedService = OperationalFeedService.shared
     @State private var showingSpeedComplianceAlert = false
     @State private var speedComplianceMessage = ""
@@ -929,6 +930,25 @@ struct HorizonView: View {
                     poisHidden: navigationPOIsHidden
                 )
                 .zIndex(400)
+            }
+
+            // Fase 1.4: banner honesto de offline durante a navegação. O GPS é local (continua) e
+            // a rota está em cache — só o recálculo online está fora. Nunca esconder esse estado.
+            if isNavigating && !networkReachability.isOnline {
+                VStack(spacing: 0) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wifi.slash").font(.system(size: 12, weight: .bold))
+                        Text(lang.horizonOfflineFollowRoute).font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Capsule().fill(Color.black.opacity(0.78)))
+                    .overlay(Capsule().stroke(Color.orange.opacity(0.55), lineWidth: 1))
+                    .padding(.top, 150)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(420)
             }
 
             navigationOverlays
