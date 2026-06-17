@@ -651,9 +651,6 @@ struct HorizonView: View {
             }
             .onChange(of: locationManager.locationFixEpoch) { _, _ in
                 handleLocationUpdate()
-                #if DEBUG
-                print("[DBG][H16] gps status update='\(gpsStatusText)' live=\(gpsIsLive)")
-                #endif
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
