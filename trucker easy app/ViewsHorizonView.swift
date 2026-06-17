@@ -2334,6 +2334,12 @@ struct HorizonView: View {
         lastRoutingProvider = provider; dockCheckDone = false
         navigationEngine.language = lang
         navigationEngine.startNavigation(route: routeForNavigation)
+        // startNavigation reseta o passo p/ 0. Se isto é uma TROCA de rota no meio da viagem
+        // (reroute / switch offline do corredor), alimenta a posição atual JÁ — o engine acha o
+        // ponto mais próximo mid-rota e corrige o passo no mesmo ciclo, sem anunciar o passo 0 errado.
+        if let loc = locationManager.currentLocation {
+            navigationEngine.updateLocation(loc)
+        }
         #if DEBUG
         print("[TRACE-NAV] 11 · navigationEngine ligado")
         #endif

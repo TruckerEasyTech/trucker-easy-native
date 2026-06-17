@@ -467,6 +467,9 @@ class TruckRestrictionWarningManager {
     /// Reverse geocode a location to ISO-3166-1 alpha-2 country code.
     /// Uses MKReverseGeocodingRequest on iOS 26+, CLGeocoder on earlier versions.
     private static func reverseGeocodeISOCode(location: CLLocation) async -> String? {
+        // Offline: o reverse-geocode (CLGeocoder/MK) pendura ~30s até dar timeout. Curto-circuita
+        // na hora — o chamador (loadWarnings) cai pro perfil de regulação base sem travar.
+        guard await MainActor.run(body: { NetworkReachability.shared.isOnline }) else { return nil }
         if #available(iOS 26, *) {
             guard let request = MKReverseGeocodingRequest(location: location),
                   let item = try? await request.mapItems.first,
