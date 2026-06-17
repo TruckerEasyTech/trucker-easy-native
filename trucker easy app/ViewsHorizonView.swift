@@ -431,6 +431,22 @@ struct HorizonView: View {
         return age <= maxAge && loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy <= maxAccuracy
     }
 
+    /// Distância mínima (m) do motorista a uma polyline de rota. Amostra os pontos (rota pode ter
+    /// milhares) — aproximação suficiente pra ESCOLHER qual corredor está mais perto (Fase 1.2b).
+    private func minDistanceToRoute(_ loc: CLLocation, _ coords: [CLLocationCoordinate2D]) -> Double {
+        guard !coords.isEmpty else { return .greatestFiniteMagnitude }
+        var best = Double.greatestFiniteMagnitude
+        let step = max(1, coords.count / 400)
+        var i = 0
+        while i < coords.count {
+            let c = coords[i]
+            let d = loc.distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+            if d < best { best = d }
+            i += step
+        }
+        return best
+    }
+
     private var gpsStatusText: String {
         guard let loc = locationManager.currentLocation else { return lang.horizonGpsSearching }
         let age = Int(abs(loc.timestamp.timeIntervalSinceNow))
@@ -2364,6 +2380,29 @@ struct HorizonView: View {
             // snap do NavigationEngine continua guiando o motorista de volta a rota (corredor).
             // Honesto e sem thrash. (cancelPendingReroute = re-arma + restaura a linha da rota.)
             if !NetworkReachability.shared.isOnline {
+                // Fase 1.2b: offline, tenta trocar pra a alternativa do corredor MAIS PERTO do
+                // motorista (sem rede — já está em cache). Reusa applyRoute (mesmo caminho do
+                // reroute online). Só troca se a alternativa for nitidamente mais perto (>60m),
+                // pra evitar flapping. Senão, mantém a rota e re-arma (comportamento 1.3).
+                if let driver = locationManager.currentLocation,
+                   let active = truckRoute, !active.corridorAlternates.isEmpty {
+                    let activeDist = minDistanceToRoute(driver, active.coordinates)
+                    let scored = active.corridorAlternates.enumerated()
+                        .map { (idx: $0.offset, route: $0.element, dist: minDistanceToRoute(driver, $0.element.coordinates)) }
+                    if let best = scored.min(by: { $0.dist < $1.dist }), best.dist + 60 < activeDist {
+                        #if DEBUG
+                        print("[Route] Reroute OFFLINE → troca p/ alternativa do corredor (\(Int(best.dist))m vs principal \(Int(activeDist))m)")
+                        #endif
+                        var chosen = best.route
+                        // preserva as opções: demais alternativas + a principal antiga (sem aninhar corredor).
+                        var remaining = active.corridorAlternates.enumerated().filter { $0.offset != best.idx }.map { $0.element }
+                        var oldPrimary = active; oldPrimary.corridorAlternates = []
+                        remaining.append(oldPrimary)
+                        chosen.corridorAlternates = remaining
+                        applyRoute(chosen, suppressUIErrors: true, destinationCoordinate: activeRouteDestination)
+                        return
+                    }
+                }
                 #if DEBUG
                 print("[Route] Reroute OFFLINE — mantendo rota em cache, re-armando deteccao")
                 #endif
