@@ -351,12 +351,22 @@ struct HorizonView: View {
     @State private var aiChatInput = ""
     @State private var aiIsStreaming = false
 
-    @State private var showingRouteEasyPicker = false
     @State private var showingRouteEasyUpgrade = false
     @State private var routeEasyUpsellKind: RouteEasyKind = .fewerTolls
     @State private var routeEasyOptions: [RouteEasyOption] = []
     @State private var routeEasyPendingCoordinate: CLLocationCoordinate2D?
     @State private var routeEasyPendingAddress: String = ""
+    /// Payload do seletor de rotas. Usar `.sheet(item:)` (em vez de isPresented + estado separado)
+    /// garante que o sheet abra SEMPRE com as opções já dentro — elimina a race onde o seletor
+    /// abria vazio (Free/Standard/Premium sem cartões) e o tap não fazia nada.
+    @State private var routeEasyPickerPayload: RouteEasyPickerPayload?
+
+    struct RouteEasyPickerPayload: Identifiable {
+        let id = UUID()
+        let options: [RouteEasyOption]
+        let address: String
+        let coordinate: CLLocationCoordinate2D
+    }
     @State private var integrationHealthResults: [IntegrationHealthResult] = []
     @State private var integrationHealthChecked = false
 
@@ -719,28 +729,30 @@ struct HorizonView: View {
             } message: {
                 Text(lang.horizonTruckSafeFallbackExplanation(provider: pendingFallbackProvider.rawValue))
             }
-            .sheet(isPresented: $showingRouteEasyPicker) {
+            .sheet(item: $routeEasyPickerPayload, onDismiss: {
+                // Fechar de qualquer jeito (Cancelar OU arrastar a aba pra baixo) limpa o estado.
+                routeEasyOptions = []
+                routeEasyPendingCoordinate = nil
+            }) { payload in
                 HorizonRouteEasyPickerSheet(
-                    options: routeEasyOptions,
-                    destinationName: routeEasyPendingAddress,
+                    options: payload.options,
+                    destinationName: payload.address,
                     useMiles: !regionalSettings.currentRegion.usesMetric,
                     currentPlan: subscriptionPlan,
                     lang: lang,
                     onSelect: { option in
-                        selectRouteEasyOption(option)
+                        selectRouteEasyOption(option, coordinate: payload.coordinate, address: payload.address)
                     },
                     onUpgrade: { kind in
                         presentRouteEasyUpgrade(for: kind)
                     },
                     onCancel: {
-                        showingRouteEasyPicker = false
-                        routeEasyOptions = []
-                        routeEasyPendingCoordinate = nil
+                        routeEasyPickerPayload = nil
                     }
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .interactiveDismissDisabled(isCalculatingRoute)
+                // SEM interactiveDismissDisabled — a aba TEM que abaixar/fechar ao arrastar pra baixo.
             }
             .sheet(isPresented: $showingRouteEasyUpgrade) {
                 SubscriptionView(highlightPlan: AppAccessPolicy.requiredPlan(for: routeEasyUpsellKind))
@@ -1366,8 +1378,8 @@ struct HorizonView: View {
                 onWeighStation: { showingWeighStation = true },
                 onRestAreas: { selectedNearbyCategory = .rest },
                 onRouteOptions: {
-                    if routeEasyPendingCoordinate != nil, !routeEasyOptions.isEmpty {
-                        showingRouteEasyPicker = true
+                    if let coord = routeEasyPendingCoordinate, !routeEasyOptions.isEmpty {
+                        routeEasyPickerPayload = RouteEasyPickerPayload(options: routeEasyOptions, address: routeEasyPendingAddress, coordinate: coord)
                     } else {
                         bottomSheetExpanded = true
                     }
@@ -3378,26 +3390,19 @@ struct HorizonView: View {
 
     // MARK: - Route Easy (compare truck routes)
 
-    private func selectRouteEasyOption(_ option: RouteEasyOption) {
-        guard let coord = routeEasyPendingCoordinate else {
-            routeError = lang.horizonRouteErrorCouldNotCalculate
-            showingRouteError = true
-            return
-        }
-        let address = routeEasyPendingAddress
-        showingRouteEasyPicker = false
+    private func selectRouteEasyOption(_ option: RouteEasyOption, coordinate: CLLocationCoordinate2D, address: String) {
+        routeEasyPickerPayload = nil   // fecha a aba (item -> nil)
         // Aplica a rota DEPOIS do sheet fechar. Aplicar no mesmo ciclo da dismissão fazia o
-        // SwiftUI engolir a navegação — por isso a seleção dos 3 modos "não funcionava" e só o
-        // caminho da seta (sem sheet em voo) pegava. Mesmo padrão do presentRouteEasyUpgrade.
+        // SwiftUI engolir a navegação — por isso a seleção "não funcionava".
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 350_000_000)
-            commitSelectedRoute(option, coordinate: coord, address: address)
+            commitSelectedRoute(option, coordinate: coordinate, address: address)
         }
     }
 
     private func presentRouteEasyUpgrade(for kind: RouteEasyKind) {
         routeEasyUpsellKind = kind
-        showingRouteEasyPicker = false
+        routeEasyPickerPayload = nil
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 350_000_000)
             showingRouteEasyUpgrade = true
@@ -3459,13 +3464,9 @@ struct HorizonView: View {
                         commitSelectedRoute(fastest, coordinate: coordinate, address: address)
                         return
                     }
-                    // Apresenta o sheet no PRÓXIMO ciclo — assim o SwiftUI já commitou routeEasyOptions
-                    // e o seletor lê a lista CHEIA. A 1ª apresentação estava capturando a lista vazia
-                    // (por isso "não fazia nada" na 1ª vez e só funcionava depois de cancelar + ir).
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 60_000_000)
-                        showingRouteEasyPicker = true
-                    }
+                    // .sheet(item:): as opções VÃO DENTRO do payload — o seletor abre SEMPRE cheio,
+                    // já na 1ª vez (sem a race que abria vazio). Atômico, sem defer.
+                    routeEasyPickerPayload = RouteEasyPickerPayload(options: options, address: address, coordinate: coordinate)
                     #if DEBUG
                     print("[RouteEasy] Picker apresentado — \(options.count) opções")
                     #endif
