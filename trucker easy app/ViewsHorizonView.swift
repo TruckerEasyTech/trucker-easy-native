@@ -38,6 +38,9 @@ struct HorizonView: View {
     @State private var locationManager = LocationManager()
     @State private var selectedMapStyle: MapStyleOption = .globe
     @AppStorage("weatherRadarEnabled") private var weatherRadarEnabled = false
+    @AppStorage("showTrafficCameras") private var showTrafficCameras = false
+    @State private var trafficCameraService = TrafficCameraService.shared
+    @State private var selectedCamera: TrafficCamera?
     @State private var mapAlerts: [MapAlert] = []
     @State private var route: MKRoute?
     @State private var truckRoute: TruckRoute?
@@ -602,6 +605,17 @@ struct HorizonView: View {
                 hosContext.updateRules(maxDriving: hos.maxDrivingHours, serviceWindow: hos.serviceWindowHours,
                                        breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
             }
+            .onChange(of: showTrafficCameras) { _, on in
+                // Ao ligar, busca as câmeras do corredor JÁ (não espera o próximo fix de GPS).
+                if on, let loc = locationManager.currentLocation {
+                    Task { await trafficCameraService.refreshIfNeeded(near: loc) }
+                }
+            }
+            .sheet(item: $selectedCamera) { cam in
+                TrafficCameraSheet(camera: cam, lang: lang)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
             .onChange(of: jurisdictionPolicyService.gpsHosRegion) { _, region in
                 // Compliance P0: a regra de HOS segue o país do GPS ao vivo. Cruzou US<->CA, troca
                 // 11h/14h <-> 13h/16h sem o motorista mexer em nada. Unidades/moeda NÃO mudam.
@@ -788,7 +802,9 @@ struct HorizonView: View {
                         weatherRadarEnabled: weatherRadarEnabled,
                         truckStops: isNavigating ? mapTruckStopsForDisplay : [],
                         routeSignage: isNavigating ? routeSignageService.onRouteSignage : [],
-                        onTruckStopTapped: { stop in selectedTruckStop = stop }
+                        cameras: showTrafficCameras ? trafficCameraService.cameras : [],
+                        onTruckStopTapped: { stop in selectedTruckStop = stop },
+                        onCameraTapped: { selectedCamera = $0 }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
@@ -1195,6 +1211,16 @@ struct HorizonView: View {
                         HorizonMapControlsPanel(
                             onZoomIn: { mapZoomIn?() }, onZoomOut: { mapZoomOut?() }, onRecenter: { mapRecenter?() }
                         )
+                        // Câmeras de trânsito 511 REAIS — toggle. Dado de governo (cron), imagem ao vivo.
+                        Button(action: { withAnimation(.spring(response: 0.3)) { showTrafficCameras.toggle() } }) {
+                            Image(systemName: "video.fill").font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(showTrafficCameras ? .white : Color(hex: "#1aa6a6"))
+                                .frame(width: 44, height: 44)
+                                .background(showTrafficCameras ? Color(hex: "#1aa6a6") : Color(hex: "#1a1a1f"))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#1aa6a6").opacity(0.5), lineWidth: 0.5))
+                                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                        }
                         // Radar de chuva REAL (NEXRAD/NOAA) — toggle. Dado de governo, grátis, auto-atualiza.
                         Button(action: { withAnimation(.spring(response: 0.3)) { weatherRadarEnabled.toggle() } }) {
                             Image(systemName: "cloud.rain.fill").font(.system(size: 17, weight: .semibold))
@@ -1755,6 +1781,7 @@ struct HorizonView: View {
                 await countryCompliance.refreshIfNeeded(for: loc)
                 await jurisdictionPolicyService.refreshIfNeeded(for: loc)
                 await operationalFeedService.refreshIfNeeded(for: loc.coordinate)
+                if showTrafficCameras { await trafficCameraService.refreshIfNeeded(near: loc) }
                 await MainActor.run {
                     syncRegionalPolicyFromLocation()
                     operationalFeedService.applyWeighSignals()

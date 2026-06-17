@@ -162,7 +162,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     var truckStops: [TruckStopItem] = []
     /// Sinalização viária no corredor da rota (semáforos + PARE) — só durante a navegação na cidade.
     var routeSignage: [RouteSignageItem] = []
+    var cameras: [TrafficCamera] = []
     var onTruckStopTapped: ((TruckStopItem) -> Void)? = nil
+    var onCameraTapped: ((TrafficCamera) -> Void)? = nil
 
     private func activeRouteCoordinates() -> [CLLocationCoordinate2D]? {
         if let tr = truckRoute, tr.coordinates.count >= 2 { return tr.coordinates }
@@ -229,6 +231,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         coordinator.mapView = mapView
         coordinator.installManagers(on: mapView)
         coordinator.onTruckStopTapped = onTruckStopTapped
+        coordinator.onCameraTapped = onCameraTapped
         coordinator.onStyleChange = onStyleChange
         coordinator.lastRouteFingerprint = routeFingerprint()
         coordinator.lastStyle = selectedMapStyle
@@ -243,7 +246,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             fitCameraToRoute: !isNavigating,
             dimmed: dimRoute
         )
-        coordinator.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts)
+        coordinator.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts, cameras: cameras)
         if let fullLoc = locationManager.currentLocation {
             coordinator.lastKnownCoordinate = fullLoc.coordinate
             mapView.mapboxMap.setCamera(to: CameraOptions(center: fullLoc.coordinate, zoom: 14, bearing: 0, pitch: 0))
@@ -313,6 +316,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         coord.isNavigatingMode = isNavigating
         coord.syncWeatherRadar(enabled: weatherRadarEnabled, on: mapView)
         coord.onTruckStopTapped = onTruckStopTapped
+        coord.onCameraTapped = onCameraTapped
         coord.onStyleChange = onStyleChange
 
         let targetMargins: UIEdgeInsets = isNavigating
@@ -382,7 +386,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
 
         coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts,
-                            signage: isNavigating ? routeSignage : [])
+                            signage: isNavigating ? routeSignage : [], cameras: cameras)
         // Feed the native interpolated puck. During navigation it gets route-snapped samples
         // (stable corridor bearing); idle it gets raw GPS. The custom lead-arrow annotation is
         // gone — the puck IS the cursor now, so make sure it stays cleared.
@@ -420,7 +424,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                     quantumAccent: self.routeQuantumLineAccent,
                     fitCameraToRoute: !coordinator.isNavigatingMode
                 )
-                coordinator.refreshPoints(mapView: mapView, truckStops: self.truckStops, alerts: self.mapAlerts)
+                coordinator.refreshPoints(mapView: mapView, truckStops: self.truckStops, alerts: self.mapAlerts, cameras: self.cameras)
             }
         }
     }
@@ -610,6 +614,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// não uma renderização por POI.
         private var stopImageCache: [String: PointAnnotation.Image] = [:]
         private var alertImageCache: [String: PointAnnotation.Image] = [:]
+        // Câmeras de trânsito 511 (mesmo padrão dos truck stops).
+        private var cameraManager: PointAnnotationManager?
+        private var lastCamerasFingerprint: Int?
+        private var cachedCameraImage: PointAnnotation.Image?
+        var onCameraTapped: ((TrafficCamera) -> Void)?
 
         /// Incremental polyline anchor for route chevron (reset when route geometry changes).
         private var lastLeadArrowPolyIndex: Int = 0
@@ -649,6 +658,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             routeLineManager = mapView.annotations.makePolylineAnnotationManager(id: "horizon-route")
             routeArrowManager = mapView.annotations.makePointAnnotationManager(id: "horizon-route-lead-arrow")
             truckStopManager = mapView.annotations.makePointAnnotationManager(id: "horizon-stops")
+            cameraManager = mapView.annotations.makePointAnnotationManager(id: "horizon-cameras")
             alertManager = mapView.annotations.makePointAnnotationManager(id: "horizon-alerts")
             signageManager = mapView.annotations.makePointAnnotationManager(id: "horizon-signage")
             // Bug "seta por baixo da linha": os managers acima entram no TOPO da pilha e cobrem o
@@ -665,6 +675,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             mapView.location.options.puckBearingEnabled = true
             // Managers recriados começam vazios → força refreshPoints a re-adicionar os pins.
             lastStopsFingerprint = nil
+            lastCamerasFingerprint = nil
             lastAlertsFingerprint = nil
             lastSignageFingerprint = nil
         }
@@ -798,9 +809,37 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             return out
         }
 
+        /// Pins de câmera 511 — mesma estratégia (fingerprint p/ não reconstruir por frame, 1 ícone
+        /// em cache pra todas, tap → onCameraTapped). Lista vazia = sem pins (nada fabricado).
+        private func refreshCameras(cameras: [TrafficCamera]) {
+            guard let camMgr = cameraManager else { return }
+            var hasher = Hasher()
+            for c in cameras { hasher.combine(c.id) }
+            let fp = hasher.finalize()
+            guard fp != lastCamerasFingerprint else { return }
+            lastCamerasFingerprint = fp
+            let img = cachedCameraImage ?? HorizonMapboxPinImages.trafficCameraImage()
+            cachedCameraImage = img
+            var anns: [PointAnnotation] = []
+            anns.reserveCapacity(cameras.count)
+            for c in cameras {
+                var ann = PointAnnotation(id: "cam-\(c.id)", coordinate: c.coordinate)
+                ann.iconAnchor = .bottom
+                if let img { ann.image = img }
+                let captured = c
+                ann.tapHandler = { [weak self] _ in
+                    self?.onCameraTapped?(captured)
+                    return true
+                }
+                anns.append(ann)
+            }
+            camMgr.annotations = anns
+        }
+
         func refreshPoints(mapView: MapboxMaps.MapView, truckStops: [TruckStopItem], alerts: [MapAlert],
-                           signage: [RouteSignageItem] = []) {
+                           signage: [RouteSignageItem] = [], cameras: [TrafficCamera] = []) {
             refreshSignage(mapView: mapView, signage: signage)
+            refreshCameras(cameras: cameras)
             guard let stopsMgr = truckStopManager, let alertMgr = alertManager else { return }
 
             var stopsHasher = Hasher()
@@ -1007,6 +1046,23 @@ private enum HorizonMapboxPinImages {
         }
         let name = "al-\(alert.id.uuidString)"
         return PointAnnotation.Image(image: img, name: name, sdf: false)
+    }
+
+    /// Pin de câmera de trânsito 511 — ícone de vídeo num pin teal. Todas usam o mesmo (cache).
+    static func trafficCameraImage() -> PointAnnotation.Image? {
+        let size: CGFloat = 30
+        let fill = UIColor(red: 0.10, green: 0.65, blue: 0.66, alpha: 1)
+        let img = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { _ in
+            let path = UIBezierPath(roundedRect: CGRect(x: 0, y: 0, width: size, height: size), cornerRadius: 8)
+            fill.setFill(); path.fill()
+            UIColor.white.withAlphaComponent(0.9).setStroke(); path.lineWidth = 1.5; path.stroke()
+            if let sym = UIImage(systemName: "video.fill")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 13, weight: .bold))
+                .withTintColor(.white, renderingMode: .alwaysOriginal) {
+                sym.draw(in: CGRect(x: 7, y: 8, width: 16, height: 14))
+            }
+        }
+        return PointAnnotation.Image(image: img, name: "traffic-camera-pin", sdf: false)
     }
 
     private static func uiColor(for type: MapAlert.AlertType) -> UIColor {
