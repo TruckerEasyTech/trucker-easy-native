@@ -2316,7 +2316,10 @@ struct HorizonView: View {
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
         #if canImport(MapboxMaps)
         // Offline C3 — baixa tiles do corredor (visão geral + janela à frente) ao aplicar a rota.
-        if MapProviderConfig.isMapboxHorizonRendererEnabled, result.coordinates.count >= 2 {
+        // Só com rede: offline o download falharia em silêncio e enfileiraria lixo no Mapbox
+        // (acontece no switch offline pra alternativa do corredor — os tiles já vieram online).
+        if MapProviderConfig.isMapboxHorizonRendererEnabled, result.coordinates.count >= 2,
+           NetworkReachability.shared.isOnline {
             OfflineRouteTileManager.shared.cacheRoute(coordinates: result.coordinates, style: selectedMapStyle.mapboxStyleURI)
         }
         #endif
@@ -2383,14 +2386,18 @@ struct HorizonView: View {
             if !NetworkReachability.shared.isOnline {
                 // Fase 1.2b: offline, tenta trocar pra a alternativa do corredor MAIS PERTO do
                 // motorista (sem rede — já está em cache). Reusa applyRoute (mesmo caminho do
-                // reroute online). Só troca se a alternativa for nitidamente mais perto (>60m),
-                // pra evitar flapping. Senão, mantém a rota e re-arma (comportamento 1.3).
-                if let driver = locationManager.currentLocation,
+                // reroute online). COOLDOWN obrigatório: applyRoute reseta passo/voz e dispara
+                // tasks — sem o cooldown isto dispararia a cada ciclo de detecção (thrash). Só
+                // troca 1x/30s e se a alternativa for nitidamente mais perto (>120m, anti-flap
+                // do ruído de GPS). Senão, mantém a rota e re-arma (comportamento 1.3).
+                if Date().timeIntervalSince(lastRerouteAt) > 30,
+                   let driver = locationManager.currentLocation,
                    let active = truckRoute, !active.corridorAlternates.isEmpty {
                     let activeDist = minDistanceToRoute(driver, active.coordinates)
                     let scored = active.corridorAlternates.enumerated()
                         .map { (idx: $0.offset, route: $0.element, dist: minDistanceToRoute(driver, $0.element.coordinates)) }
-                    if let best = scored.min(by: { $0.dist < $1.dist }), best.dist + 60 < activeDist {
+                    if let best = scored.min(by: { $0.dist < $1.dist }), best.dist + 120 < activeDist {
+                        lastRerouteAt = Date()   // trava o switch por 30s (anti-thrash)
                         #if DEBUG
                         print("[Route] Reroute OFFLINE → troca p/ alternativa do corredor (\(Int(best.dist))m vs principal \(Int(activeDist))m)")
                         #endif
