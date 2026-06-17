@@ -346,12 +346,16 @@ struct HOSState {
     var dutyTimeRemainingHours: Double   // Total on-duty hours remaining
     var isInBreak: Bool
     var breakEndsAt: Date?
+    /// Velocidade média REAL em movimento (telemetria DotHosContext); nil até ter amostras.
+    /// Usada na reachability dos truck stops — substitui o chute de velocidade fixa.
+    var averageDrivingSpeedMph: Double? = nil
 
     static let mock = HOSState(
         driveTimeRemainingHours: 4.5,
         dutyTimeRemainingHours: 7.0,
         isInBreak: false,
-        breakEndsAt: nil
+        breakEndsAt: nil,
+        averageDrivingSpeedMph: nil
     )
 
     var driveTimeText: String {

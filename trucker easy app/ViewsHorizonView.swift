@@ -483,7 +483,8 @@ struct HorizonView: View {
             driveTimeRemainingHours: hosContext.drivingRemaining / 3600,
             dutyTimeRemainingHours: hosContext.shiftRemaining / 3600,
             isInBreak: hosContext.status == .offDuty || hosContext.status == .sleeper,
-            breakEndsAt: nil
+            breakEndsAt: nil,
+            averageDrivingSpeedMph: hosContext.averageDrivingSpeedMph
         )
     }
     private var subscriptionPlan: TruckerEasyPlan { store.effectivePlan }
