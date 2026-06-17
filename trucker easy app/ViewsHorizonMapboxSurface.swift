@@ -753,26 +753,34 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         ) {
             guard coords.count >= 2 else { return }
 
-            // POSIÇÃO = GPS REAL (±2m) — precisão acima de tudo. A polyline do Valhalla é decimada
-            // (pontos a 10-50m); projetar o GPS nela colocava o puck visivelmente torto (a causa de
-            // "localização imprecisa"). Agora a bolinha fica EXATAMENTE onde o motorista está, e a
-            // rota é usada só pra um RUMO suave (corredor), evitando o tremor do course do GPS.
-            var bearing: CLLocationDirection = user.course >= 0 ? user.course : lastEmittedBearing
-            if let snap = PolylineLeadArrow.snappedPosition(
+            // CONSISTÊNCIA linha+seta+posição (igual Google/Apple): durante a navegação a SETA anda
+            // SOBRE a linha da rota (snap), não no GPS cru deslocado na faixa. A linha segue a via,
+            // a seta segue a linha -> tudo bate. Mostra GPS REAL só quando o motorista está DE FATO
+            // fora da rota (>35m: cobre faixa ~3m + ruído de GPS), aí o auto-reroute religa. Rumo =
+            // corredor (suave), sem o tremor do course.
+            guard let snap = PolylineLeadArrow.snappedPosition(
                 coords: coords,
                 user: user,
                 anchorIndex: &lastLeadArrowPolyIndex
-            ) {
-                bearing = snap.bearingDegrees
+            ) else {
+                emitRawLocation(user: user)
+                return
             }
-            lastEmittedBearing = bearing
-            smoothedRouteCoord = user.coordinate
-            smoothedRouteBearing = bearing
-            snapProvider.emit(
-                coordinate: user.coordinate,
-                bearing: bearing,
-                speed: max(0, user.speed)
-            )
+            let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
+            if snapped.distance(from: user) <= 35 {
+                // Na rota: a seta GRUDA na linha (consistente).
+                lastEmittedBearing = snap.bearingDegrees
+                smoothedRouteCoord = snap.coordinate
+                smoothedRouteBearing = snap.bearingDegrees
+                snapProvider.emit(coordinate: snap.coordinate, bearing: snap.bearingDegrees, speed: max(0, user.speed))
+            } else {
+                // Fora da rota de verdade: GPS real honesto (o reroute religa a linha).
+                let bearing = user.course >= 0 ? user.course : lastEmittedBearing
+                lastEmittedBearing = bearing
+                smoothedRouteCoord = user.coordinate
+                smoothedRouteBearing = bearing
+                snapProvider.emit(coordinate: user.coordinate, bearing: bearing, speed: max(0, user.speed))
+            }
         }
 
         /// Feeds the native puck with raw GPS while idle (no route). Mapbox still interpolates
