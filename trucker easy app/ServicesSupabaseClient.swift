@@ -70,7 +70,6 @@ enum SupabaseConfig {
         static let shipperFacilityReviews = "shipper_facility_reviews"
         static let driverWellnessCheckins = "driver_wellness_checkins"
         static let driverWellnessInsights = "driver_wellness_insights"
-        static let routeOptimizations = "route_optimizations"
     }
 }
 

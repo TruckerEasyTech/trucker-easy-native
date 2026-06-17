@@ -936,9 +936,8 @@ struct TruckingNewsView: View {
             }
             return true
         } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-            }
+            // Camada Supabase de notícias é um acelerador opcional (a tabela pode nem existir).
+            // Falha em silêncio: o RSS REAL (FreightWaves/Transport Topics) é o dono do estado de erro.
             return false
         }
     }
