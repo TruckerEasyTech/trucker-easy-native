@@ -1686,6 +1686,12 @@ struct HorizonView: View {
             hosContext.endRouteSession()
             return
         }
+        // P0 #5: navegação com a tela bloqueada / app em 2º plano só recebe GPS com permissão
+        // "Sempre". Se está só em "Quando em uso", o boneco congela ao bloquear a tela. Escala
+        // AGORA (início da rota) — é o momento em que o 2º plano passa a importar.
+        if locationManager.authorizationStatus == .authorizedWhenInUse {
+            locationManager.requestPermission()
+        }
         bottomSheetExpanded = false
         showingAIChat = false
         showingSteps = false
