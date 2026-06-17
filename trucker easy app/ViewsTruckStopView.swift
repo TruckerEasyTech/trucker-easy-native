@@ -652,9 +652,10 @@ final class TruckStopService {
             case .parkingFull:
                 nearbyStops[idx].amenities.parkingAvailable = 0
             case .parkingAvailable:
-                // Não inventar total (era `?? 50`). Só estima a partir de um total REAL; sem total
-                // conhecido, fica nil (desconhecido) em vez de um número fabricado.
-                nearbyStops[idx].amenities.parkingAvailable = nearbyStops[idx].amenities.parkingSlots.map { $0 / 2 }
+                // Reporte qualitativo ("tem vaga") NÃO dá contagem real. Não fabricar um número
+                // (era slots/2, exibido como "60/120" real). Fica nil = contagem desconhecida.
+                // O reporte em si fica registrado; só não inventamos a quantidade.
+                nearbyStops[idx].amenities.parkingAvailable = nil
             default:
                 break
             }
@@ -1412,16 +1413,20 @@ struct TruckStopDetailSheet: View {
             Spacer()
             // Parking fill bar
             if let total = stop.amenities.parkingSlots {
-                let fraction = stop.amenities.parkingAvailable.map { Double($0) / Double(max(total, 1)) } ?? 0.5
+                // Só pinta a barra quando a contagem disponível é REAL. Desconhecida = sem fill
+                // (antes inventava 50% cheio, enganando que "metade está livre"). O texto mostra "?".
+                let fraction = stop.amenities.parkingAvailable.map { Double($0) / Double(max(total, 1)) }
                 VStack(spacing: 3) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 3)
                                 .fill(AppTheme.Colors.backgroundCard)
                                 .frame(height: 6)
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(status.color)
-                                .frame(width: geo.size.width * fraction, height: 6)
+                            if let fraction {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(status.color)
+                                    .frame(width: geo.size.width * fraction, height: 6)
+                            }
                         }
                     }
                     .frame(width: 60, height: 6)

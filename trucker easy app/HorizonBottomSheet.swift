@@ -797,8 +797,8 @@ struct HorizonBottomSheet: View {
     }
 
     private func adjustedTruckETA(seconds: Double, distanceMeters: Double) -> String {
-        let miles = distanceMeters / 1609.34
-        let truckHours = miles / 62.0
-        return formatTime(truckHours * 3600)
+        // Usa a duração REAL da rota — o Valhalla truck costing já calcula o tempo com a velocidade
+        // de caminhão. Recalcular num 62 mph fixo era um número inventado sobrescrevendo o real.
+        return formatTime(seconds)
     }
 }

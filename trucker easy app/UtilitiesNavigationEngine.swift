@@ -406,7 +406,11 @@ final class NavigationEngine {
 
         distanceRemaining = remaining
 
-        let speed = max(location.speed, 13.4)
+        // ETA: velocidade do GPS quando confiável (em movimento ≥2 m/s); senão a média PLANEJADA
+        // da rota (REAL, do Valhalla: distância/duração) — nunca um valor fixo chutado. Parado, o
+        // ETA reflete o ritmo planejado da rota, não um "30 mph" inventado.
+        let plannedAvgSpeed = route.durationSeconds > 0 ? route.distanceMeters / route.durationSeconds : 0
+        let speed = location.speed >= 2.0 ? location.speed : plannedAvgSpeed
         if speed > 0 {
             timeRemaining = remaining / speed
             eta = Date().addingTimeInterval(timeRemaining)

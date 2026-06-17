@@ -156,7 +156,10 @@ enum RouteEasyEngine {
                         fuelStop: cheapestFuelStop,
                         compareTo: fastRoute,
                         decisionSummary: "Premium AI balances time, tolls, diesel price, and suggested fuel stops.",
-                        estimatedSavingsUSD: max(2, fastRoute.tollCostUSD * 0.15),
+                        // Sem parada de combustível real comparável, NÃO inventar economia (era 15%
+                        // do pedágio = número fabricado). nil → o subtítulo cai no honesto
+                        // "balances time, tolls, fuel and HOS", sem "$X" falso.
+                        estimatedSavingsUSD: nil,
                         recommendedStopsCount: cheapestFuelStop == nil ? 0 : 1,
                         subtitleOverride: "Premium · AI cost-benefit route"
                     )
