@@ -3381,7 +3381,13 @@ struct HorizonView: View {
         }
         let address = routeEasyPendingAddress
         showingRouteEasyPicker = false
-        commitSelectedRoute(option, coordinate: coord, address: address)
+        // Aplica a rota DEPOIS do sheet fechar. Aplicar no mesmo ciclo da dismissão fazia o
+        // SwiftUI engolir a navegação — por isso a seleção dos 3 modos "não funcionava" e só o
+        // caminho da seta (sem sheet em voo) pegava. Mesmo padrão do presentRouteEasyUpgrade.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            commitSelectedRoute(option, coordinate: coord, address: address)
+        }
     }
 
     private func presentRouteEasyUpgrade(for kind: RouteEasyKind) {

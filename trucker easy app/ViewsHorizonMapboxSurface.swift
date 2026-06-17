@@ -577,6 +577,18 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             truckStopManager = mapView.annotations.makePointAnnotationManager(id: "horizon-stops")
             alertManager = mapView.annotations.makePointAnnotationManager(id: "horizon-alerts")
             signageManager = mapView.annotations.makePointAnnotationManager(id: "horizon-signage")
+            // Bug "seta por baixo da linha": os managers acima entram no TOPO da pilha e cobrem o
+            // puck. Re-asserir o puckType só atualiza no lugar (não reordena) — por isso ele
+            // continuava embaixo. Forçamos a RECRIAÇÃO (nil → puck2D): a camada do indicador é
+            // removida e re-adicionada no topo, acima da linha da rota.
+            mapView.location.options.puckType = nil
+            var puckConfig = Puck2DConfiguration()
+            puckConfig.showsAccuracyRing = false
+            puckConfig.topImage = HorizonMapboxPinImages.userNavigationArrowPuckImage()
+            puckConfig.scale = .constant(1.0)
+            mapView.location.options.puckType = .puck2D(puckConfig)
+            mapView.location.options.puckBearing = .heading
+            mapView.location.options.puckBearingEnabled = true
             // Managers recriados começam vazios → força refreshPoints a re-adicionar os pins.
             lastStopsFingerprint = nil
             lastAlertsFingerprint = nil
@@ -660,7 +672,22 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 coords: coords,
                 user: user,
                 anchorIndex: &lastLeadArrowPolyIndex
-            ) else { return }
+            ) else {
+                // Sem snap válido: NÃO congela o puck (bug antigo) — mostra o GPS real.
+                emitRawLocation(user: user)
+                return
+            }
+
+            // Precisão: o snap deve só CORRIGIR pequenos desvios pra alinhar à via, nunca
+            // REALOCAR. Se moveria o puck > 30m (via paralela, shape decimado do Valhalla, ou
+            // motorista de fato fora da rota), o GPS real (±2m) é mais confiável → mostra ele.
+            let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
+            guard snapped.distance(from: user) <= 30 else {
+                smoothedRouteCoord = user.coordinate
+                if user.course >= 0 { smoothedRouteBearing = user.course }
+                emitRawLocation(user: user)
+                return
+            }
 
             // Track an anchor for recenter/hasAnchor consumers (kept in sync with the snap).
             smoothedRouteCoord = snap.coordinate
