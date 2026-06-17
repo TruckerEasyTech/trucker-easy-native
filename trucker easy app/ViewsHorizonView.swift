@@ -884,7 +884,10 @@ struct HorizonView: View {
                     currentSpeed: navCurrentSpeedText,
                     speedUnit: regionalSettings.currentRegion.distanceUnit == "mi" ? "MPH" : "KM/H",
                     isOverspeeding: navOverspeeding,
-                    showLaneBar: isHighwayStep(routeSteps[safeStepIndex].instructions),
+                    // Falso-positivo removido: a barra mostrava sempre 4 faixas todas ativas (sem dado
+                    // real de qual faixa pegar). Fica oculta até o lane guidance REAL (parse de
+                    // maneuver.lanes do Valhalla) — feature do Tier 2 pós-TestFlight.
+                    showLaneBar: false,
                     selectedMapStyle: $selectedMapStyle,
                     voiceManager: voiceManager,
                     lang: lang,
