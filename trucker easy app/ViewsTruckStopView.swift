@@ -638,7 +638,9 @@ final class TruckStopService {
 
             nearbyStops[index].amenities.parkingAvailable = signal.availableSlots
             nearbyStops[index].amenities.parkingSlots = signal.totalSlots ?? nearbyStops[index].amenities.parkingSlots
-            nearbyStops[index].amenities.parkingUpdatedAt = signal.updatedAt ?? Date()
+            // Frescura REAL do feed (TPIMS observed_at). Se desconhecida, fica nil — NÃO finge "agora"
+            // (era `?? Date()`, que mostrava "Updated just now" pra dado sem timestamp = falso-positivo).
+            nearbyStops[index].amenities.parkingUpdatedAt = signal.updatedAt
         }
     }
 

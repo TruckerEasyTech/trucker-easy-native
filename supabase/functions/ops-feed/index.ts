@@ -161,17 +161,17 @@ Deno.serve(async (req) => {
       return haversineKm(lat, lon, la, lo) <= maxKm;
     })
     .map((r) => {
+      // NÃO fabricar vagas (era `?? 50` + 65%/20% inventado, exibido como nº real). "full" = 0
+      // vaga é honesto; "many"/"some" não dá número real -> null (desconhecido). O app mostra "?".
       const status = String(r.status ?? "").toLowerCase();
-      const inferredTotal = (r.total_slots as number | null) ?? 50;
-      const inferredAvailable =
-        (r.available_slots as number | null) ??
-        (status === "full" ? 0 : status === "many" ? Math.round(inferredTotal * 0.65) : Math.round(inferredTotal * 0.2));
+      const available = (r.available_slots as number | null) ?? (status === "full" ? 0 : null);
+      const total = (r.total_slots as number | null) ?? null;
       return {
         location_name: (r.location_name as string) ?? "Parking report",
         latitude: r.latitude as number,
         longitude: r.longitude as number,
-        available_slots: inferredAvailable,
-        total_slots: inferredTotal,
+        available_slots: available,
+        total_slots: total,
         updated_at: r.reported_at as string,
       };
     });
