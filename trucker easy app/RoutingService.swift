@@ -1027,6 +1027,11 @@ struct TruckRoute: Equatable {
     var tollCurrency: String = "USD"
     var tollPoints: [TollPoint] = []
 
+    /// Fase 1.2: rotas alternativas do MESMO cálculo (Valhalla `alternates`) = o "corredor".
+    /// Geometria + passos pra reroute OFFLINE: se o motorista sai da principal sem sinal, o app
+    /// pode trocar pra uma alternativa em cache (mais perto) sem rede. Ignorado pelo == (abaixo).
+    var corridorAlternates: [TruckRoute] = []
+
     var polyline: MKPolyline {
         MKPolyline(coordinates: coordinates, count: coordinates.count)
     }

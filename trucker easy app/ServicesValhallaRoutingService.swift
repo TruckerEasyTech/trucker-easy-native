@@ -321,7 +321,9 @@ final class ValhallaRoutingService {
                 "units": "miles",
                 "language": Self.valhallaInstructionLanguageTag()
             ],
-            "shape_match": "walk_or_snap"
+            "shape_match": "walk_or_snap",
+            // Fase 1.2: pede até 2 rotas alternativas (o "corredor") pro reroute offline.
+            "alternates": 2
         ]
 
         return try JSONSerialization.data(withJSONObject: body)
@@ -388,7 +390,42 @@ final class ValhallaRoutingService {
         route.tollCurrency = tollEstimate.currency
         route.tollPoints = tollEstimate.points
 
+        // Fase 1.2: anexa o corredor (alternativas) pro reroute offline.
+        if let alts = response.alternates, !alts.isEmpty {
+            route.corridorAlternates = alts.compactMap { parseAlternateTrip($0.trip, destinationName: destinationName) }
+        }
+
         return route
+    }
+
+    /// Geometria + passos de um trip ALTERNATIVO — só o necessário pra navegar offline
+    /// (sem tolls/notices, que não são críticos pra um desvio de emergência sem sinal).
+    private func parseAlternateTrip(_ trip: ValhallaTrip, destinationName: String) -> TruckRoute? {
+        guard !trip.legs.isEmpty else { return nil }
+        var coords: [CLLocationCoordinate2D] = []
+        var steps: [RouteStep] = []
+        for leg in trip.legs {
+            coords.append(contentsOf: StandardPolylineDecoder.decode(leg.shape, precision: 6))
+            for m in leg.maneuvers {
+                let instr = m.instruction.trimmingCharacters(in: .whitespaces)
+                guard !instr.isEmpty else { continue }
+                steps.append(RouteStep(
+                    instruction: instr,
+                    distanceMeters: m.length * 1609.34,
+                    durationSeconds: m.time,
+                    maneuver: ValhallaManeuverType(rawValue: m.type)?.instruction ?? instr
+                ))
+            }
+        }
+        guard !coords.isEmpty else { return nil }
+        return TruckRoute(
+            coordinates: coords,
+            steps: steps,
+            distanceMeters: Double(trip.summary.length) * 1609.34,
+            durationSeconds: trip.summary.time,
+            destinationName: destinationName,
+            truckNotices: []
+        )
     }
 
     // MARK: - Toll Estimation (from Valhalla toll_booth flags)
@@ -626,6 +663,12 @@ enum ValhallaError: LocalizedError {
 // MARK: - Valhalla Response Models
 
 private struct ValhallaRouteResponse: Decodable {
+    let trip: ValhallaTrip
+    /// Fase 1.2: rotas alternativas (Valhalla retorna num array top-level, cada uma com seu trip).
+    let alternates: [ValhallaAlternateRoute]?
+}
+
+private struct ValhallaAlternateRoute: Decodable {
     let trip: ValhallaTrip
 }
 
