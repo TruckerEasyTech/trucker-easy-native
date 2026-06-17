@@ -3449,7 +3449,23 @@ struct HorizonView: View {
                     )
                     isCalculatingRoute = false
                     routeEasyOptions = options
-                    showingRouteEasyPicker = true
+                    // Nunca mostra o seletor VAZIO (sem isto, tappar Free/Standard/Premium não fazia
+                    // nada). Se por algum motivo veio vazio, aplica a Rápida em vez de prender o driver.
+                    guard !options.isEmpty else {
+                        let fastest = RouteEasyEngine.fastestOption(
+                            route: fast, provider: provider,
+                            dieselPricePerGallon: diesel, mpg: mpg, usesTruckForFreeTier: usesTruck
+                        )
+                        commitSelectedRoute(fastest, coordinate: coordinate, address: address)
+                        return
+                    }
+                    // Apresenta o sheet no PRÓXIMO ciclo — assim o SwiftUI já commitou routeEasyOptions
+                    // e o seletor lê a lista CHEIA. A 1ª apresentação estava capturando a lista vazia
+                    // (por isso "não fazia nada" na 1ª vez e só funcionava depois de cancelar + ir).
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 60_000_000)
+                        showingRouteEasyPicker = true
+                    }
                     #if DEBUG
                     print("[RouteEasy] Picker apresentado — \(options.count) opções")
                     #endif
