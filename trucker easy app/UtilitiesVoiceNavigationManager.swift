@@ -196,9 +196,12 @@ final class VoiceNavigationManager {
         let prefix = all.filter { $0.language.lowercased().hasPrefix(String(lang.prefix(2))) }
         let pool   = exact.isEmpty ? prefix : exact
 
-        // Sorted: premium first, then enhanced, then default quality
+        // Ordena: 1º qualidade (premium > enhanced > default), 2º naturalidade da voz
+        // (Siri/Ava/Zoe/Allison soam bem mais suaves e fluidas que Samantha default).
         let ranked = pool.sorted { a, b in
-            qualityRank(a.quality) > qualityRank(b.quality)
+            let qa = qualityRank(a.quality), qb = qualityRank(b.quality)
+            if qa != qb { return qa > qb }
+            return naturalnessRank(a) < naturalnessRank(b)   // índice menor = mais natural
         }
 
         guard let resolved = ranked.first
@@ -222,6 +225,20 @@ final class VoiceNavigationManager {
         }
     }
 
+    /// Vozes en mais suaves/fluidas primeiro. Siri e as premium modernas (Ava/Zoe/Allison/Evan)
+    /// soam naturais; Samantha (default) é a mais "robótica". Índice menor = preferida.
+    private func naturalnessRank(_ voice: AVSpeechSynthesisVoice) -> Int {
+        let id = voice.identifier.lowercased()
+        let name = voice.name.lowercased()
+        // Siri voices (as mais fluidas quando o SO as expõe ao AVSpeech).
+        if id.contains("siri") { return 0 }
+        let preferred = ["ava", "zoe", "allison", "evan", "joelle", "nicky", "samantha"]
+        for (i, n) in preferred.enumerated() where name.contains(n) || id.contains(n) {
+            return 1 + i
+        }
+        return 50   // não-listada: depois das preferidas, antes de nada
+    }
+
     // MARK: - Core speech
 
     private func speak(_ text: String, language: String, priority: Bool = false) {
@@ -234,19 +251,19 @@ final class VoiceNavigationManager {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = bestVoice(for: language)
 
-        // Slightly above default — feels natural, not rushed, not robotic
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
+        // Levemente abaixo do default — fala calma e fluida, sem soar apressada nem robótica.
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.96
 
-        // Natural pitch — 1.0 avoids the mechanical low-pitch effect
-        utterance.pitchMultiplier = 1.0
+        // Pitch quase neutro, com um toque mais suave (evita o efeito mecânico agudo).
+        utterance.pitchMultiplier = 0.98
 
         utterance.volume = 1.0
 
-        // Short lead-in so the first word isn't clipped by audio ducking
-        utterance.preUtteranceDelay  = priority ? 0.08 : 0.15
+        // Lead-in maior suaviza a entrada (1ª palavra não é cortada pelo ducking do áudio).
+        utterance.preUtteranceDelay  = priority ? 0.10 : 0.18
 
-        // Silence after phrase so it doesn't feel cut off
-        utterance.postUtteranceDelay = 0.12
+        // Respiro no fim pra não parecer cortada — dá fluidez entre frases.
+        utterance.postUtteranceDelay = 0.18
 
         synthesizer.speak(utterance)
         #if DEBUG
