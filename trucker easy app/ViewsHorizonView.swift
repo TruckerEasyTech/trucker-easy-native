@@ -619,6 +619,14 @@ struct HorizonView: View {
                 hosContext.updateRules(maxDriving: hos.maxDrivingHours, serviceWindow: hos.serviceWindowHours,
                                        breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
             }
+            .onChange(of: jurisdictionPolicyService.gpsHosRegion) { _, region in
+                // Compliance P0: a regra de HOS segue o país do GPS ao vivo. Cruzou US<->CA, troca
+                // 11h/14h <-> 13h/16h sem o motorista mexer em nada. Unidades/moeda NÃO mudam.
+                guard let region else { return }
+                let hos = region.hosRules
+                hosContext.updateRules(maxDriving: hos.maxDrivingHours, serviceWindow: hos.serviceWindowHours,
+                                       breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
+            }
             .onChange(of: regionalSettings.currentLanguage) { _, newLang in
                 navigationEngine.language = newLang; VoiceNavigationManager.shared.resetForNewRoute()
             }

@@ -50,6 +50,10 @@ final class JurisdictionPolicyService {
     private(set) var lastError: String?
     private(set) var lastSuccessfulAt: Date?
     private(set) var lastSuccessfulSource: String?
+    /// Jurisdição de HOS detectada pelo GPS (não pela locale do device). A regra de horas
+    /// DEVE seguir onde o caminhão ESTÁ — cruzar US<->CA troca 11h/14h <-> 13h/16h. NÃO mexe
+    /// em unidades/moeda (isso continua sendo preferência do motorista). Compliance FMCSA/NSC.
+    private(set) var gpsHosRegion: SupportedRegion?
 
     private var lastLookupDate: Date = .distantPast
     private var lastCoordinate: CLLocationCoordinate2D?
@@ -86,6 +90,14 @@ final class JurisdictionPolicyService {
             }
 
             guard !countryCode.isEmpty else { return }
+
+            // HOS segue o país do GPS (compliance). Só US/CA têm rulesets; outras jurisdições
+            // mantêm a última conhecida (nunca inventa uma regra de horas).
+            switch countryCode {
+            case "US", "USA": gpsHosRegion = .usa
+            case "CA", "CAN": gpsHosRegion = .canada
+            default: break
+            }
 
             // Try backend first; on failure use built-in regulation data from GPS location
             do {
