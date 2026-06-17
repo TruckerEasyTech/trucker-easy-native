@@ -37,6 +37,9 @@ final class NavigationEngine {
 
     /// Language used for voice turn announcements — sync with app's current language
     var language: AppLanguage = .english
+    /// Unidade de distância falada — "mi" (US/Canadá/México → pés/milhas) ou "km" (métrico → m/km).
+    /// Sincronizado com `regionalSettings.currentRegion.distanceUnit`.
+    var distanceUnit: String = "mi"
 
     // Trucks take wider turns and GPS can drift ±20m — use generous thresholds
     private let announcementDistances: [Double] = [800, 400, 100, 50]
@@ -581,6 +584,17 @@ final class NavigationEngine {
     }
 
     private func formatDistance(_ meters: Double) -> String {
+        // Métrico (Brasil/Europa/etc.) — m/km falados.
+        if distanceUnit == "km" {
+            if meters >= 1000 {
+                return String(format: "%.1f kilometers", meters / 1000)
+            }
+            if meters >= 450 { return "500 meters" }
+            let rounded = max(Int((meters / 10).rounded()) * 10, 10)
+            return "\(rounded) meters"
+        }
+
+        // Imperial (US/Canadá/México) — pés/milhas falados (consistente com a UI em "mi").
         if meters >= 1609 {
             let miles = meters / 1609.34
             return String(format: "%.1f miles", miles)
@@ -594,7 +608,10 @@ final class NavigationEngine {
             return "quarter mile"
         }
 
-        return "\(Int(meters)) meters"
+        // < 1/4 milha: pés arredondados a 50 (natural na fala), nunca metros nos EUA.
+        let feet = meters * 3.28084
+        let rounded = max(Int((feet / 50).rounded()) * 50, 50)
+        return "\(rounded) feet"
     }
 }
 

@@ -664,7 +664,9 @@ struct HorizonView: View {
                                        breakAfter: hos.mandatoryBreakAfterHours, breakMinutes: hos.mandatoryBreakMinutes)
             }
             .onChange(of: regionalSettings.currentLanguage) { _, newLang in
-                navigationEngine.language = newLang; VoiceNavigationManager.shared.resetForNewRoute()
+                navigationEngine.language = newLang
+                navigationEngine.distanceUnit = regionalSettings.currentRegion.distanceUnit
+                VoiceNavigationManager.shared.resetForNewRoute()
             }
             .onChange(of: locationManager.locationFixEpoch) { _, _ in
                 handleLocationUpdate()
@@ -2308,6 +2310,7 @@ struct HorizonView: View {
         let provider = RoutingService.shared.lastProvider
         lastRoutingProvider = provider; dockCheckDone = false
         navigationEngine.language = lang
+        navigationEngine.distanceUnit = regionalSettings.currentRegion.distanceUnit
         navigationEngine.startNavigation(route: routeForNavigation)
         // startNavigation reseta o passo p/ 0. Se isto é uma TROCA de rota no meio da viagem
         // (reroute / switch offline do corredor), alimenta a posição atual JÁ — o engine acha o
