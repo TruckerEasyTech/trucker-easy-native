@@ -668,36 +668,25 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         ) {
             guard coords.count >= 2 else { return }
 
-            guard let snap = PolylineLeadArrow.snappedPosition(
+            // POSIÇÃO = GPS REAL (±2m) — precisão acima de tudo. A polyline do Valhalla é decimada
+            // (pontos a 10-50m); projetar o GPS nela colocava o puck visivelmente torto (a causa de
+            // "localização imprecisa"). Agora a bolinha fica EXATAMENTE onde o motorista está, e a
+            // rota é usada só pra um RUMO suave (corredor), evitando o tremor do course do GPS.
+            var bearing: CLLocationDirection = user.course >= 0 ? user.course : lastEmittedBearing
+            if let snap = PolylineLeadArrow.snappedPosition(
                 coords: coords,
                 user: user,
                 anchorIndex: &lastLeadArrowPolyIndex
-            ) else {
-                // Sem snap válido: NÃO congela o puck (bug antigo) — mostra o GPS real.
-                emitRawLocation(user: user)
-                return
+            ) {
+                bearing = snap.bearingDegrees
             }
-
-            // Precisão: o snap deve só CORRIGIR pequenos desvios pra alinhar à via, nunca
-            // REALOCAR. Se moveria o puck > 30m (via paralela, shape decimado do Valhalla, ou
-            // motorista de fato fora da rota), o GPS real (±2m) é mais confiável → mostra ele.
-            let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
-            guard snapped.distance(from: user) <= 30 else {
-                smoothedRouteCoord = user.coordinate
-                if user.course >= 0 { smoothedRouteBearing = user.course }
-                emitRawLocation(user: user)
-                return
-            }
-
-            // Track an anchor for recenter/hasAnchor consumers (kept in sync with the snap).
-            smoothedRouteCoord = snap.coordinate
-            smoothedRouteBearing = snap.bearingDegrees
-
-            let speed = max(0, user.speed)
+            lastEmittedBearing = bearing
+            smoothedRouteCoord = user.coordinate
+            smoothedRouteBearing = bearing
             snapProvider.emit(
-                coordinate: snap.coordinate,
-                bearing: snap.bearingDegrees,
-                speed: speed
+                coordinate: user.coordinate,
+                bearing: bearing,
+                speed: max(0, user.speed)
             )
         }
 

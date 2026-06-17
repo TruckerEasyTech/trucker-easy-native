@@ -3671,6 +3671,20 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Ponto de partida da rota precisa de um fix PRECISO — sem achismo. Mensagem honesta quando
+    /// o GPS ainda está grosseiro (cold-start / sob cobertura), em vez de rotear do lugar errado.
+    var horizonRouteErrorWaitingPreciseGPS: String {
+        switch self {
+        case .english, .hindi, .arabic: return "Waiting for a precise GPS fix to start from your exact location…"
+        case .portuguese: return "Aguardando um GPS preciso para iniciar do seu local exato…"
+        case .spanish, .spanishLatam: return "Esperando un GPS preciso para iniciar desde tu ubicación exacta…"
+        case .french: return "En attente d'un GPS précis pour démarrer de votre position exacte…"
+        case .german: return "Warte auf genaues GPS, um vom exakten Standort zu starten…"
+        case .polish: return "Czekam na dokładny sygnał GPS, aby ruszyć z dokładnej lokalizacji…"
+        case .russian: return "Ожидание точного GPS, чтобы начать с вашего точного местоположения…"
+        }
+    }
+
     var horizonRouteErrorValhallaUnavailable: String {
         switch self {
         case .english, .hindi, .arabic:

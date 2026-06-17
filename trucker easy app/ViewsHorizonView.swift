@@ -1935,10 +1935,23 @@ struct HorizonView: View {
         try? modelContext.save()
     }
 
+    /// O ponto de partida da rota tem que ser PRECISO e RECENTE — sem achismo. Um fix grosseiro
+    /// (cold-start, sob cobertura) ou velho faria a rota começar no lugar errado. Caminhão dirige
+    /// a céu aberto (±2-10m), então ≤65m/≤30s quase nunca bloqueia um motorista real na estrada.
+    private func originIsPreciseEnough(_ loc: CLLocation) -> Bool {
+        loc.horizontalAccuracy >= 0 && loc.horizontalAccuracy <= 65
+            && abs(loc.timestamp.timeIntervalSinceNow) <= 30
+    }
+
     private func calculateRoute(to coordinate: CLLocationCoordinate2D, address: String) {
         let isReroute = isNavigating // If already navigating, this is a reroute
         guard let origin = locationManager.currentLocation else {
             if !isReroute { routeError = lang.horizonRouteErrorLocationUnavailable; showingRouteError = true }
+            return
+        }
+        // Rota nova parte do local exato: exige GPS preciso. Reroute usa o que tem (já navegando).
+        if !isReroute, !originIsPreciseEnough(origin) {
+            routeError = lang.horizonRouteErrorWaitingPreciseGPS; showingRouteError = true
             return
         }
         if !isReroute {
@@ -1974,6 +1987,11 @@ struct HorizonView: View {
         let isReroute = isNavigating
         guard let origin = locationManager.currentLocation else {
             if !isReroute { routeError = lang.horizonRouteErrorLocationUnavailable; showingRouteError = true }
+            return
+        }
+        // Rota nova parte do local exato: exige GPS preciso. Reroute usa o que tem (já navegando).
+        if !isReroute, !originIsPreciseEnough(origin) {
+            routeError = lang.horizonRouteErrorWaitingPreciseGPS; showingRouteError = true
             return
         }
         if !isReroute {
