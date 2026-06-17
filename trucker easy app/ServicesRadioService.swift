@@ -60,7 +60,7 @@ final class RadioService {
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         statusObserver = item.observe(\.status) { [weak self] item, _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch item.status {
                 case .readyToPlay: self.isBuffering = false; self.isPlaying = true

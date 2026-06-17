@@ -1239,7 +1239,7 @@ private struct OSRMRouteResponse: Decodable {
     }
 }
 
-private struct CachedRoutePayload: Codable, Sendable {
+nonisolated private struct CachedRoutePayload: Codable, Sendable {
     let originLatitude: Double
     let originLongitude: Double
     let destinationLatitude: Double
@@ -1254,12 +1254,12 @@ private struct CachedRoutePayload: Codable, Sendable {
     let originalRoutingProvider: String?
 }
 
-private struct CachedCoordinate: Codable {
+nonisolated private struct CachedCoordinate: Codable {
     let latitude: Double
     let longitude: Double
 }
 
-private struct CachedStep: Codable {
+nonisolated private struct CachedStep: Codable {
     let instruction: String
     let distanceMeters: Double
     let durationSeconds: Double

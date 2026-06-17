@@ -3263,13 +3263,16 @@ struct HorizonView: View {
     private func startSpeedMonitoringForDusk() {
         speedMonitorTimer?.invalidate()
         speedMonitorTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-            let now = Date(); guard now.timeIntervalSince(lastSpeedCheckDate) > 25 else { return }
-            lastSpeedCheckDate = now
-            if isDuskNow(at: now) && isVehicleStopped() && !hasShownMoodAtDuskToday && !isNavigating {
-                presentMoodCheckIfParked()
-                hasShownMoodAtDuskToday = true
+            // O bloco do Timer é nonisolated; este corpo toca estado/métodos @MainActor.
+            Task { @MainActor in
+                let now = Date(); guard now.timeIntervalSince(lastSpeedCheckDate) > 25 else { return }
+                lastSpeedCheckDate = now
+                if isDuskNow(at: now) && isVehicleStopped() && !hasShownMoodAtDuskToday && !isNavigating {
+                    presentMoodCheckIfParked()
+                    hasShownMoodAtDuskToday = true
+                }
+                if Calendar.current.isDateInToday(now) == false { hasShownMoodAtDuskToday = false }
             }
-            if Calendar.current.isDateInToday(now) == false { hasShownMoodAtDuskToday = false }
         }
     }
 

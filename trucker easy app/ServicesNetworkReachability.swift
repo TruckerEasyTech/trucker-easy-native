@@ -35,7 +35,7 @@ final class NetworkReachability {
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
             let expensive = path.isExpensive
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.isOnline != online { self.lastChange = Date() }
                 self.isOnline = online
