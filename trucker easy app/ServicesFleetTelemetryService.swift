@@ -55,14 +55,14 @@ private struct RealtimeTelemetryRecord: Decodable {
     let fuel_level_percent: Double?
     let vin: String?
     let dtc_codes: [String]?
-    let reported_at: String?
+    let created_at: String?
 }
 
 final class SupabaseRealtimeTelemetryProvider: FleetTelemetryProvider {
     let providerName = "trucker_easy_realtime"
 
     func fetchSnapshot() async throws -> FleetTelemetrySnapshot {
-        let endpoint = "\(SupabaseConfig.projectURL)/rest/v1/fleet_telemetry_stream?select=*&order=reported_at.desc&limit=1"
+        let endpoint = "\(SupabaseConfig.projectURL)/rest/v1/fleet_telemetry_stream?select=*&order=created_at.desc&limit=1"
         guard let url = URL(string: endpoint) else {
             throw URLError(.badURL)
         }
@@ -85,7 +85,7 @@ final class SupabaseRealtimeTelemetryProvider: FleetTelemetryProvider {
 
         let records = try JSONDecoder().decode([RealtimeTelemetryRecord].self, from: data)
         guard let dto = records.first else { throw URLError(.resourceUnavailable) }
-        let timestamp = dto.reported_at.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+        let timestamp = dto.created_at.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
 
         return FleetTelemetrySnapshot(
             timestamp: timestamp,
