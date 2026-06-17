@@ -2339,6 +2339,17 @@ struct HorizonView: View {
             currentStepIndex = stepIndex
         }
         navigationEngine.onNeedsReroute = {
+            // Fase 1 offline: sem sinal, recalcular ia falhar (timeout) e penalizar 2.5min com
+            // passos errados. Em vez disso MANTEM a rota em cache ativa e re-arma a deteccao — o
+            // snap do NavigationEngine continua guiando o motorista de volta a rota (corredor).
+            // Honesto e sem thrash. (cancelPendingReroute = re-arma + restaura a linha da rota.)
+            if !NetworkReachability.shared.isOnline {
+                #if DEBUG
+                print("[Route] Reroute OFFLINE — mantendo rota em cache, re-armando deteccao")
+                #endif
+                navigationEngine.cancelPendingReroute()
+                return
+            }
             // Cooldown: don't reroute more than once per 30 seconds (prevents API rate limiting)
             guard Date().timeIntervalSince(lastRerouteAt) > 30 else {
                 #if DEBUG
