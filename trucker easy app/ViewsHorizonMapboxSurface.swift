@@ -468,7 +468,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         }
 
         private func addWeatherRadar(on mapView: MapboxMaps.MapView) {
-            let map = mapView.mapboxMap
+            guard let map = mapView.mapboxMap else { return }
             guard !map.layerExists(withId: weatherRadarLayerId) else { return }
             do {
                 if !map.sourceExists(withId: weatherRadarSourceId) {
@@ -491,7 +491,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         }
 
         private func removeWeatherRadar(on mapView: MapboxMaps.MapView) {
-            let map = mapView.mapboxMap
+            guard let map = mapView.mapboxMap else { return }
             if map.layerExists(withId: weatherRadarLayerId) { try? map.removeLayer(withId: weatherRadarLayerId) }
             if map.sourceExists(withId: weatherRadarSourceId) { try? map.removeSource(withId: weatherRadarSourceId) }
         }
