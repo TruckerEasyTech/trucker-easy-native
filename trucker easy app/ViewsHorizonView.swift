@@ -541,6 +541,7 @@ struct HorizonView: View {
                 }
                 locationManager.requestPermission()
                 locationManager.startTracking()
+                NetworkReachability.shared.start()
                 #if canImport(HealthKit)
                 if let hk = HealthKitManager.shared { hk.requestAuthorization() }
                 #endif
