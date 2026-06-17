@@ -28,7 +28,7 @@ as $$
   with recent as (
     select *
     from public.fuel_price_reports
-    where reported_at >= now() - make_interval(hours => p_max_age_hours)
+    where reported_at >= now() - (p_max_age_hours * interval '1 hour')
       and latitude is not null and longitude is not null
       and latitude  between p_lat - (p_radius_km / 111.0) and p_lat + (p_radius_km / 111.0)
       and longitude between p_lon - (p_radius_km / (111.0 * cos(radians(p_lat)))) and p_lon + (p_radius_km / (111.0 * cos(radians(p_lat))))
