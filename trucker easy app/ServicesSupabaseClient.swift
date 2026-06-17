@@ -62,7 +62,6 @@ enum SupabaseConfig {
         static let logisticsNews     = "logistics_news"
         static let drivers           = "drivers"
         static let dispatchedLoads   = "dispatched_loads"
-        static let fuelReports       = "fuel_reports"
         static let fuelPriceReports  = "fuel_price_reports"
         static let fuelReceipts      = "fuel_receipts"
         static let truckStopParkingReports = "truck_stop_parking_reports"
@@ -548,31 +547,6 @@ final class SupabaseClient {
         try await update(table: SupabaseConfig.Tables.dispatchedLoads, id: id, body: body)
     }
 
-    // Record a fuel stop — feeds into company profit dashboard
-    func reportFuelPurchase(
-        loadId: String,
-        driverId: String,
-        companyId: String?,
-        gallons: Double,
-        pricePerGallon: Double,
-        eiaAverage: Double?,
-        stationName: String?
-    ) async throws {
-        let savings = eiaAverage.map { ($0 - pricePerGallon) * gallons }
-        let payload = FuelReportPayload(
-            load_id: loadId,
-            driver_id: driverId,
-            company_id: companyId,
-            gallons: gallons,
-            price_per_gallon: pricePerGallon,
-            eia_average: eiaAverage,
-            savings_vs_eia: savings,
-            station_name: stationName,
-            reported_at: ISO8601DateFormatter().string(from: Date())
-        )
-        try await upsert(into: SupabaseConfig.Tables.fuelReports, value: payload)
-    }
-
     // MARK: - Private helpers
 
     private func validateResponse(_ response: URLResponse, data: Data?) throws {
@@ -876,18 +850,6 @@ struct DispatchedLoadRecord: Decodable, Identifiable {
     let company_name: String?
     let valor_frete: Double?
     let preco_diesel_eia: Double?
-}
-
-struct FuelReportPayload: Encodable {
-    let load_id: String
-    let driver_id: String
-    let company_id: String?
-    let gallons: Double
-    let price_per_gallon: Double
-    let eia_average: Double?           // Government reference price for comparison
-    let savings_vs_eia: Double?        // Computed: (eia_average - price_per_gallon) * gallons
-    let station_name: String?
-    let reported_at: String
 }
 
 private struct SupabaseErrorBody: Decodable {

@@ -197,29 +197,6 @@ class DispatchService {
         }
     }
 
-    // Report a fuel stop — price paid vs EIA average feeds back to company profit dashboard
-    func reportFuelStop(for load: DispatchedLoad, gallons: Double, pricePerGallon: Double, stationName: String?, completion: @escaping (Bool) -> Void) {
-        Task {
-            do {
-                try await SupabaseClient.shared.reportFuelPurchase(
-                    loadId: load.id,
-                    driverId: load.driverId,
-                    companyId: load.companyId,
-                    gallons: gallons,
-                    pricePerGallon: pricePerGallon,
-                    eiaAverage: load.precoDieselEia,
-                    stationName: stationName
-                )
-                await MainActor.run { completion(true) }
-            } catch {
-                #if DEBUG
-                print("DispatchService: failed to report fuel stop — \(error.localizedDescription)")
-                #endif
-                await MainActor.run { completion(false) }
-            }
-        }
-    }
-
     // MARK: - Local notification when load is confirmed received
     private func scheduleReceivedConfirmation(for load: DispatchedLoad) {
         let content = UNMutableNotificationContent()
