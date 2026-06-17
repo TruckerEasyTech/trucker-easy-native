@@ -159,6 +159,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     /// Radar de chuva REAL (NEXRAD via IEM/NOAA) sobreposto no mapa — dado de governo, grátis,
     /// auto-atualizado (o endpoint serve sempre o mosaico mais recente). Toggle do motorista.
     var weatherRadarEnabled: Bool = false
+    /// Altura da chrome de baixo (vinda da View) p/ os ornamentos do Mapbox ficarem ACIMA dela.
+    var mapboxBottomInset: CGFloat = 96
     var truckStops: [TruckStopItem] = []
     /// Sinalização viária no corredor da rota (semáforos + PARE) — só durante a navegação na cidade.
     var routeSignage: [RouteSignageItem] = []
@@ -187,13 +189,16 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
     /// Idle map shows the navigation-arrow puck; during navigation only the lead chevron on the route is shown.
     /// Mapbox requires attribution when their renderer is used; keep logo off the driving HUD (bottom-left, under chrome).
-    private static func tuckMapboxOrnaments(_ mapView: MapboxMaps.MapView, navigating: Bool) {
+    /// Posiciona o logo + atribuição do Mapbox (obrigatórios, visíveis) ACIMA da chrome de baixo —
+    /// sem isso a "faixa de baixo" do mapa sobrepunha o sheet/painel. O inset vem da View (altura
+    /// real da chrome idle / barra de navegação).
+    private static func tuckMapboxOrnaments(_ mapView: MapboxMaps.MapView, bottomInset: CGFloat) {
         var options = mapView.ornaments.options
-        let bottomInset: CGFloat = navigating ? 88 : 72
+        let inset = max(bottomInset, 16)
         options.logo.position = .bottomLeading
-        options.logo.margins = CGPoint(x: 8, y: bottomInset)
+        options.logo.margins = CGPoint(x: 8, y: inset)
         options.attributionButton.position = .bottomLeading
-        options.attributionButton.margins = CGPoint(x: 56, y: bottomInset)
+        options.attributionButton.margins = CGPoint(x: 56, y: inset)
         options.compass.visibility = .hidden
         options.scaleBar.visibility = .hidden
         mapView.ornaments.options = options
@@ -223,7 +228,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     private func bootstrapMap(_ mapView: MapboxMaps.MapView, coordinator: Coordinator) {
         mapView.overrideUserInterfaceStyle = (isNavigating || Self.isNightComfortHours) ? .dark : .light
         applyUserLocationPuck(on: mapView, navigating: isNavigating)
-        Self.tuckMapboxOrnaments(mapView, navigating: isNavigating)
+        Self.tuckMapboxOrnaments(mapView, bottomInset: mapboxBottomInset)
         var g = mapView.gestures.options
         g.pitchEnabled = true
         g.rotateEnabled = false
@@ -311,7 +316,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         host.syncContentScaleWithScreen()
         mapView.overrideUserInterfaceStyle = (isNavigating || Self.isNightComfortHours) ? .dark : .light
         applyUserLocationPuck(on: mapView, navigating: isNavigating)
-        Self.tuckMapboxOrnaments(mapView, navigating: isNavigating)
+        Self.tuckMapboxOrnaments(mapView, bottomInset: mapboxBottomInset)
         let coord = context.coordinator
         coord.isNavigatingMode = isNavigating
         coord.syncWeatherRadar(enabled: weatherRadarEnabled, on: mapView)

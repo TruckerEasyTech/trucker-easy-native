@@ -832,6 +832,7 @@ struct HorizonView: View {
                             mapZoomIn = zoomIn; mapZoomOut = zoomOut; mapRecenter = recenter
                         },
                         weatherRadarEnabled: weatherRadarEnabled,
+                        mapboxBottomInset: isNavigating ? (navigatingMapChromeBottomInset + 8) : idleMapControlsBottomInset,
                         truckStops: isNavigating ? mapTruckStopsForDisplay : [],
                         routeSignage: isNavigating ? routeSignageService.onRouteSignage : [],
                         cameras: showTrafficCameras ? trafficCameraService.cameras : [],
