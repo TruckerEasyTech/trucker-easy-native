@@ -78,6 +78,31 @@ final class OfflineRouteTileManager {
         lastWindowAnchor = nil
     }
 
+    /// Limpa TODO o cache offline persistente do Mapbox — NÃO só as 2 regiões de rota: TODAS as
+    /// tile regions acumuladas (o grosso do disco) + os style packs dos estilos do app + o cache
+    /// temporário/ambient. É isto que zera o tile store inchado (ex.: 344 MB) que trava o launch no
+    /// device; o `clear()` sozinho só tira as regiões de rota. Tudo assíncrono — os callbacks do
+    /// Mapbox rodam fora da main thread, então não congela a UI. Chamar quando IDLE (não-navegando).
+    func purgeAllOfflineCache() {
+        // 1) Remove TODAS as tile regions persistentes (o grosso do disco).
+        tileStore.allTileRegions { [weak self] result in
+            guard let self else { return }
+            if case let .success(regions) = result {
+                for region in regions { self.tileStore.removeTileRegion(forId: region.id) }
+            }
+        }
+        // 2) Remove os style packs dos estilos que o app usa (MapStyleOption.mapboxStyleURI).
+        for style in [StyleURI.streets, .standard, .satelliteStreets, .satellite] {
+            offlineManager.removeStylePack(for: style)
+        }
+        // 3) Cache temporário/ambient (glyphs/sprites/tiles soltos) — não toca o offline persistente,
+        //    por isso vem DEPOIS da remoção das regiões/packs acima.
+        MapboxMap.clearData { _ in }
+
+        routeCoordinates = []
+        lastWindowAnchor = nil
+    }
+
     /// Update explícito via Offline API: rebaixa a versão ATUAL do style pack (e da rota ativa,
     /// se houver) com `acceptExpired: false`, limpando o aviso do Mapbox
     /// "outdated resource ... shall be updated explicitly using Offline API".

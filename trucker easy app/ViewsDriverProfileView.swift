@@ -588,7 +588,9 @@ struct DriverProfileView: View {
             for item in items { try? FileManager.default.removeItem(at: item) }
         }
         #if canImport(MapboxMaps)
-        OfflineRouteTileManager.shared.clear()
+        // Purge COMPLETO (todas as tile regions + style packs + ambient) — zera o tile store
+        // inchado (ex.: 344 MB) que trava o launch. O clear() antigo só tirava as regiões de rota.
+        OfflineRouteTileManager.shared.purgeAllOfflineCache()
         #endif
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         withAnimation { cacheCleared = true }
