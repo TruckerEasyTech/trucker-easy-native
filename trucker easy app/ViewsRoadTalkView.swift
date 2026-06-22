@@ -312,11 +312,8 @@ struct RoadReportPanel: View {
     }
 
     let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-    private let mockReports: [MockRoadReport] = [
-        MockRoadReport(type: .scaleOpen, location: "I-80 MM 342", minutesAgo: 12, votes: 5),
-        MockRoadReport(type: .parkingFull, location: "TA Truckstop Exit 44", minutesAgo: 28, votes: 3),
-        MockRoadReport(type: .hazard, location: "I-40 WB", minutesAgo: 60, votes: 7)
-    ]
+    // Removido (auditoria 20/06): `mockReports` era dado de report FABRICADO (balança/vaga/hazard
+    // com locais fake) e estava MORTO (zero usos). Road reports reais vêm do Supabase.
 
     var body: some View {
         ScrollView(showsIndicators: false) {

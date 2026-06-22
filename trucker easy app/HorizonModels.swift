@@ -12,11 +12,17 @@ struct DisplayRouteStep: Identifiable {
     let instructions: String
     let distance: Double  // meters
     let duration: Double  // seconds
+    /// Saída ESTRUTURADA do Valhalla (número/destino exatos) — usada pelo exit shield ANTES de
+    /// qualquer parse de texto. nil = não é saída ou a fonte não forneceu.
+    let exitNumber: String?
+    let exitToward: String?
 
     init(_ step: RouteStep) {
         self.instructions = step.instruction
         self.distance = step.distanceMeters
         self.duration = step.durationSeconds
+        self.exitNumber = step.exitNumber
+        self.exitToward = step.exitToward
     }
 }
 

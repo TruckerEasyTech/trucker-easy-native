@@ -79,6 +79,10 @@ struct AppEntryView: View {
         .onChange(of: hasSeenWelcome) { _, newVal in
             if newVal { presentMorningCheckInIfNeeded() }
         }
+        // NÃO tocar o tile store do Mapbox aqui: o 1º acesso a OfflineRouteTileManager.shared cria
+        // TileStore.default (I/O síncrono num store grande) na MAIN THREAD durante o splash → congela
+        // a tela preta com o spinner (o asyncAfter que dispensa o splash não chega a disparar). A poda
+        // já roda, em segurança, no HorizonView.onAppear (depois do mapa montar, idle).
     }
 }
 

@@ -51,6 +51,7 @@ BATCH_SIZE = int(os.environ.get("SUPABASE_BATCH_SIZE", "200"))
 INGEST_SIGNAGE = os.environ.get("INGEST_SIGNAGE", "0").lower() in ("1", "true", "yes")
 SIGNAGE_QUERY_LINES = """  node["highway"="traffic_signals"]({south},{west},{north},{east});
   node["highway"="stop"]({south},{west},{north},{east});
+  node["railway"="level_crossing"]({south},{west},{north},{east});
 """
 
 OVERPASS_QUERY = """
@@ -106,6 +107,8 @@ def classify_poi(tags: dict[str, str]) -> str | None:
         return "traffic_signals"
     if tags.get("highway") == "stop":
         return "stop"
+    if tags.get("railway") == "level_crossing":
+        return "rail_crossing"
     if tags.get("amenity") == "fuel":
         name = tags.get("name") or tags.get("brand") or tags.get("operator") or ""
         network = detect_network(name, tags.get("brand"), tags.get("operator"))

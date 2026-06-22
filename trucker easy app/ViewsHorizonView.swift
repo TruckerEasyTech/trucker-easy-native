@@ -129,7 +129,10 @@ struct HorizonView: View {
     @State private var isIdleBottomSheetReady = false
 
     private var idleBottomSheetHeight: CGFloat {
-        bottomSheetExpanded ? launchSafeScreenHeight * 0.62 : idleCollapsedChromeHeight
+        guard bottomSheetExpanded else { return idleCollapsedChromeHeight }
+        // Expandido COM conteúdo real (viagem ativa: destino/clima/ações) usa a altura cheia.
+        // Idle (só busca de endereço + sugestões) NÃO abre um vazio cinza gigante — altura modesta.
+        return activeTrip != nil ? launchSafeScreenHeight * 0.62 : launchSafeScreenHeight * 0.40
     }
 
     /// Dispatch UI hidden for driver beta — backend hooks remain for fleet portal later.
@@ -339,6 +342,11 @@ struct HorizonView: View {
     @State private var scaleAlertCommunitySummary: WeighStationCommunitySummary?
     /// Staged alerts already fired ("stationKey#tier") — first at 50 mi, update at 20 mi, final at 5 mi.
     @State private var scaleAlertNotifiedTierKeys: Set<String> = []
+    /// Balanças JÁ confirmadas como passadas (auto-feed passivo) — evita re-emitir o mesmo "passed".
+    @State private var scalePassedConfirmedFor: Set<String> = []
+    /// Balanças À FRENTE na rota (até ~100 mi) p/ os badges laterais com distância regressiva.
+    /// Aditivo ao alerta único; status só de dado gov REAL (aberto/fechado/desconhecido), nunca inventado.
+    @State private var upcomingScales: [UpcomingScale] = []
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
@@ -365,6 +373,10 @@ struct HorizonView: View {
     @State private var nearestParkingFull: Bool = false
     @State private var showParkingPill: Bool = false
     @State private var showingStopsSheet: Bool = false
+
+    // Compartilhamento de viagem (acompanhamento read-only estilo Life360).
+    @State private var showingTripShare = false
+    @State private var tripShare = TripShareService.shared
 
     @State private var showingAIChat = false
     @State private var aiChatMessages: [(role: String, text: String)] = []
@@ -514,8 +526,11 @@ struct HorizonView: View {
                 mapAlerts: mapAlerts,
                 formatDistance: { regionalSettings.formatDistance($0) }
             ))
-            // Tab bar always visible — hiding it trapped users on Horizon after route preview.
-            .toolbar(.visible, for: .tabBar)
+            // Tab bar: escondida SÓ na navegação ATIVA (libera a barra de baixo 100% pro HUD de
+            // telemetria, cara de GPS de fábrica). Fora da navegação ela volta — o bug antigo de
+            // "usuário preso na Horizon" era no PREVIEW/idle, não na navegação ativa, então só
+            // gateamos por `isNavigating`.
+            .toolbar(isNavigating ? .hidden : .visible, for: .tabBar)
             // ━━━ NUCLEAR FIX: white background behind EVERYTHING ━━━
             .background(Color.white.ignoresSafeArea())
             .dotSpeedFeeder(locationManager: locationManager, hosContext: hosContext)
@@ -533,9 +548,18 @@ struct HorizonView: View {
                 DispatchQueue.main.async {
                     self.isIdleBottomSheetReady = true
                 }
+                // Poda 1×/launch o tile store offline acumulado (causa do freeze de startup → "app não
+                // abre" em devices com cache inchado, ex. 318MB). Só idle; re-cacheia por rota.
+                if !isNavigating { OfflineRouteTileManager.shared.pruneStaleRouteTilesOnce() }
                 // Atualiza o style pack offline do Mapbox p/ a versão atual (Offline API) — limpa o
-                // aviso "outdated resource mapbox://styles/mapbox/standard shall be updated".
-                OfflineRouteTileManager.shared.updateOfflineResources()
+                // aviso "outdated resource ... shall be updated". DEFERIDO ~4s: rodar isto no launch
+                // disparava downloads de tile que COMPETIAM com o load do tile store (306MB) no exato
+                // momento do freeze de startup. Fora do pico de launch, alivia a contenção da main thread.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    // Passa o estilo REALMENTE renderizado (ex.: satelliteStreets) — atualizar o `.standard`
+                    // default não limpava o aviso do estilo que o app mostra.
+                    OfflineRouteTileManager.shared.updateOfflineResources(style: selectedMapStyle.mapboxStyleURI)
+                }
                 // Clear ALL old route caches to prevent stale data from causing issues
                 for key in ["offlineRouteCache_v1", "offlineRouteCache_v2"] {
                     UserDefaults.standard.removeObject(forKey: key)
@@ -1001,8 +1025,47 @@ struct HorizonView: View {
             alertOverlays
             if !isNavigating { mapControlsOverlay }
             warningsDispatchAndBottomOverlays
+            tripShareLiveOverlay
         }
         .animation(.spring(response: 0.35), value: navigationTopChromeHeight)
+        .sheet(isPresented: $showingTripShare) {
+            TripShareSheet(
+                lang: lang,
+                originName: nil,
+                destinationName: truckRoute?.destinationName ?? route?.name
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// Pill "ao vivo" durante a navegação — só aparece quando o compartilhamento está ativo,
+    /// pra o motorista poder gerenciar/parar sem sair do modo de navegação.
+    @ViewBuilder private var tripShareLiveOverlay: some View {
+        if isNavigating && tripShare.isSharing {
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { showingTripShare = true }) {
+                        HStack(spacing: 6) {
+                            Circle().fill(.green).frame(width: 7, height: 7)
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .font(.system(size: 12, weight: .bold))
+                            Text(lang.code.hasPrefix("pt") ? "Ao vivo" : "Live")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 11).padding(.vertical, 7)
+                        .background(Capsule().fill(Color.black.opacity(0.8)))
+                        .overlay(Capsule().stroke(Color.green.opacity(0.6), lineWidth: 1))
+                    }
+                    .padding(.trailing, 12)
+                    .padding(.top, navigationTopChromeHeight + 8)
+                }
+                Spacer()
+            }
+            .zIndex(430)
+        }
     }
 
     // MARK: - Navigation Overlays
@@ -1107,6 +1170,7 @@ struct HorizonView: View {
                     communityHint: scaleAlertCommunityHint,
                     communitySummary: scaleAlertCommunitySummary,
                     onReport: { submitScaleReport($0) },
+                    onReportOpenOutcome: { submitScaleReport(.open, outcome: $0); withAnimation { showingScaleAlert = false } },
                     onMoreDetails: { openScaleDetailsSheet() }
                 )
                 .padding(.horizontal, 12)
@@ -1114,6 +1178,24 @@ struct HorizonView: View {
             }
             .zIndex(405)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+
+        // Badges de balança com distância regressiva REAL. Só na navegação e só se houver estação à
+        // frente (dado real). Tocar abre o detalhe. ORGANIZAÇÃO ANTI-SOBREPOSIÇÃO: ficam à ESQUERDA
+        // (área vazia durante a nav) — o lado DIREITO já está ocupado pela trilha de botões
+        // (zoom/mute/recenter), pelo pill de HOS no topo e pelo overlay de restrições. Esquerda = zero colisão.
+        if isNavigating, !upcomingScales.isEmpty {
+            VStack {
+                HStack {
+                    UpcomingScaleBadges(scales: upcomingScales) { _ in openScaleDetailsSheet() }
+                        .padding(.leading, 12)
+                    Spacer()
+                }
+                .padding(.top, navigationTopChromeHeight + 64)
+                Spacer()
+            }
+            .zIndex(404)
+            .transition(.move(edge: .leading).combined(with: .opacity))
         }
     }
 
@@ -1270,6 +1352,8 @@ struct HorizonView: View {
                                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#1aa6a6").opacity(0.5), lineWidth: 0.5))
                                 .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
                         }
+                        // (Truck stops REMOVIDO daqui — duplicava a barra "Stops". Decisão:
+                        // barra = listas, flutuante = camadas. Truck stops agora só na barra inferior.)
                         // Radar de chuva REAL (NEXRAD/NOAA) — toggle. Dado de governo, grátis, auto-atualiza.
                         Button(action: { withAnimation(.spring(response: 0.3)) { weatherRadarEnabled.toggle() } }) {
                             Image(systemName: "cloud.rain.fill").font(.system(size: 17, weight: .semibold))
@@ -1288,6 +1372,23 @@ struct HorizonView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#c9a84c").opacity(0.5), lineWidth: 0.5))
                                 .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                        }
+                        // Compartilhar viagem — família acompanha ao vivo (read-only, estilo Life360).
+                        Button(action: { showingTripShare = true }) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 17, weight: .semibold))
+                                    .foregroundColor(tripShare.isSharing ? .white : Color(hex: "#10b981"))
+                                    .frame(width: 44, height: 44)
+                                    .background(tripShare.isSharing ? Color(hex: "#10b981") : Color(hex: "#1a1a1f"))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: "#10b981").opacity(0.5), lineWidth: 0.5))
+                                    .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                                if tripShare.isSharing {
+                                    Circle().fill(.green).frame(width: 9, height: 9)
+                                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                        .offset(x: 2, y: -2)
+                                }
+                            }
                         }
                     }
                     .padding(.trailing, 12)
@@ -1471,12 +1572,13 @@ struct HorizonView: View {
                         bottomSheetExpanded = true
                     }
                 },
-                onWeather: { showingWeather = true },
-                onCommunity: { showingAIChat = true },
-                onTrafficMap: { selectedMapStyle = .hybrid }
+                onWeather: { showingWeather = true }
             )
             .padding(.horizontal, 8)
             .padding(.top, 8)
+            
+            
+            
 
             HorizonBottomSheet(
                 locationManager: locationManager, activeTrip: activeTrip,
@@ -1795,6 +1897,9 @@ struct HorizonView: View {
         let gpsSpeedMph = max(0, loc.speed * 2.23694)
 
         navigationEngine.updateLocation(loc)
+        // Compartilhamento de viagem (opt-in): empurra a posição ao vivo pra família acompanhar.
+        // Faz throttle internamente e só envia se o motorista ativou o compartilhamento.
+        tripShare.pushIfSharing(location: loc, headingDeg: locationManager.bestBearing)
         restrictionWarningManager.updateLocation(loc)
         truckWarnings = restrictionWarningManager.activeWarnings
         if isNavigating, let coords = truckRoute?.coordinates, coords.count >= 2 {
@@ -2291,6 +2396,12 @@ struct HorizonView: View {
         print("[TRACE-NAV] 9 · transaction OK (truckRoute setado)")
         #endif
         activeRouteDestination = destinationCoordinate ?? result.coordinates.last
+        // HISTÓRICO DE ROTAS INICIADAS: registra TODO destino que vira navegação (seletor RouteEasy,
+        // AI, dispatch, reroute) no mesmo store que o buscador mostra. Antes só as buscas diretas do
+        // bottom sheet eram salvas → rotas iniciadas pelo seletor não apareciam no histórico.
+        if let histCoord = activeRouteDestination, !result.destinationName.trimmingCharacters(in: .whitespaces).isEmpty {
+            HorizonRecentSearchStore.record(name: result.destinationName, coordinate: histCoord)
+        }
         #if canImport(MapboxMaps)
         // Offline C3 — baixa tiles do corredor (visão geral + janela à frente) ao aplicar a rota.
         // Só com rede: offline o download falharia em silêncio e enfileiraria lixo no Mapbox
@@ -2620,11 +2731,12 @@ struct HorizonView: View {
         )
     }
 
-    private func submitScaleReport(_ status: WeighStationStatus) {
+    private func submitScaleReport(_ status: WeighStationStatus, outcome: WeighStationOpenOutcome? = nil) {
         let name = scaleAlertName.isEmpty ? lang.horizonGenericWeighStation : scaleAlertName
         let coord = scaleAlertCoordinate ?? locationManager.currentLocation?.coordinate
         WeighStationStatusService.shared.submit(
             status: status,
+            outcome: outcome,
             for: name,
             latitude: coord?.latitude,
             longitude: coord?.longitude,
@@ -2648,18 +2760,18 @@ struct HorizonView: View {
     /// Navigating: 50 mi alert horizon so staged notifications (50 → 20 → 5 mi) can fire.
     private func scaleDetectionProfile(for location: CLLocation) -> (alertMeters: Double, searchMeters: Double, headingTolerance: Double) {
         if isNavigating {
-            return (80_467, 96_561, 100)
+            return (24_140, 40_233, 100)   // alerta a 15 mi (era 50 = "muito cedo"); busca ~25 mi
         }
         return (5_000, 24_140, 70)
     }
 
-    /// Staged alert tier: 3 = first heads-up (≤50 mi), 2 = update (≤20 mi), 1 = final (≤5 mi).
+    /// Staged alert tier: 3 = first heads-up (≤15 mi), 2 = update (≤5 mi), 1 = final (≤1 mi).
     /// Idle uses a single close-range tier. Returns nil when out of alert range.
     private func scaleAlertTier(forDistanceMeters meters: Double) -> Int? {
         if isNavigating {
-            if meters <= 8_047 { return 1 }
-            if meters <= 32_187 { return 2 }
-            if meters <= 80_467 { return 3 }
+            if meters <= 1_609 { return 1 }    // 1 mi (final)
+            if meters <= 8_047 { return 2 }    // 5 mi
+            if meters <= 24_140 { return 3 }   // 15 mi (1º aviso — não mais 50 mi)
             return nil
         }
         return meters <= 5_000 ? 1 : nil
@@ -2724,6 +2836,22 @@ struct HorizonView: View {
                     govWeighSource = row.gov_weigh_source
                     govSiteOpen = row.gov_site_open
                 }
+
+                // Badges laterais: balanças À FRENTE até 25 mi (era 100 mi = "muito cedo" no road test).
+                // Status SÓ de `gov_site_open` (aberto/fechado/desconhecido) — nunca estimado/inventado.
+                let upcoming = rows.compactMap { row -> UpcomingScale? in
+                    let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
+                    let d = location.distance(from: CLLocation(latitude: row.lat, longitude: row.lon))
+                    guard d <= 40_233 else { return nil }   // 25 mi (advance útil, sem poluir cedo demais)
+                    guard isScaleAhead(of: location, target: coord, headingTolerance: limits.headingTolerance) else { return nil }
+                    return UpcomingScale(id: row.id,
+                                         name: row.name ?? lang.horizonGenericWeighStation,
+                                         coordinate: coord,
+                                         distanceMiles: d / 1609.34,
+                                         siteOpen: row.gov_site_open)
+                }.sorted { $0.distanceMiles < $1.distanceMiles }
+                let capped = Array(upcoming.prefix(2))   // no máx. 2 (era 4 = "muitas de uma vez")
+                await MainActor.run { upcomingScales = capped }
             }
 
             // 2) MapKit fallback when Supabase has no weigh POI nearby
@@ -2802,6 +2930,25 @@ struct HorizonView: View {
                 scaleAlertProvenance = resolved.provenance
                 scaleAlertCommunityHint = resolved.communityHint
                 scaleAlertCommunitySummary = resolved.communitySummary
+
+                // AUTO-FEED passivo: passou FISICAMENTE por uma balança (<150 m, GPS) → confirma na base
+                // que ela existe/é relevante nesta rota, SEM UI, sem distração, sem inventar status.
+                // Cresce o dataset que a predição (Trends) usa. (Status aberto/fechado = passo futuro
+                // com prompt, que exige aval de UX/segurança — passar de carro não revela o status.)
+                let passKey = poiPlaceId?.uuidString ?? stationName
+                if distMeters < 150, !scalePassedConfirmedFor.contains(passKey) {
+                    if scalePassedConfirmedFor.count > 128 { scalePassedConfirmedFor.removeAll() }
+                    scalePassedConfirmedFor.insert(passKey)
+                    let passCoord = stationCoord ?? location.coordinate
+                    Task {
+                        let payload = RoadReportPayload(
+                            driver_id: SupabaseClient.shared.currentDriverId,
+                            report_type: "weigh_station_passed",
+                            latitude: passCoord.latitude, longitude: passCoord.longitude,
+                            location_name: stationName)
+                        try? await SupabaseClient.shared.submitRoadReport(payload)
+                    }
+                }
 
                 // Staged notifications: fire once per tier (50 / 20 / 5 mi), never repeat
                 // inside a tier — a dismissed banner stays dismissed until the next tier.
@@ -3043,6 +3190,21 @@ struct HorizonView: View {
                 foodSuggestion = nil
 
                 guard dwell >= stopReviewMinDwellSeconds else { return }
+
+                // AUTO-FEED passivo (crowdsourcing, estilo Trucker Path): visita REAL confirmada por
+                // GPS (chegou + ficou ≥ dwell + saiu) → alimenta a base automaticamente que este stop
+                // EXISTE e é acessível. NÃO inventa status (aberto/vaga) — só confirma presença real.
+                // Reusa o pipeline de road report já estabelecido. Sem input do motorista.
+                Task {
+                    let payload = RoadReportPayload(
+                        driver_id: SupabaseClient.shared.currentDriverId,
+                        report_type: "truck_stop_visited",
+                        latitude: prevStop.coordinate.latitude,
+                        longitude: prevStop.coordinate.longitude,
+                        location_name: prevStop.name)
+                    try? await SupabaseClient.shared.submitRoadReport(payload)
+                }
+
                 reviewTargetStop = prevStop
                 DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [self] in
                     guard reviewTargetStop?.name == prevStop.name, !showingStopReview else { return }
@@ -3428,15 +3590,21 @@ struct HorizonView: View {
         return h > 0 ? "\(h)h \(m) min" : "\(m) min"
     }
 
+    // SÓ o número — o TruckerPathSpeedPanel já desenha os rótulos "LIMIT" e a unidade (MPH/KM/H).
+    // Antes retornávamos "65 mph LIMIT"/"0 MPH" → o painel cortava em "65..."/"0..." (texto longo +
+    // sublabel duplicado em 54pt). Número puro cabe sem corte.
     private var navSpeedLimitText: String {
         let legalLimit = jurisdictionPolicyService.effectiveSpeedLimitKmh(fallback: countryCompliance.truckSpeedLimitKmh)
-        return "\(regionalSettings.formatSpeed(legalLimit)) LIMIT"
+        let useMph = regionalSettings.currentRegion.distanceUnit == "mi"
+        let value = useMph ? legalLimit / 1.60934 : legalLimit
+        return "\(Int(value.rounded()))"
     }
 
     private var navCurrentSpeedText: String {
-        guard let speed = locationManager.currentLocation?.speed, speed >= 0 else { return "0 MPH" }
-        let mph = max(0, speed * 2.23694)
-        return "\(Int(mph.rounded())) MPH"
+        guard let speed = locationManager.currentLocation?.speed, speed >= 0 else { return "0" }
+        let useMph = regionalSettings.currentRegion.distanceUnit == "mi"
+        let value = useMph ? speed * 2.23694 : speed * 3.6
+        return "\(Int(value.rounded()))"
     }
 
     private var navOverspeeding: Bool {
@@ -3741,3 +3909,59 @@ private enum HorizonViewFirstGpsFixLogged {
     static var didLog = false
 }
 #endif
+
+// MARK: - Badges laterais de balança à frente (distância regressiva real)
+
+/// Uma balança À FRENTE na rota. `siteOpen` vem SÓ do dado gov real (`gov_site_open`):
+/// true=aberto, false=fechado, nil=desconhecido — a cor nunca é estimada/inventada.
+private struct UpcomingScale: Identifiable {
+    let id: UUID
+    let name: String
+    let coordinate: CLLocationCoordinate2D
+    let distanceMiles: Double
+    let siteOpen: Bool?
+}
+
+/// Pilha vertical de badges "W" coloridos por status real + milhas regressivas. Tocar abre o detalhe.
+private struct UpcomingScaleBadges: View {
+    let scales: [UpcomingScale]
+    let onTap: (UpcomingScale) -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(scales) { scale in
+                Button { onTap(scale) } label: {
+                    VStack(spacing: 2) {
+                        ZStack {
+                            Circle()
+                                .fill(color(for: scale.siteOpen))
+                                .frame(width: 38, height: 38)
+                                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                            // Ícone de BALANÇA (scalemass) em vez do "W" críptico — mesmo ícone da
+                            // categoria "Weigh" da barra. Clareza imediata pro motorista.
+                            Image(systemName: "scalemass.fill")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        Text("\(Int(scale.distanceMiles.rounded())) mi")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Cor SÓ por dado real: aberto=vermelho (parar), fechado=verde (passar), desconhecido=cinza.
+    private func color(for siteOpen: Bool?) -> Color {
+        switch siteOpen {
+        case .some(true):  return Color(red: 0.94, green: 0.27, blue: 0.27)
+        case .some(false): return Color(red: 0.06, green: 0.72, blue: 0.51)
+        case .none:        return Color(red: 0.42, green: 0.45, blue: 0.50)
+        }
+    }
+}

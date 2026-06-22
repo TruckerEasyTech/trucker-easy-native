@@ -44,6 +44,7 @@ struct DriverProfileView: View {
     @State private var avatarItem: PhotosPickerItem? = nil
     @State private var avatarImageData: Data? = nil
     @State private var fleetAuth = DriverAuthManager.shared
+    @State private var cacheCleared = false
 
     var lang: AppLanguage { regionalSettings.currentLanguage }
 
@@ -540,6 +541,16 @@ struct DriverProfileView: View {
                     ProfileRow(icon: "questionmark.circle.fill", iconColor: AppTheme.Colors.accentSoft,
                                title: lang.helpSupportLabel, subtitle: lang.helpSupportSubtitle)
                 }
+
+                Divider().background(AppTheme.Colors.backgroundCard)
+
+                // Limpeza de cache — libera espaço e ZERA o tile store offline do Mapbox (o que inchava
+                // até 318MB e travava o launch). Re-cacheia por rota; nenhum dado do motorista é perdido.
+                Button(action: { clearAppCache() }) {
+                    ProfileRow(icon: "trash.fill", iconColor: AppTheme.Colors.danger,
+                               title: "Limpar cache",
+                               subtitle: cacheCleared ? "Cache limpo ✓" : "Libera espaço · mapas offline + temporários")
+                }
             }
         }
     }
@@ -563,6 +574,24 @@ struct DriverProfileView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.Colors.danger.opacity(0.3), lineWidth: 1))
         }
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Cache
+
+    /// Limpa caches REGENERÁVEIS: respostas de rede + temporários + tile store offline do Mapbox
+    /// (o que inchava até 318MB e travava o launch). Nenhum dado do motorista (viagens/perfil) é
+    /// tocado — só cache que volta sozinho. Dá ao motorista a opção de liberar espaço sem reinstalar.
+    private func clearAppCache() {
+        URLCache.shared.removeAllCachedResponses()
+        let tmp = FileManager.default.temporaryDirectory
+        if let items = try? FileManager.default.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) {
+            for item in items { try? FileManager.default.removeItem(at: item) }
+        }
+        #if canImport(MapboxMaps)
+        OfflineRouteTileManager.shared.clear()
+        #endif
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        withAnimation { cacheCleared = true }
     }
 
     // MARK: - Color scheme helper

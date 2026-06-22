@@ -12,6 +12,15 @@ private enum WeatherAPIConfig {
     }
     static let baseURL = "https://api.openweathermap.org/data/2.5/weather"
     static let oneCallURL = "https://api.openweathermap.org/data/3.0/onecall"
+
+    // Proxy SEGURO: a chave fica no servidor (Edge Function `weather-proxy`); o app chama via anon key.
+    static var supabaseURL: String { (Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String ?? "").trimmingCharacters(in: .whitespaces) }
+    static var anonKey: String { (Bundle.main.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String ?? "").trimmingCharacters(in: .whitespaces) }
+    static var proxyBase: String? {
+        guard !supabaseURL.isEmpty, !anonKey.isEmpty else { return nil }
+        let b = supabaseURL.hasSuffix("/") ? String(supabaseURL.dropLast()) : supabaseURL
+        return b + "/functions/v1/weather-proxy"
+    }
 }
 
 // NOTE: TruckWeather and WeatherDanger structs are defined in ViewsWeighStationWeatherShare.swift
@@ -83,10 +92,10 @@ final class RealWeatherService {
         errorMessage = nil
         lastCoordinate = coordinate
 
-        guard !WeatherAPIConfig.apiKey.isEmpty else {
+        guard !WeatherAPIConfig.apiKey.isEmpty || WeatherAPIConfig.proxyBase != nil else {
             await MainActor.run {
                 self.currentWeather = nil
-                self.errorMessage = "OpenWeatherMapAPIKey is missing"
+                self.errorMessage = "Weather not configured"
                 self.isLoading = false
                 self.cacheExpiry = nil
             }
@@ -101,16 +110,36 @@ final class RealWeatherService {
     private func loadRealWeather(coordinate: CLLocationCoordinate2D) async {
         let lat = coordinate.latitude
         let lon = coordinate.longitude
-        let key = WeatherAPIConfig.apiKey
 
-        let urlString = "\(WeatherAPIConfig.baseURL)?lat=\(lat)&lon=\(lon)&appid=\(key)&units=imperial"
-        guard let url = URL(string: urlString) else {
+        // Proxy seguro primeiro (chave no servidor); fallback direto se o proxy não estiver no ar.
+        func makeRequest(useProxy: Bool) -> URLRequest? {
+            if useProxy, let base = WeatherAPIConfig.proxyBase,
+               let url = URL(string: "\(base)?lat=\(lat)&lon=\(lon)") {
+                var r = URLRequest(url: url)
+                r.setValue("Bearer \(WeatherAPIConfig.anonKey)", forHTTPHeaderField: "Authorization")
+                r.setValue(WeatherAPIConfig.anonKey, forHTTPHeaderField: "apikey")
+                return r
+            }
+            guard !WeatherAPIConfig.apiKey.isEmpty,
+                  let url = URL(string: "\(WeatherAPIConfig.baseURL)?lat=\(lat)&lon=\(lon)&appid=\(WeatherAPIConfig.apiKey)&units=imperial")
+            else { return nil }
+            return URLRequest(url: url)
+        }
+
+        var useProxy = (WeatherAPIConfig.proxyBase != nil)
+        guard let firstReq = makeRequest(useProxy: useProxy) else {
             setError("Invalid URL")
             return
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var (data, response) = try await URLSession.shared.data(for: firstReq)
+            // Proxy ainda não publicado (503/404) e há chave direta → fallback direto (transição).
+            if useProxy, let h = response as? HTTPURLResponse, (h.statusCode == 503 || h.statusCode == 404),
+               !WeatherAPIConfig.apiKey.isEmpty, let directReq = makeRequest(useProxy: false) {
+                useProxy = false
+                (data, response) = try await URLSession.shared.data(for: directReq)
+            }
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 await MainActor.run {
                     self.currentWeather = nil

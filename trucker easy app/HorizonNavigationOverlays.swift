@@ -10,10 +10,13 @@ enum NavigationManeuverIcon {
     static func symbol(for instructions: String) -> String {
         let t = instructions.lowercased()
         if t.contains("u-turn") || t.contains("u turn") { return "arrow.uturn.left" }
-        if t.contains("turn left sharply") || t.contains("sharp left") { return "arrow.turn.up.left" }
-        if t.contains("turn right sharply") || t.contains("sharp right") { return "arrow.turn.up.right" }
-        if t.contains("turn left") || t.contains("left turn") || t.contains("bear left") || t.contains("keep left") || t.contains("slight left") { return "arrow.turn.down.left" }
-        if t.contains("turn right") || t.contains("right turn") || t.contains("bear right") || t.contains("keep right") || t.contains("slight right") { return "arrow.turn.down.right" }
+        // Curvas usam DIAGONAIS limpas (`arrow.up.left/right` = ↖↗): apontam PRA FRENTE + lado, sem
+        // cauda. Antes usávamos `arrow.turn.up.left/right`, que é a seta de "RESPONDER" (↩) com cauda
+        // pra baixo → lia como "de cabeça para baixo" no road test. Diagonal nunca parece invertida.
+        if t.contains("turn left sharply") || t.contains("sharp left") { return "arrow.up.left" }
+        if t.contains("turn right sharply") || t.contains("sharp right") { return "arrow.up.right" }
+        if t.contains("turn left") || t.contains("left turn") || t.contains("bear left") || t.contains("keep left") || t.contains("slight left") { return "arrow.up.left" }
+        if t.contains("turn right") || t.contains("right turn") || t.contains("bear right") || t.contains("keep right") || t.contains("slight right") { return "arrow.up.right" }
         if t.contains("roundabout") || t.contains("rotary") || t.contains("traffic circle") { return "arrow.clockwise.circle" }
         if t.contains("merge") || t.contains("ramp") || t.contains("highway") { return "arrow.merge" }
         if t.contains("exit") { return "arrow.up.right.circle" }

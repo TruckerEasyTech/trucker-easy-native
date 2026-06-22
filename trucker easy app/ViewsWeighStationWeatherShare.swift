@@ -616,6 +616,11 @@ struct WeighStationStatusSheet: View {
                         .padding(.top, 16)
                         .padding(.horizontal, 20)
 
+                    // ── Prediction (Trends): tendência histórica neste horário ──
+                    predictionCard
+                        .padding(.top, 12)
+                        .padding(.horizontal, 20)
+
                     Divider()
                         .background(AppTheme.Colors.textSecondary.opacity(0.15))
                         .padding(.vertical, 20)
@@ -765,6 +770,58 @@ struct WeighStationStatusSheet: View {
                     .stroke(selected ? AppTheme.Colors.accent.opacity(0.45) : Color.clear, lineWidth: 1.5)
             )
         }
+    }
+
+    // MARK: - Prediction (Trends) — tendência histórica por hora-do-dia, SÓ de reports reais
+
+    struct HourlyPrediction {
+        let likelyStatus: WeighStationStatus?   // nil = histórico insuficiente (NUNCA inventa)
+        let sampleCount: Int
+    }
+
+    /// Agrega os reports reais da estação por hora-do-dia (janela ±1h p/ amostra) e devolve a
+    /// tendência aberta/fechada neste horário. < 2 amostras → nil (honesto, sem fabricar).
+    static func hourlyPrediction(reports: [WeighStationReport], atHour hour: Int) -> HourlyPrediction {
+        let cal = Calendar.current
+        let band = reports.filter { r in
+            let h = cal.component(.hour, from: r.reportedAt)
+            let raw = abs(h - hour)
+            return min(raw, 24 - raw) <= 1
+        }
+        let open = band.filter { $0.status == .open }.count
+        let closed = band.filter { $0.status == .closed }.count
+        let total = open + closed
+        guard total >= 2 else { return HourlyPrediction(likelyStatus: nil, sampleCount: total) }
+        return HourlyPrediction(likelyStatus: closed >= open ? .closed : .open, sampleCount: total)
+    }
+
+    @ViewBuilder private var predictionCard: some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let p = Self.hourlyPrediction(reports: service.reports[stationName] ?? [], atHour: hour)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.bar.fill").font(.system(size: 12, weight: .bold))
+                Text("Prediction").font(.system(size: 13, weight: .bold))
+            }
+            .foregroundColor(AppTheme.Colors.textSecondary)
+
+            if let status = p.likelyStatus {
+                HStack(spacing: 8) {
+                    Image(systemName: status.icon).foregroundColor(status.color)
+                    Text("Geralmente \(status.rawValue.uppercased()) por volta deste horário")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+                Text("Baseado em \(p.sampleCount) report\(p.sampleCount == 1 ? "" : "s") reais neste horário (±1h).")
+                    .font(.system(size: 11)).foregroundColor(AppTheme.Colors.textSecondary)
+            } else {
+                Text("Histórico insuficiente neste horário — ainda coletando reports reais dos motoristas.")
+                    .font(.system(size: 12)).foregroundColor(AppTheme.Colors.textSecondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(AppTheme.Colors.textSecondary.opacity(0.08)))
     }
 
     private var currentStatusBanner: some View {
@@ -1035,12 +1092,35 @@ struct WeighStationStatusSheet: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 10)
 
-            ForEach(recentReports) { report in
-                WeighStationReportRow(report: report) {
-                    service.confirm(report: report, for: stationName)
+            // Anti-poluição: vários reports IGUAIS e consecutivos (ex: "Closed, Closed, Closed…")
+            // colapsam num accordion "N similar reports" em vez de N linhas idênticas. Só agrupa
+            // dados REAIS já carregados — nada é fabricado.
+            ForEach(groupConsecutiveSimilarReports(recentReports)) { run in
+                if run.reports.count == 1 {
+                    WeighStationReportRow(report: run.reports[0]) {
+                        service.confirm(report: run.reports[0], for: stationName)
+                    }
+                } else {
+                    SimilarReportsGroup(run: run) { report in
+                        service.confirm(report: report, for: stationName)
+                    }
                 }
             }
         }
+    }
+
+    /// Colapsa RUNS consecutivos de reports com o mesmo status+resumo num único grupo expansível.
+    /// Mantém a ordem cronológica (não reordena) — só funde vizinhos idênticos.
+    private func groupConsecutiveSimilarReports(_ reports: [WeighStationReport]) -> [GroupedReportRun] {
+        var runs: [[WeighStationReport]] = []
+        for r in reports {
+            if let head = runs.last?.first, head.status == r.status, head.summaryText == r.summaryText {
+                runs[runs.count - 1].append(r)
+            } else {
+                runs.append([r])
+            }
+        }
+        return runs.map { GroupedReportRun(id: $0[0].id, reports: $0) }
     }
 
     // MARK: Actions
@@ -1149,6 +1229,55 @@ struct WeighStationStatusSheet: View {
         .sorted { ($0.distanceMeters ?? .greatestFiniteMagnitude) < ($1.distanceMeters ?? .greatestFiniteMagnitude) }
         .prefix(25)
         .map { $0 }
+    }
+}
+
+// MARK: - Agrupamento anti-poluição (reports similares consecutivos)
+
+/// Um run de reports idênticos e consecutivos (mesmo status+resumo). `id` = id do primeiro report.
+private struct GroupedReportRun: Identifiable {
+    let id: UUID
+    let reports: [WeighStationReport]
+}
+
+/// Accordion "N similar reports" — colapsa um run de reports idênticos numa linha expansível.
+private struct SimilarReportsGroup: View {
+    let run: GroupedReportRun
+    let onConfirm: (WeighStationReport) -> Void
+    @State private var isExpanded = false
+
+    private var status: WeighStationStatus { run.reports[0].status }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: status.icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(status.color)
+                        .frame(width: 22)
+                    Text("\(run.reports.count) similar reports · \(run.reports[0].summaryText)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(AppTheme.Colors.textSecondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ForEach(run.reports) { report in
+                    WeighStationReportRow(report: report) { onConfirm(report) }
+                }
+            }
+        }
     }
 }
 

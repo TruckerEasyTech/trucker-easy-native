@@ -2091,10 +2091,14 @@ struct ScaleAlertBanner: View {
     var communityHint: WeighStationStatus? = nil
     var communitySummary: WeighStationCommunitySummary? = nil
     var onReport: ((WeighStationStatus) -> Void)? = nil
+    /// Passo 2 (só quando o motorista marca OPEN): o que aconteceu — bypass/rolling/inspection.
+    var onReportOpenOutcome: ((WeighStationOpenOutcome) -> Void)? = nil
     var onMoreDetails: (() -> Void)? = nil
 
     @State private var expanded = false
     @State private var reportAcknowledged = false
+    /// Fluxo PROGRESSIVO: ao tocar OPEN, troca os 3 botões pelas sub-opções (não mostra tudo de uma vez).
+    @State private var showOpenOutcomes = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2284,19 +2288,36 @@ struct ScaleAlertBanner: View {
                 .foregroundColor(AppTheme.Colors.textSecondary)
                 .tracking(0.4)
 
-            HStack(spacing: 8) {
-                scaleReportButton(.closed)
-                scaleReportButton(.open)
-                scaleReportButton(.monitoring)
+            if showOpenOutcomes {
+                // PASSO 2 — só aparece DEPOIS de tocar "Open" (progressivo, não tudo na tela).
+                Text("Aberta — o que aconteceu?")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+                HStack(spacing: 8) {
+                    ForEach(WeighStationOpenOutcome.allCases) { openOutcomeButton($0) }
+                }
+            } else {
+                // PASSO 1 — status básico.
+                HStack(spacing: 8) {
+                    scaleReportButton(.closed)
+                    scaleReportButton(.open)
+                    scaleReportButton(.monitoring)
+                }
             }
         }
     }
 
     private func scaleReportButton(_ weighStatus: WeighStationStatus) -> some View {
         Button {
-            onReport?(weighStatus)
-            reportAcknowledged = true
-            UISelectionFeedbackGenerator().selectionChanged()
+            if weighStatus == .open {
+                // Não submete ainda — abre o passo 2 (Bypass/Rolling/Inspection).
+                withAnimation { showOpenOutcomes = true }
+                UISelectionFeedbackGenerator().selectionChanged()
+            } else {
+                onReport?(weighStatus)
+                reportAcknowledged = true
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: weighStatus.icon)
@@ -2314,6 +2335,34 @@ struct ScaleAlertBanner: View {
             .overlay(
                 RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
                     .stroke(weighStatus.color.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openOutcomeButton(_ outcome: WeighStationOpenOutcome) -> some View {
+        Button {
+            // Submete OPEN + o detalhe (bypass/rolling/inspection) num único report. Fecha o card.
+            onReportOpenOutcome?(outcome)
+            reportAcknowledged = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: outcome.icon)
+                    .font(.system(size: 16, weight: .bold))
+                Text(outcome.rawValue.uppercased())
+                    .font(.system(size: 9, weight: .black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundColor(outcome.color)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(outcome.color.opacity(0.12))
+            .cornerRadius(AppTheme.Radius.sm)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                    .stroke(outcome.color.opacity(0.35), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

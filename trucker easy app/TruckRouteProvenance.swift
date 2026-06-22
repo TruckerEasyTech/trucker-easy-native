@@ -16,11 +16,13 @@ struct TruckRouteProvenance: Equatable {
     var optimizeRequestId: String?
     var solverUsed: String?
 
-    /// Neal SA, Leap Hybrid CQM, AWS Braket D-Wave, or Plano B (SA clássico) — accent line + “quantum” product chrome.
+    /// HONESTO: só ganha o selo "Quantum" quem toca QPU de VERDADE — Leap Hybrid (QPU+clássico) ou
+    /// Braket D-Wave (QPU). `dwave_neal_sa` (Neal = simulated annealing em CPU, apesar do nome) e
+    /// `simulated_quantum_annealing` são CLÁSSICOS → NÃO podem ser anunciados como "Quantum" (era
+    /// falso-positivo). Eles ainda mostram "Optimized stop order" (verdadeiro: reordenam paradas).
     var usesQuantumAccentPolyline: Bool {
         guard let s = solverUsed?.lowercased() else { return false }
-        return s == "dwave_neal_sa" || s == "leap_hybrid_cqm" || s == "amazon_braket_dwave"
-            || s == "simulated_quantum_annealing"
+        return s == "leap_hybrid_cqm" || s == "amazon_braket_dwave"
     }
 
     var driverBadgeTitle: String {

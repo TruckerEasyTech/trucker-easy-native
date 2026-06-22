@@ -171,6 +171,9 @@ final class NavigationEngine {
     /// Issue 1 (teste de estrada): rastreia regressões do índice mais-próximo — a assinatura
     /// do "tremor" de manobra. Só DEBUG; não afeta release.
     private var lastLoggedClosestIndex = -1
+    /// Telemetria de "milhas erradas": loga, a cada manobra, a distância Valhalla vs a calculada,
+    /// pra isolar onde a milha diverge no próximo road test (sem mudar comportamento).
+    private var lastLoggedMileageStep = -1
     #endif
 
     func updateLocation(_ location: CLLocation) {
@@ -234,6 +237,16 @@ final class NavigationEngine {
         updateRemainingStats(from: location, route: route, routeIndex: closestIndex)
         checkAndAnnounceStep(distance: nextTurnDistance)
 
+        #if DEBUG
+        if currentStepIndex != lastLoggedMileageStep, let step = route.steps[safe: currentStepIndex] {
+            lastLoggedMileageStep = currentStepIndex
+            print("[NavMiles] step=\(currentStepIndex) '\(step.instruction)' "
+                + "valhalla=\(String(format: "%.2f", step.distanceMeters / 1609.34))mi "
+                + "calc2turn=\(String(format: "%.2f", nextTurnDistance / 1609.34))mi "
+                + "remain=\(String(format: "%.1f", distanceRemaining / 1609.34))mi")
+        }
+        #endif
+
         // Advance step at 20m — gives enough lead-in for trucks at highway speed
         if nextTurnDistance < 20 && currentStepIndex < route.steps.count - 1 {
             moveToNextStep()
@@ -259,26 +272,35 @@ final class NavigationEngine {
         var idx = min(max(lastClosestCoordinateIndex, 0), n - 1)
         let anchorDist = location.distance(from: loc(at: idx))
 
+        // Issue 1 (tremor de manobra): em trevo/alça/retorno a rota passa perto de um trecho ANTERIOR.
+        // Sem trava, o ponto mais-próximo regride pra esse trecho antigo e a distância-pra-manobra (e a
+        // instrução falada) pula pra trás. Durante navegação ATIVA e DENTRO da rota, travamos a busca pra
+        // frente: o índice não pode cair abaixo do ponto mais avançado já alcançado (−2 vértices p/ ruído
+        // de GPS). Fora de rota / recalculando, a divergência é real → busca completa continua liberada.
+        let forwardLock = (state == .navigating && !isOffRoute)
+        let minIndexFloor = forwardLock ? min(max(0, maxReachedRouteIndex - 2), n - 1) : 0
+
         // Cold start or lost sync / large jump — coarse scan so we don't climb into a wrong local minimum.
         if lastClosestCoordinateIndex == 0 && anchorDist > 250 {
             idx = coarseClosestCoordinateIndex(to: location, coordinates: coords)
         } else if anchorDist > offRouteThreshold * 4 {
             idx = coarseClosestCoordinateIndex(to: location, coordinates: coords)
         }
+        idx = max(idx, minIndexFloor)
 
         while idx < n - 1 {
             let d0 = location.distance(from: loc(at: idx))
             let d1 = location.distance(from: loc(at: idx + 1))
             if d1 < d0 { idx += 1 } else { break }
         }
-        while idx > 0 {
+        while idx > minIndexFloor {
             let d0 = location.distance(from: loc(at: idx))
             let dm = location.distance(from: loc(at: idx - 1))
             if dm < d0 { idx -= 1 } else { break }
         }
 
         let refineRadius = min(48, max(n / 4, 24))
-        let low = max(0, idx - refineRadius)
+        let low = max(minIndexFloor, idx - refineRadius)
         let high = min(n - 1, idx + refineRadius)
         var bestIdx = idx
         var bestDist = location.distance(from: loc(at: idx))
@@ -293,8 +315,48 @@ final class NavigationEngine {
         }
 
         lastClosestCoordinateIndex = bestIdx
-        let bc = coords[bestIdx]
-        return (CLLocation(latitude: bc.latitude, longitude: bc.longitude), bestIdx)
+        // Map-matching on-device: em vez do VÉRTICE mais próximo, projeta o GPS perpendicularmente no
+        // SEGMENTO da via (entre vértices). Dá distância-à-rota exata (menos falso "fora de rota") e um
+        // ponto suave que desliza ao longo da via. Sem rede, offline, custo zero — o que GPS sério faz
+        // no loop ao vivo (Valhalla /trace_route seria rede por tick: errado aqui, ok só p/ correção offline).
+        let snapped = bestProjectedPoint(location: location, coords: coords, around: bestIdx)
+        return (snapped, bestIdx)
+    }
+
+    /// Projeta o ponto mais próximo entre os dois segmentos adjacentes ao vértice `idx`.
+    private func bestProjectedPoint(location: CLLocation, coords: [CLLocationCoordinate2D], around idx: Int) -> CLLocation {
+        let n = coords.count
+        var best = coords[idx]
+        var bestD = location.distance(from: CLLocation(latitude: best.latitude, longitude: best.longitude))
+        func consider(_ a: Int, _ b: Int) {
+            guard a >= 0, b < n, a != b else { return }
+            let proj = Self.projectOntoSegment(location.coordinate, coords[a], coords[b])
+            let d = location.distance(from: CLLocation(latitude: proj.latitude, longitude: proj.longitude))
+            if d < bestD { bestD = d; best = proj }
+        }
+        consider(idx - 1, idx)
+        consider(idx, idx + 1)
+        return CLLocation(latitude: best.latitude, longitude: best.longitude)
+    }
+
+    /// Projeção perpendicular de P no segmento A→B (aprox. equirretangular local, precisa em escala de via).
+    /// Retorna o ponto projetado, preso ao segmento (t ∈ [0,1]).
+    private static func projectOntoSegment(_ p: CLLocationCoordinate2D, _ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+        let mPerDegLat = 111_320.0
+        let mPerDegLon = 111_320.0 * cos(a.latitude * .pi / 180)
+        guard mPerDegLon != 0 else { return a }
+        let bx = (b.longitude - a.longitude) * mPerDegLon
+        let by = (b.latitude  - a.latitude)  * mPerDegLat
+        let px = (p.longitude - a.longitude) * mPerDegLon
+        let py = (p.latitude  - a.latitude)  * mPerDegLat
+        let segLenSq = bx * bx + by * by
+        guard segLenSq > 0 else { return a }
+        var t = (px * bx + py * by) / segLenSq
+        t = min(1, max(0, t))
+        return CLLocationCoordinate2D(
+            latitude:  a.latitude  + (t * by) / mPerDegLat,
+            longitude: a.longitude + (t * bx) / mPerDegLon
+        )
     }
 
     /// ~O(n/stride) fallback when the vehicle is far from the last anchor or polyline is huge.

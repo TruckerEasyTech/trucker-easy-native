@@ -248,13 +248,31 @@ private struct RouteEasyOptionCard: View {
                 }
             }
 
-            HStack(spacing: 12) {
-                metric(icon: "road.lanes", text: distanceText)
-                metric(icon: "dollarsign.circle", text: tollText)
-                metric(icon: "fuelpump.fill", text: fuelText)
-                if option.recommendedStopsCount > 0 {
-                    metric(icon: "mappin.and.ellipse", text: "\(option.recommendedStopsCount) stop")
+            // Opção paga IDÊNTICA à Free → ESCONDE os números repetidos (milhas/pedágio/diesel). Sem
+            // isso os 3 cards mostravam "606 mi · 609 min · $472" iguais e ninguém pagaria mais caro.
+            // Aqui o card mostra só o VALOR do plano (valueNote abaixo) — justifica o preço.
+            if !option.matchesFastest {
+                HStack(spacing: 12) {
+                    metric(icon: "road.lanes", text: distanceText)
+                    // Fastest é o tier FREE: NÃO mostra pedágio/diesel (otimização de custo é dos planos
+                    // pagos No-Tolls/Easy-AI). Mostrar isso no Free confundia e era "feature paga vazando".
+                    if option.kind != .fastest {
+                        metric(icon: "dollarsign.circle", text: tollText)
+                        metric(icon: "fuelpump.fill", text: fuelText)
+                    }
+                    if option.recommendedStopsCount > 0 {
+                        metric(icon: "mappin.and.ellipse", text: "\(option.recommendedStopsCount) stop")
+                    }
                 }
+            }
+
+            // Diferencial HONESTO do tier — quando os números coincidem (ex.: rota curta sem pedágio),
+            // explica o VALOR do plano em vez de parecer um clone. Nada fabricado.
+            if let note = valueNote {
+                Text(note)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(accent.opacity(0.95))
+                    .lineLimit(2)
             }
 
             if !isLocked {
@@ -319,6 +337,22 @@ private struct RouteEasyOptionCard: View {
         case .fastest: return Color(hex: "#60a5fa")
         case .fewerTolls: return Color(hex: "#22c55e")
         case .fuelSmart: return Color(hex: "#f59e0b")
+        }
+    }
+
+    /// Diferencial honesto do plano. Quando há ganho numérico real (economia/parada), ele já aparece
+    /// nos metrics → retorna nil. Quando coincide com a rota grátis nesta viagem, explica QUANDO o
+    /// plano vale — sem inventar número.
+    private var valueNote: String? {
+        switch option.kind {
+        case .fastest:
+            return nil
+        case .fewerTolls:
+            if let s = option.estimatedSavingsUSD, s > 1 { return nil }
+            return "Sem pedágio nesta rota — evita pedágios automaticamente quando houver."
+        case .fuelSmart:
+            if option.recommendedStopsCount > 0 { return nil }
+            return "Melhor base truck-safe — otimiza diesel e descanso (HOS) em viagens longas."
         }
     }
 

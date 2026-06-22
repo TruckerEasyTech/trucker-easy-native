@@ -4,6 +4,7 @@ import MapKit
 import CoreLocation
 import MapboxMaps
 import UIKit
+import Combine
 
 // MARK: - Map style → Mapbox StyleURI
 
@@ -36,6 +37,11 @@ final class RouteSnapLocationProvider: NSObject, LocationProvider, HeadingProvid
 
     private var lastLocation: MapboxMaps.Location?
     private var heading: MapboxMaps.Heading?
+
+    // Publishers que alimentam o `LocationDataModel` (API NÃO-deprecated da v11 — substitui o
+    // `override(provider:)`). O `emit()` envia aqui; o puck nativo consome via dataModel.
+    let locationPublisher = PassthroughSubject<[MapboxMaps.Location], Never>()
+    let headingPublisher = PassthroughSubject<MapboxMaps.Heading, Never>()
 
     // MARK: LocationProvider
 
@@ -82,6 +88,11 @@ final class RouteSnapLocationProvider: NSObject, LocationProvider, HeadingProvid
         lastLocation = loc
         heading = newHeading
 
+        // Caminho ATUAL (não-deprecated): alimenta o LocationDataModel via publishers.
+        locationPublisher.send([loc])
+        headingPublisher.send(newHeading)
+
+        // Observers mantidos por conformidade do protocolo (o dataModel não os usa).
         for observer in locationObservers.allObjects {
             (observer as? LocationObserver)?.onLocationUpdateReceived(for: [loc])
         }
@@ -104,19 +115,39 @@ final class HorizonMapboxMapHostView: UIView {
         super.init(frame: .zero)
         backgroundColor = .white
         clipsToBounds = true
+        // Anti-TELA-PRETA: ao voltar do 2º plano / desbloquear a tela, o Mapbox/Metal pode perder o
+        // drawable e ficar preto. Forçamos repaint + re-escala no didBecomeActive pra recuperar.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     required init?(coder: NSCoder) { nil }
 
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func appDidBecomeActive() {
+        applySafeContentScale()
+        mapView?.mapboxMap.triggerRepaint()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         if mapView == nil, bounds.width > 100, bounds.height > 100, let opts = pendingInitOptions {
-            let mv = MapboxMaps.MapView(frame: bounds, mapInitOptions: opts)
-            mv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            addSubview(mv)
-            mapView = mv
+            // ANTI-TELA-PRETA no launch: a init do MapboxMaps.MapView (Metal + style + tile store) é
+            // pesada e SÍNCRONA. Criá-la aqui, no mesmo ciclo, congelava o frame da transição
+            // splash→mapa = tela preta travada. Deferimos pro próximo runloop: o fundo branco + chrome
+            // já desenham, então o mapa entra. UI nunca fica num preto congelado.
             pendingInitOptions = nil
-            onMapViewReady?(mv)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.mapView == nil, self.bounds.width > 100, self.bounds.height > 100 else { return }
+                let mv = MapboxMaps.MapView(frame: self.bounds, mapInitOptions: opts)
+                mv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                self.addSubview(mv)
+                self.mapView = mv
+                self.onMapViewReady?(mv)
+                self.applySafeContentScale()
+            }
         }
         applySafeContentScale()
     }
@@ -215,7 +246,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         puckConfig.topImage = HorizonMapboxPinImages.userNavigationArrowPuckImage()
         puckConfig.scale = .constant(1.0)
         mapView.location.options.puckType = .puck2D(puckConfig)
-        mapView.location.options.puckBearing = .heading
+        mapView.location.options.puckBearing = .course   // lê location.bearing (corredor), não a bússola — consistente c/ a câmera no iPad
         mapView.location.options.puckBearingEnabled = true
     }
 
@@ -455,6 +486,60 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         private var weatherRadarEnabled = false
         private var weatherRadarTimer: Timer?
 
+        // MARK: - Tráfego ao vivo (Mapbox Traffic v1) + declutter por zoom
+        private let trafficSourceId = "mapbox-traffic-src"
+        private let trafficLayerId = "mapbox-traffic-layer"
+
+        /// Camada de tráfego ao vivo do Mapbox (congestão colorida do dado real `mapbox-traffic-v1`).
+        /// Hierarquia: entra ABAIXO da linha de rota ("horizon-route") → a rota laranja e o puck
+        /// ficam por cima, com o maior contraste. Opacidade 0.55 (visível sem competir) e minZoom 14
+        /// (só aparece no zoom de rua; na rodovia não polui). Defensivo: guarda por layerExists.
+        private func addTrafficLayer(on mapView: MapboxMaps.MapView) {
+            guard let map = mapView.mapboxMap else { return }
+            guard !map.layerExists(withId: trafficLayerId) else { return }
+            do {
+                if !map.sourceExists(withId: trafficSourceId) {
+                    var source = VectorSource(id: trafficSourceId)
+                    source.url = "mapbox://mapbox.mapbox-traffic-v1"
+                    try map.addSource(source)
+                }
+                var layer = LineLayer(id: trafficLayerId, source: trafficSourceId)
+                layer.sourceLayer = "traffic"
+                layer.lineWidth = .constant(2.5)
+                layer.lineOpacity = .constant(0.55)
+                layer.minZoom = 14
+                // Cor por nível de congestão (campo `congestion` do tile do Mapbox).
+                layer.lineColor = .expression(
+                    Exp(.match) {
+                        Exp(.get) { "congestion" }
+                        "low";      UIColor.systemGreen
+                        "moderate"; UIColor.systemYellow
+                        "heavy";    UIColor.systemOrange
+                        "severe";   UIColor.systemRed
+                        UIColor.clear   // default (sem dado) → invisível
+                    }
+                )
+                if map.layerExists(withId: "horizon-route") {
+                    try map.addLayer(layer, layerPosition: .below("horizon-route"))
+                } else {
+                    try map.addLayer(layer)
+                }
+            } catch {
+                #if DEBUG
+                print("[Traffic] addLayer falhou: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        /// Declutter por zoom: ícones de serviço/sinalização só a partir do zoom 14 (rua) — limpo na
+        /// rodovia, detalhado na cidade. Alertas de SEGURANÇA (pesagem etc.) ficam de fora: sempre visíveis.
+        private func applyIconZoomFilters(on mapView: MapboxMaps.MapView) {
+            guard let map = mapView.mapboxMap else { return }
+            for id in ["horizon-signage", "horizon-stops", "horizon-cameras"] where map.layerExists(withId: id) {
+                try? map.setLayerProperty(for: id, property: "minzoom", value: 14)
+            }
+        }
+
         // MARK: - Weather radar (NEXRAD real, NOAA via Iowa Mesonet — grátis, sem chave, auto-atualiza)
         private let weatherRadarSourceId = "weather-radar-src"
         private let weatherRadarLayerId = "weather-radar-layer"
@@ -535,7 +620,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             var opts = FollowPuckViewportStateOptions()
             opts.zoom = navigationZoom
             opts.pitch = 50                // visão inclinada pra frente (GPS de verdade)
-            opts.bearing = .heading        // mapa GIRA pro sentido da viagem (course-up)
+            // `.course` lê `location.bearing` (o rumo do corredor que emitimos), NÃO o heading da
+            // bússola. iPad sem bússola / sem sinal de heading não gira com `.heading`, mas o
+            // `location.bearing` flui igual (o puck anda) → câmera gira course-up em qualquer device.
+            opts.bearing = .course
             let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
             followPuckState = state
             mapView.viewport.transition(to: state)
@@ -572,9 +660,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 var opts = FollowPuckViewportStateOptions()
                 opts.zoom = navigationZoom
                 // Course-up: o mapa GIRA pro sentido da viagem e inclina pra frente (GPS de verdade).
-                // O puck já emite um bearing de corredor ESTÁVEL, então gira suave (sem jitter).
+                // `.course` lê `location.bearing` (rumo do corredor ESTÁVEL que emitimos) em vez do
+                // heading da bússola — corrige o iPad ("rota de lado") sem mexer no iPhone (mesmo valor).
                 opts.pitch = 50
-                opts.bearing = .heading
+                opts.bearing = .course
                 let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
                 followPuckState = state
                 followPuckActive = true
@@ -654,10 +743,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         func clearLeadNavigationArrow() { clearRouteNavigationArrow() }
 
         func installManagers(on mapView: MapboxMaps.MapView) {
-            // Drive the native puck from our route-snapped provider (once — the override persists
-            // across style reloads). Mapbox interpolates between the samples we emit at 60fps.
+            // Drive the native puck from our route-snapped provider (once — persists across style
+            // reloads). Mapbox interpolates between the samples we emit at 60fps. API NÃO-deprecated
+            // da v11: `dataModel` (publishers) em vez do antigo `override(provider:)`. Equivalente —
+            // o override fazia exatamente isto por dentro (montava um LocationDataModel dos signals).
             if !snapProviderInstalled {
-                mapView.location.override(provider: snapProvider)
+                mapView.location.dataModel = LocationDataModel(
+                    location: snapProvider.locationPublisher.eraseToAnyPublisher(),
+                    heading: snapProvider.headingPublisher.eraseToAnyPublisher()
+                )
                 snapProviderInstalled = true
             }
             routeLineManager = mapView.annotations.makePolylineAnnotationManager(id: "horizon-route")
@@ -676,13 +770,18 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             puckConfig.topImage = HorizonMapboxPinImages.userNavigationArrowPuckImage()
             puckConfig.scale = .constant(1.0)
             mapView.location.options.puckType = .puck2D(puckConfig)
-            mapView.location.options.puckBearing = .heading
+            mapView.location.options.puckBearing = .course   // lê location.bearing (corredor), não a bússola — consistente c/ a câmera no iPad
             mapView.location.options.puckBearingEnabled = true
             // Managers recriados começam vazios → força refreshPoints a re-adicionar os pins.
             lastStopsFingerprint = nil
             lastCamerasFingerprint = nil
             lastAlertsFingerprint = nil
             lastSignageFingerprint = nil
+
+            // Contexto pro motorista: tráfego ao vivo (abaixo da rota) + declutter por zoom dos ícones.
+            // Aqui, no fim do install, a linha de rota "horizon-route" já existe → o tráfego entra abaixo dela.
+            addTrafficLayer(on: mapView)
+            applyIconZoomFilters(on: mapView)
         }
 
         func refreshRoute(
@@ -724,6 +823,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             main.lineSortKey = 1
 
             mgr.annotations = [casing, main]
+            // Parte JÁ percorrida SOME (fica transparente) — "vanishing line" do Google/Waze; o
+            // `lineTrimOffset` (0…1) é avançado a cada tick no emit. (lineTrimColor é @_spi na v11.23 →
+            // não dá p/ tingir de cinza; transparente atende "não continuar toda aparecendo".) Reset aqui
+            // p/ rota nova começar 100% viva.
+            mgr.lineTrimOffset = [0, 0]
             if fitCameraToRoute {
                 fitCameraToRouteBounds(mapView: mapView, coords: coords)
             }
@@ -771,6 +875,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 emitRawLocation(user: user)
                 return
             }
+            // "Vanishing route line" (igual Google/Waze/Trucker Path): a parte JÁ percorrida (atrás do
+            // puck) fica apagada; só o trecho À FRENTE segue laranja vivo. Atualiza só o trim (float
+            // 0…1), SEM redesenhar a polilinha. Fração ≈ índice-âncora / total de vértices.
+            let progressed = min(max(Double(lastLeadArrowPolyIndex) / Double(coords.count - 1), 0), 1)
+            routeLineManager?.lineTrimOffset = [0, progressed]
             let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
             if snapped.distance(from: user) <= 35 {
                 // Na rota: a seta GRUDA na linha (consistente).
@@ -975,6 +1084,18 @@ private enum HorizonMapboxPinImages {
                 ]
                 let ts = txt.size(withAttributes: attrs)
                 txt.draw(at: CGPoint(x: cxp - ts.width / 2, y: cyp - ts.height / 2), withAttributes: attrs)
+            case .railCrossing:
+                // Passagem de nível — sinal rodoviário US: círculo amarelo de aviso + "X" preto (crossbuck).
+                let cxp = size / 2, cyp = size / 2, rad = size * 0.46
+                c.setFillColor(UIColor.systemYellow.cgColor)
+                c.fillEllipse(in: CGRect(x: cxp - rad, y: cyp - rad, width: rad * 2, height: rad * 2))
+                c.setStrokeColor(UIColor.white.cgColor); c.setLineWidth(1.4)
+                c.strokeEllipse(in: CGRect(x: cxp - rad, y: cyp - rad, width: rad * 2, height: rad * 2))
+                c.setStrokeColor(UIColor.black.cgColor); c.setLineWidth(size * 0.11); c.setLineCap(.round)
+                let inset = size * 0.30
+                c.move(to: CGPoint(x: inset, y: inset)); c.addLine(to: CGPoint(x: size - inset, y: size - inset))
+                c.move(to: CGPoint(x: size - inset, y: inset)); c.addLine(to: CGPoint(x: inset, y: size - inset))
+                c.strokePath()
             }
         }
         return PointAnnotation.Image(image: uiImage, name: "signage-\(kind.rawValue)", sdf: false)
@@ -1089,34 +1210,54 @@ private enum HorizonMapboxPinImages {
         }
     }
 
-    /// Conventional navigation arrow (drawn pointing up = 0° rotation = north).
-    /// Mapbox's Puck2D rotates it to the GPS course with built-in interpolation,
-    /// so it always points along the direction of travel — never sideways.
+    /// Cursor de navegação = CAMINHÃO top-down preto-e-laranja (marca Trucker Easy),
+    /// desenhado apontando pra FRENTE = topo (0° = norte). O Puck2D do Mapbox rotaciona
+    /// pro rumo do corredor com interpolação, então ele sempre aponta no sentido da viagem.
+    ///
+    /// O road test anterior reclamou que o caminhão "lia de cabeça pra baixo". A causa era
+    /// silhueta ambígua (frente/trás indistinguíveis). Aqui a DIANTEIRA é inequívoca:
+    /// cabine LARANJA + para-brisa claro no topo, baú PRETO atrás, nariz arredondado e
+    /// traseira reta. Contorno branco + sombra p/ destacar em qualquer estilo de mapa.
     static func userNavigationArrowPuckImage() -> UIImage {
-        let size = CGSize(width: 44, height: 44)
+        let size = CGSize(width: 46, height: 46)
         return UIGraphicsImageRenderer(size: size).image { ctx in
             let c = ctx.cgContext
-            // Outer white ring + shadow so the puck pops on any map style.
-            c.setShadow(offset: CGSize(width: 0, height: 2), blur: 4, color: UIColor.black.withAlphaComponent(0.45).cgColor)
-            c.setFillColor(UIColor.white.cgColor)
-            c.fillEllipse(in: CGRect(x: 3, y: 3, width: 38, height: 38))
-            c.setShadow(offset: .zero, blur: 0, color: nil)
-            // Inner BLUE disc — deliberately a different hue from the ORANGE route line so the cursor
-            // reads as a distinct arrow and never blends into "a line of the same color" behind it.
-            let puckBlue = UIColor(red: 0.13, green: 0.45, blue: 0.96, alpha: 1)
-            c.setFillColor(puckBlue.cgColor)
-            c.fillEllipse(in: CGRect(x: 6, y: 6, width: 32, height: 32))
-            // White chevron pointing forward (up at 0° rotation; Mapbox rotates it to the heading).
             c.translateBy(x: size.width / 2, y: size.height / 2)
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: 0, y: -11))
-            path.addLine(to: CGPoint(x: 8.5, y: 9))
-            path.addLine(to: CGPoint(x: 0, y: 3.5))
-            path.addLine(to: CGPoint(x: -8.5, y: 9))
-            path.close()
+
+            let orange = UIColor(red: 0.96, green: 0.49, blue: 0.09, alpha: 1)   // laranja da marca
+            let bodyBlack = UIColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1) // baú preto
+            let glass = UIColor(red: 0.66, green: 0.81, blue: 0.96, alpha: 1)     // para-brisa
+
+            // Silhueta do corpo (frente=topo): nariz arredondado, traseira menos arredondada.
+            let bodyRect = CGRect(x: -9, y: -16, width: 18, height: 32)
+            let body = UIBezierPath(roundedRect: bodyRect, cornerRadius: 5)
+
+            // Contorno branco (corpo inflado) + sombra → destaca em mapa claro/escuro/satélite.
+            c.setShadow(offset: CGSize(width: 0, height: 2), blur: 4,
+                        color: UIColor.black.withAlphaComponent(0.45).cgColor)
             c.setFillColor(UIColor.white.cgColor)
-            c.addPath(path.cgPath)
-            c.fillPath()
+            let outline = UIBezierPath(roundedRect: bodyRect.insetBy(dx: -2.5, dy: -2.5), cornerRadius: 7)
+            c.addPath(outline.cgPath); c.fillPath()
+            c.setShadow(offset: .zero, blur: 0, color: nil)
+
+            // Baú (traseira) preto — corpo inteiro como base.
+            c.setFillColor(bodyBlack.cgColor)
+            c.addPath(body.cgPath); c.fillPath()
+
+            // Cabine (terço dianteiro) laranja.
+            let cab = UIBezierPath(roundedRect: CGRect(x: -9, y: -16, width: 18, height: 13), cornerRadius: 5)
+            c.setFillColor(orange.cgColor)
+            c.addPath(cab.cgPath); c.fillPath()
+
+            // Para-brisa: faixa clara colada na frente = marca a DIANTEIRA sem ambiguidade.
+            let windshield = UIBezierPath(roundedRect: CGRect(x: -6, y: -14, width: 12, height: 4.5), cornerRadius: 2)
+            c.setFillColor(glass.cgColor)
+            c.addPath(windshield.cgPath); c.fillPath()
+
+            // Costura cabine/baú (engate) — linha fina escura.
+            c.setStrokeColor(bodyBlack.withAlphaComponent(0.6).cgColor)
+            c.setLineWidth(1)
+            c.move(to: CGPoint(x: -9, y: -3)); c.addLine(to: CGPoint(x: 9, y: -3)); c.strokePath()
         }
     }
 

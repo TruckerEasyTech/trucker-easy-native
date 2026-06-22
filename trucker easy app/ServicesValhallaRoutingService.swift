@@ -362,11 +362,17 @@ final class ValhallaRoutingService {
                 let instruction = maneuver.instruction.trimmingCharacters(in: .whitespaces)
                 guard !instruction.isEmpty else { continue }
 
+                // Shield de saída SÓ na manobra de saída/rampa de verdade (tipos Valhalla 17–21).
+                // O Valhalla carrega o nº via consecutive_count pro passo "Continue" (tipo 8) seguinte;
+                // mostrar "EXIT 282" ali (após já sair) seria redundante. Validado na resposta real.
+                let isExitManeuver = (17...21).contains(maneuver.type)
                 allSteps.append(RouteStep(
                     instruction: instruction,
                     distanceMeters: maneuver.length * 1609.34,    // miles → meters
                     durationSeconds: maneuver.time,
-                    maneuver: ValhallaManeuverType(rawValue: maneuver.type)?.instruction ?? instruction
+                    maneuver: ValhallaManeuverType(rawValue: maneuver.type)?.instruction ?? instruction,
+                    exitNumber: isExitManeuver ? maneuver.sign?.exitNumberText : nil,   // saída EXATA do Valhalla (não regex)
+                    exitToward: isExitManeuver ? maneuver.sign?.exitTowardText : nil
                 ))
             }
         }
@@ -409,11 +415,14 @@ final class ValhallaRoutingService {
             for m in leg.maneuvers {
                 let instr = m.instruction.trimmingCharacters(in: .whitespaces)
                 guard !instr.isEmpty else { continue }
+                let isExit = (17...21).contains(m.type)
                 steps.append(RouteStep(
                     instruction: instr,
                     distanceMeters: m.length * 1609.34,
                     durationSeconds: m.time,
-                    maneuver: ValhallaManeuverType(rawValue: m.type)?.instruction ?? instr
+                    maneuver: ValhallaManeuverType(rawValue: m.type)?.instruction ?? instr,
+                    exitNumber: isExit ? m.sign?.exitNumberText : nil,
+                    exitToward: isExit ? m.sign?.exitTowardText : nil
                 ))
             }
         }
@@ -710,13 +719,43 @@ private struct ValhallaManeuver: Decodable {
     let rough: Bool?
     let beginShapeIndex: Int?
     let endShapeIndex: Int?
+    /// Placa estruturada do Valhalla — número/destino/via da saída EXATOS (não regex no texto).
+    let sign: ValhallaSign?
 
     enum CodingKeys: String, CodingKey {
-        case type, instruction, length, time, rough
+        case type, instruction, length, time, rough, sign
         case hasTimeRestrictions = "has_time_restrictions"
         case tollBooth = "toll_booth"
         case beginShapeIndex = "begin_shape_index"
         case endShapeIndex = "end_shape_index"
+    }
+}
+
+/// Campo `sign` do maneuver Valhalla — dado de saída ESTRUTURADO (exit_number / exit_toward / exit_branch).
+private struct ValhallaSign: Decodable {
+    let exitNumber: [Element]?
+    let exitBranch: [Element]?
+    let exitToward: [Element]?
+
+    struct Element: Decodable { let text: String }
+
+    // Nomes REAIS confirmados no servidor Valhalla de produção (curl SLC→I-15): os campos terminam
+    // em `_elements` — assumir "exit_number" daria nil sempre (caía no regex = não corrigia nada).
+    enum CodingKeys: String, CodingKey {
+        case exitNumber = "exit_number_elements"
+        case exitBranch = "exit_branch_elements"
+        case exitToward = "exit_toward_elements"
+    }
+
+    /// Número da saída exato (ex.: "32A"), juntando entradas consecutivas se houver.
+    var exitNumberText: String? {
+        guard let nums = exitNumber, !nums.isEmpty else { return nil }
+        return nums.map(\.text).joined(separator: "/")
+    }
+    /// Destino da saída exato (ex.: "Waterbury").
+    var exitTowardText: String? {
+        guard let tw = exitToward, !tw.isEmpty else { return nil }
+        return tw.map(\.text).joined(separator: ", ")
     }
 }
 

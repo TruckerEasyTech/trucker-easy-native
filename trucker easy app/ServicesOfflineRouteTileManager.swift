@@ -60,6 +60,16 @@ final class OfflineRouteTileManager {
         loadRegion(id: aheadRegionId, coordinates: window, zoom: aheadZoom)
     }
 
+    private static var didPruneThisLaunch = false
+    /// Poda os tiles de rota acumulados UMA vez por launch (eles re-cacheiam por rota). Sem isto o
+    /// tile store incha entre sessões (ex.: 318 MB / 149 tiles) → o Mapbox trava no load de startup →
+    /// "app não abre". Chamar só quando IDLE (não-navegando), no launch. Não toca style packs.
+    func pruneStaleRouteTilesOnce() {
+        guard !Self.didPruneThisLaunch else { return }
+        Self.didPruneThisLaunch = true
+        clear()
+    }
+
     /// Remove os tiles da rota (ex.: ao encerrar a navegação) para não acumular disco.
     func clear() {
         tileStore.removeTileRegion(forId: overviewRegionId)
@@ -72,7 +82,11 @@ final class OfflineRouteTileManager {
     /// se houver) com `acceptExpired: false`, limpando o aviso do Mapbox
     /// "outdated resource ... shall be updated explicitly using Offline API".
     /// Chamar quando online (ex.: ao abrir o mapa) — offline vira no-op silencioso.
-    func updateOfflineResources() {
+    /// `style`: o estilo REALMENTE renderizado pelo mapa (ex.: `.satelliteStreets`). Antes atualizava
+    /// o default `.standard` — estilo que o app nem mostra — então o aviso "outdated resource
+    /// mapbox://styles/mapbox/standard" persistia e o trabalho ia pro pack errado. Agora atualiza o certo.
+    func updateOfflineResources(style: StyleURI? = nil) {
+        if let style { styleURI = style }
         loadStylePack(styleURI, acceptExpired: false)
         if routeCoordinates.count >= 2 {
             loadRegion(id: overviewRegionId, coordinates: routeCoordinates, zoom: overviewZoom, acceptExpired: false)

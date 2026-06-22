@@ -2,17 +2,34 @@
 
 import Foundation
 
-/// Feature gating for TestFlight / internal QA. Flip `unlockAllFeaturesForTesting` to `false` before App Store launch.
 enum AppAccessPolicy {
-    /// When `true`: Premium features + truck-only Valhalla routing for all testers (no IAP required).
-    /// Release builds always use production gating (`false`).
-    #if DEBUG
-    static let unlockAllFeaturesForTesting = true
-    #else
-    // TESTFLIGHT: true — testador na estrada precisa de todas as features (Premium,
-    // Route Easy completo) sem paywall. ⚠️ TODO: voltar para `false` ANTES do envio
-    // à App Store (release público volta ao gating de planos).
-    static let unlockAllFeaturesForTesting = true
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🚦  INTERRUPTOR ÚNICO DO PAYWALL — mude SÓ esta linha  🚦
+    //
+    //  • true  → build de TESTE (TestFlight/QA): libera TODAS as features sem pagar.
+    //  • false → build de LANÇAMENTO (App Store): paywall ATIVO (planos Free/Standard/Premium).
+    //
+    //  Builds de desenvolvimento (DEBUG, simulador/Xcode) ignoram isto e ficam SEMPRE liberados.
+    //  Este é o ÚNICO lugar a mudar — não há duplicação. O banner "Test mode" e o unlock seguem daqui.
+    //
+    //                  ▼▼▼  MUDE PARA false ANTES DE SUBMETER À APP STORE  ▼▼▼
+    static let isPreLaunchTestBuild = true
+    //                  ▲▲▲  (deixe true enquanto testa no TestFlight)        ▲▲▲
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /// When `true`: Premium features + truck-only Valhalla routing liberados sem IAP.
+    /// DEBUG = sempre true (dev). Release = segue `isPreLaunchTestBuild` (TestFlight=true; App Store=false).
+    static var unlockAllFeaturesForTesting: Bool {
+        #if DEBUG
+        return true
+        #else
+        return isPreLaunchTestBuild
+        #endif
+    }
+
+    #if !DEBUG
+    // Lembrete em TODO build de release (aparece no log ao arquivar): confira o interruptor acima.
+    #warning("Release: confirme AppAccessPolicy.isPreLaunchTestBuild — true=teste liberado, false=App Store (paywall).")
     #endif
 
     /// Fleet dispatch portal (loads from dispatcher) — off for solo-driver; nothing to tap while driving.

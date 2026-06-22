@@ -19,6 +19,7 @@ struct RouteSignageItem: Identifiable, Equatable {
     enum Kind: String {
         case trafficSignal   // OSM highway=traffic_signals
         case stop            // OSM highway=stop
+        case railCrossing    // OSM railway=level_crossing — passagem de nível (crítico p/ caminhão preso no trilho)
     }
 
     let id: String          // estável por tipo+coordenada (~1 m) → render incremental sem churn
@@ -59,6 +60,8 @@ final class RouteSignageService {
     private var lastFetchAt: Date = .distantPast
     private var lastFetchLocation: CLLocation?
     private var isFetching = false
+    /// Cooldown do fallback Overpass (educado com o serviço público) — só quando a poi_places não cobre a área.
+    private var lastOverpassAt: Date = .distantPast
 
     func clear() {
         onRouteSignage = []
@@ -89,16 +92,33 @@ final class RouteSignageService {
                 let rows = try await PoiPlacesService.shared.fetchPlacesNear(
                     location: location,
                     radiusMeters: fetchRadiusMeters,
-                    poiTypes: ["traffic_signals", "stop"],
+                    poiTypes: ["traffic_signals", "stop", "rail_crossing"],
                     limit: 80
                 )
-                onRouteSignage = Self.filterToCorridor(
+                var merged = Self.filterToCorridor(
                     rows: rows,
                     user: location,
                     route: routeCoordinates,
                     corridorMeters: corridorMeters,
                     lookaheadMeters: lookaheadMeters
                 )
+                // Overpass roda SEMPRE (online + cooldown 60s) — é a ÚNICA fonte de passagem de trem
+                // (railway=level_crossing NÃO está na poi_places) e cobre semáforos/PARE onde o ingest
+                // não rodou (densos demais p/ varredura nacional). MERGE + dedup com a base. Best-effort.
+                if NetworkReachability.shared.isOnline,
+                   now.timeIntervalSince(lastOverpassAt) > 60 {
+                    lastOverpassAt = now
+                    if let live = try? await Self.fetchSignalsFromOverpass(
+                        user: location, route: routeCoordinates,
+                        corridorMeters: corridorMeters, lookaheadMeters: lookaheadMeters,
+                        searchRadiusMeters: fetchRadiusMeters
+                    ), !live.isEmpty {
+                        var seen = Set(merged.map(\.id))
+                        for item in live where seen.insert(item.id).inserted { merged.append(item) }
+                        merged.sort { $0.distanceMeters < $1.distanceMeters }
+                    }
+                }
+                onRouteSignage = merged
             } catch {
                 #if DEBUG
                 print("[Signage] places_near falhou: \(error.localizedDescription)")
@@ -133,6 +153,7 @@ final class RouteSignageService {
             switch row.poi_type {
             case "traffic_signals": kind = .trafficSignal
             case "stop":            kind = .stop
+            case "rail_crossing":   kind = .railCrossing
             default:                return nil
             }
             let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
@@ -169,5 +190,62 @@ final class RouteSignageService {
             if d < best { best = d }
         }
         return best
+    }
+
+    // MARK: - Fallback Overpass (OSM ao vivo, on-demand) — semáforo/PARE no corredor
+    private struct OverpassResponse: Decodable {
+        struct Element: Decodable { let lat: Double?; let lon: Double?; let tags: [String: String]? }
+        let elements: [Element]
+    }
+
+    /// Busca semáforos/PARE reais do OSM via Overpass no bbox do corredor próximo. Best-effort:
+    /// qualquer falha/timeout → retorna vazio (o chamador mantém o comportamento atual). NÃO fabrica.
+    private static func fetchSignalsFromOverpass(
+        user: CLLocation,
+        route: [CLLocationCoordinate2D],
+        corridorMeters: Double,
+        lookaheadMeters: Double,
+        searchRadiusMeters: Double
+    ) async throws -> [RouteSignageItem] {
+        let near = route.filter {
+            user.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) <= searchRadiusMeters
+        }
+        guard near.count >= 2,
+              let south = near.map(\.latitude).min(), let north = near.map(\.latitude).max(),
+              let west = near.map(\.longitude).min(), let east = near.map(\.longitude).max() else { return [] }
+
+        let bbox = "\(south),\(west),\(north),\(east)"
+        let query = "[out:json][timeout:8];(node[\"highway\"=\"traffic_signals\"](\(bbox));node[\"highway\"=\"stop\"](\(bbox));node[\"railway\"=\"level_crossing\"](\(bbox)););out body;"
+        guard let url = URL(string: "https://overpass-api.de/api/interpreter"),
+              let body = "data=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")".data(using: .utf8) else { return [] }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10
+        req.httpBody = body
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
+        let decoded = try JSONDecoder().decode(OverpassResponse.self, from: data)
+
+        return decoded.elements.compactMap { el -> RouteSignageItem? in
+            guard let lat = el.lat, let lon = el.lon else { return nil }
+            let kind: RouteSignageItem.Kind
+            if el.tags?["railway"] == "level_crossing" {
+                kind = .railCrossing
+            } else {
+                switch el.tags?["highway"] {
+                case "traffic_signals": kind = .trafficSignal
+                case "stop":            kind = .stop
+                default:                return nil
+                }
+            }
+            let coord = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            let userDist = user.distance(from: CLLocation(latitude: lat, longitude: lon))
+            guard userDist <= lookaheadMeters else { return nil }
+            guard distanceToPolyline(coord, route) <= corridorMeters else { return nil }
+            return RouteSignageItem(kind: kind, coordinate: coord, distanceMeters: userDist)
+        }
+        .sorted { $0.distanceMeters < $1.distanceMeters }
     }
 }

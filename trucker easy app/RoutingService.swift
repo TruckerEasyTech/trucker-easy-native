@@ -393,76 +393,6 @@ final class RoutingService {
         )
     }
 
-    // MARK: - Synthetic Steps Fallback (when API returns 0 maneuver steps)
-
-    private func generateSyntheticSteps(
-        from coordinates: [CLLocationCoordinate2D],
-        totalDistance: Double,
-        totalDuration: Double,
-        destinationName: String
-    ) -> [RouteStep] {
-        guard coordinates.count >= 2 else {
-            return [RouteStep(instruction: "Head to \(destinationName)", distanceMeters: totalDistance, durationSeconds: totalDuration, maneuver: "continue")]
-        }
-
-        var steps: [RouteStep] = []
-        let segmentCount = max(1, min(coordinates.count - 1, 20)) // max 20 synthetic steps
-        let sampleStride = max(1, (coordinates.count - 1) / segmentCount)
-        var sampledIndexes: [Int] = Array(Swift.stride(from: 0, to: coordinates.count - 1, by: sampleStride))
-        if sampledIndexes.last != coordinates.count - 1 {
-            sampledIndexes.append(coordinates.count - 1)
-        }
-
-        for i in 0..<(sampledIndexes.count - 1) {
-            let fromIndex = sampledIndexes[i]
-            let toIndex = sampledIndexes[i + 1]
-            let from = coordinates[fromIndex]
-            let to = coordinates[toIndex]
-            let segmentDistance = CLLocation(latitude: from.latitude, longitude: from.longitude)
-                .distance(from: CLLocation(latitude: to.latitude, longitude: to.longitude))
-            let duration = totalDistance > 0
-                ? totalDuration * (segmentDistance / totalDistance)
-                : 0
-            let bearing = Self.bearing(from: from, to: to)
-            let direction = Self.cardinalDirection(bearing)
-            let roadHint = i == 0 ? "Head \(direction)" : "Continue \(direction)"
-            steps.append(RouteStep(
-                instruction: roadHint,
-                distanceMeters: max(segmentDistance, 1),
-                durationSeconds: max(duration, 0),
-                maneuver: i == 0 ? "depart" : "continue"
-            ))
-        }
-
-        // Final arrive step
-        steps.append(RouteStep(instruction: "Arrive at \(destinationName)", distanceMeters: 0, durationSeconds: 0, maneuver: "arrive"))
-        return steps
-    }
-
-    private static func bearing(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
-        let dLon = (to.longitude - from.longitude) * .pi / 180
-        let lat1 = from.latitude * .pi / 180
-        let lat2 = to.latitude * .pi / 180
-        let y = sin(dLon) * cos(lat2)
-        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        let rad = atan2(y, x)
-        return (rad * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
-    }
-
-    private static func cardinalDirection(_ bearing: Double) -> String {
-        switch bearing {
-        case 337.5...360, 0..<22.5: return "north"
-        case 22.5..<67.5: return "northeast"
-        case 67.5..<112.5: return "east"
-        case 112.5..<157.5: return "southeast"
-        case 157.5..<202.5: return "south"
-        case 202.5..<247.5: return "southwest"
-        case 247.5..<292.5: return "west"
-        case 292.5..<337.5: return "northwest"
-        default: return "ahead"
-        }
-    }
-
     private static func isValidCoordinate(_ coordinate: CLLocationCoordinate2D) -> Bool {
         coordinate.latitude.isFinite &&
         coordinate.longitude.isFinite &&
@@ -506,43 +436,6 @@ final class RoutingService {
 
         private static func osrmCoordinateString(_ coordinate: CLLocationCoordinate2D) -> String {
             String(format: "%.6f,%.6f", coordinate.longitude, coordinate.latitude)
-        }
-
-        // MARK: - Nuclear Fallback: Direct Route (NEVER fails)
-
-        private func generateDirectRoute(
-            from origin: CLLocationCoordinate2D,
-            to destination: CLLocationCoordinate2D,
-            destinationName: String
-        ) -> TruckRoute {
-            let originLoc = CLLocation(latitude: origin.latitude, longitude: origin.longitude)
-            let destLoc = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-            let distanceMeters = originLoc.distance(from: destLoc)
-            let durationSeconds = distanceMeters / 22.352 // assume ~50mph average
-
-            // Create polyline with intermediate points (great circle)
-            let pointCount = max(10, Int(distanceMeters / 1000)) // 1 point per km, min 10
-            var coordinates: [CLLocationCoordinate2D] = []
-            for i in 0...pointCount {
-                let fraction = Double(i) / Double(pointCount)
-                let lat = origin.latitude + fraction * (destination.latitude - origin.latitude)
-                let lon = origin.longitude + fraction * (destination.longitude - origin.longitude)
-                coordinates.append(CLLocationCoordinate2D(latitude: lat, longitude: lon))
-            }
-
-            let steps = generateSyntheticSteps(from: coordinates, totalDistance: distanceMeters, totalDuration: durationSeconds, destinationName: destinationName)
-
-            #if DEBUG
-            print("[Routing] Direct route: \(Int(distanceMeters / 1000)) km | \(Int(durationSeconds / 60)) min | \(steps.count) steps")
-            #endif
-            return TruckRoute(
-                coordinates: coordinates,
-                steps: steps,
-                distanceMeters: distanceMeters,
-                durationSeconds: durationSeconds,
-                destinationName: destinationName,
-                truckNotices: [TruckRouteNotice(code: "DIRECT", title: "Direct route", details: "Road data unavailable. Drive with caution.")]
-            )
         }
 
         // MARK: - Geocode + Route (address string)
@@ -995,6 +888,10 @@ struct RouteStep: Equatable {
     let distanceMeters: Double
     let durationSeconds: Double
     let maneuver: String
+    /// Saída ESTRUTURADA do Valhalla (campo `sign.exit_number`/`exit_toward`) — número/destino EXATOS,
+    /// não adivinhados por regex no texto. nil quando a manobra não é uma saída ou a fonte não fornece.
+    var exitNumber: String? = nil
+    var exitToward: String? = nil
 }
 
 struct TruckRouteNotice: Equatable {

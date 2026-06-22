@@ -13,19 +13,18 @@ struct HorizonGPSToolbar: View {
     let onRestAreas: () -> Void
     let onRouteOptions: () -> Void
     let onWeather: () -> Void
-    let onCommunity: () -> Void
-    let onTrafficMap: () -> Void
 
+    // 6 categorias que abrem PAINÉIS/LISTAS (decisão: "barra = listas, flutuante = camadas").
+    // Removidos: "Cam" (tinha ícone de vídeo mas abria o AI — duplicava o sparkle flutuante) e
+    // "Tra" (na verdade trocava o estilo de mapa). Câmeras/radar/tráfego/AI agora SÓ no flutuante.
     var body: some View {
         HStack(spacing: 0) {
-            tool(icon: "location.north.line.fill", label: "Dir", action: onDirections)
-            tool(icon: "mappin.and.ellipse", label: "Pla", action: onPlaces)
-            tool(icon: "scalemass.fill", label: "WS", action: onWeighStation)
-            tool(icon: "moon.zzz.fill", label: "Rest", action: onRestAreas)
-            tool(icon: "dollarsign.circle", label: "Toll", action: onRouteOptions)
-            tool(icon: "cloud.sun.fill", label: "Wea", action: onWeather)
-            tool(icon: "video.fill", label: "Cam", action: onCommunity)
-            tool(icon: "car.2.fill", label: "Tra", action: onTrafficMap)
+            tool(icon: "magnifyingglass", label: "Search", action: onDirections)
+            tool(icon: "fuelpump.fill", label: "Stops", action: onPlaces)
+            tool(icon: "scalemass.fill", label: "Scales", action: onWeighStation)
+            tool(icon: "bed.double.fill", label: "Rest", action: onRestAreas)
+            tool(icon: "dollarsign.circle", label: "Tolls", action: onRouteOptions)
+            tool(icon: "cloud.sun.fill", label: "Weather", action: onWeather)
         }
         .padding(.horizontal, 6)
         .frame(height: GPSDesignSystem.Metrics.toolbarHeight)

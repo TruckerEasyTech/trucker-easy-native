@@ -18,6 +18,17 @@ final class AIService {
     private let openRouterURL = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private let openRouterModel = "mistralai/mistral-7b-instruct:free"
 
+    // Proxy SEGURO: a chave do OpenRouter fica no servidor (Edge Function `ai-proxy`); o app chama via
+    // anon key. Se o proxy ainda não estiver publicado (503/404), cai na chamada direta (transição,
+    // enquanto a OpenRouterAPIKey ainda existir no xcconfig). Remova a chave do xcconfig após o deploy.
+    private var supabaseURL: String { (Bundle.main.object(forInfoDictionaryKey: "SupabaseURL") as? String ?? "").trimmingCharacters(in: .whitespaces) }
+    private var supabaseAnonKey: String { (Bundle.main.object(forInfoDictionaryKey: "SupabaseAnonKey") as? String ?? "").trimmingCharacters(in: .whitespaces) }
+    private var aiProxyURL: URL? {
+        guard !supabaseURL.isEmpty, !supabaseAnonKey.isEmpty else { return nil }
+        let base = supabaseURL.hasSuffix("/") ? String(supabaseURL.dropLast()) : supabaseURL
+        return URL(string: "\(base)/functions/v1/ai-proxy")
+    }
+
     /// System prompt shared between both providers
     private let systemPrompt = """
     You are Route Easy, the routing assistant inside Trucker Easy for professional truck drivers. \
@@ -140,7 +151,7 @@ final class AIService {
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                guard !apiKey.isEmpty else {
+                guard aiProxyURL != nil || !apiKey.isEmpty else {
                     continuation.finish(throwing: AIError.missingAPIKey)
                     return
                 }
@@ -163,19 +174,33 @@ final class AIService {
                         "temperature": 0.7
                     ]
 
-                    var request = URLRequest(url: openRouterURL)
-                    request.httpMethod = "POST"
-                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("Trucker Easy App", forHTTPHeaderField: "X-Title")
-                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let bodyData = try JSONSerialization.data(withJSONObject: body)
+                    var useProxy = (aiProxyURL != nil)
+                    func makeRequest() -> URLRequest {
+                        var request = URLRequest(url: useProxy ? aiProxyURL! : openRouterURL)
+                        request.httpMethod = "POST"
+                        request.httpBody = bodyData
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        request.setValue("Trucker Easy App", forHTTPHeaderField: "X-Title")
+                        if useProxy {
+                            request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+                            request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+                        } else {
+                            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                        }
+                        return request
+                    }
 
-                    let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-
-                    guard let http = response as? HTTPURLResponse,
-                          (200...299).contains(http.statusCode) else {
-                        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                        throw AIError.apiError("HTTP \(code)")
+                    var (asyncBytes, response) = try await URLSession.shared.bytes(for: makeRequest())
+                    var http = response as? HTTPURLResponse
+                    // Proxy ainda não publicado (503/404) e há chave direta → fallback direto (transição).
+                    if useProxy, let h = http, (h.statusCode == 503 || h.statusCode == 404), !apiKey.isEmpty {
+                        useProxy = false
+                        (asyncBytes, response) = try await URLSession.shared.bytes(for: makeRequest())
+                        http = response as? HTTPURLResponse
+                    }
+                    guard let finalHttp = http, (200...299).contains(finalHttp.statusCode) else {
+                        throw AIError.apiError("HTTP \(http?.statusCode ?? 0)")
                     }
 
                     // Parse Server-Sent Events stream

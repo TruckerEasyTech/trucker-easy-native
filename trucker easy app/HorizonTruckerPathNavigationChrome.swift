@@ -155,6 +155,9 @@ private struct TruckerPathTopManeuverBar: View {
     }
 
     private var exitShield: String? {
+        // ESTRUTURADO primeiro: o número EXATO do `sign.exit_number` do Valhalla — nada de adivinhar.
+        if let n = step.exitNumber, !n.isEmpty { return n }
+        // Fallback (fonte sem sign estruturado): regex no texto.
         let sources = [nextStepInstruction, step.instructions].compactMap { $0 }
         for text in sources {
             if let n = TruckerPathTopManeuverBar.parseExitNumber(from: text) {
@@ -167,6 +170,8 @@ private struct TruckerPathTopManeuverBar: View {
     /// Destino da saída ("...toward X" / "...para X") — a cidade/via pra onde a saída leva.
     /// Vem direto do texto da instrução do Valhalla (campo `sign.exit_toward`).
     private var exitToward: String? {
+        // ESTRUTURADO primeiro: `sign.exit_toward` do Valhalla (destino exato da saída).
+        if let t = step.exitToward, !t.isEmpty { return t }
         let sources = [nextStepInstruction, step.instructions].compactMap { $0 }
         for text in sources {
             if let t = TruckerPathTopManeuverBar.parseToward(from: text) { return t }
@@ -199,10 +204,9 @@ private struct TruckerPathTopManeuverBar: View {
                 return String(lower[r]).uppercased()
             }
         }
-        if lower.contains("i-") || lower.contains("i "){
-            let parts = text.split(separator: " ")
-            for p in parts where p.uppercased().hasPrefix("I-") { return String(p.uppercased()) }
-        }
+        // BUG corrigido (road test "saída errada"): o fallback antigo retornava o número de um
+        // INTERESTADUAL (ex.: "Merge onto I-84") como se fosse a saída → mostrava "EXIT I-84". Uma
+        // rodovia NÃO é uma saída. Sem um "exit N" real, NÃO há shield de saída.
         return nil
     }
 
@@ -381,18 +385,18 @@ private struct TruckerPathBottomTripBar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if !roadLine.isEmpty {
                         Text(roadLine)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.9))
                             .lineLimit(1)
                     }
                     Text("\(totalDistanceText) · \(totalDurationText)")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.55)   // distância·duração cabe inteira, sem cortar em "...10h…"
                     Text(arrivalText)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color.white.opacity(0.6))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.65))
                 }
 
                 Spacer(minLength: 0)
@@ -460,24 +464,24 @@ private struct TruckerPathSpeedPanel: View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 Text(speedLimit)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 25, weight: .bold, design: .rounded))
                     .foregroundColor(.black)
                 Text("LIMIT")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.black.opacity(0.55))
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 54, height: 54)
             .background(Color.white)
 
             VStack(spacing: 0) {
                 Text(currentSpeed)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 25, weight: .bold, design: .rounded))
                     .foregroundColor(isOverspeeding ? Color(hex: "#ef4444") : Color(hex: "#ea580c"))
                 Text(unitLabel)
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(Color.white.opacity(0.55))
             }
-            .frame(width: 44, height: 44)
+            .frame(width: 54, height: 54)
             .background(Color(hex: "#2a2a2e"))
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

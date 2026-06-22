@@ -27,6 +27,9 @@ struct RouteEasyOption: Identifiable {
     let decisionSummary: String?
     let estimatedSavingsUSD: Double?
     let recommendedStopsCount: Int
+    /// true = esta rota paga é IDÊNTICA à Free (mesma distância/tempo/pedágio) → o card NÃO mostra os
+    /// números repetidos (milhas/pedágio/diesel), só o valor do plano. Justifica o preço sem parecer clone.
+    var matchesFastest: Bool = false
 
     var id: String { kind.rawValue }
 
@@ -327,6 +330,15 @@ enum RouteEasyEngine {
             }
         }
 
+        // Rota paga IDÊNTICA à Free? (mesma dist/tempo/pedágio) → o card esconde os números repetidos.
+        let matchesFastest: Bool = {
+            guard kind != .fastest, let compareTo else { return false }
+            return !routesAreMeaningfullyDifferent(compareTo, route)
+                && abs(compareTo.tollCostUSD - route.tollCostUSD) < 1
+                && (estimatedSavingsUSD ?? 0) < 1
+                && recommendedStopsCount == 0
+        }()
+
         return RouteEasyOption(
             kind: kind,
             route: route,
@@ -340,7 +352,8 @@ enum RouteEasyEngine {
             subtitle: subtitle,
             decisionSummary: decisionSummary,
             estimatedSavingsUSD: estimatedSavingsUSD,
-            recommendedStopsCount: recommendedStopsCount
+            recommendedStopsCount: recommendedStopsCount,
+            matchesFastest: matchesFastest
         )
     }
 
@@ -425,7 +438,8 @@ private extension RouteEasyOption {
                 ? "Standard plan unlocks truck-safe routes that skip tolls when possible."
                 : "Premium AI balances time, tolls, diesel price, and suggested fuel stops.",
             estimatedSavingsUSD: estimatedSavingsUSD,
-            recommendedStopsCount: recommendedStopsCount
+            recommendedStopsCount: recommendedStopsCount,
+            matchesFastest: kind != .fastest   // clone da Free → esconde números repetidos no card
         )
     }
 }
