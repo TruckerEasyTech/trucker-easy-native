@@ -149,9 +149,18 @@ final class AIService {
         message: String,
         context: [String]
     ) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+        // Snapshot da config AQUI (no contexto do método) → o Task concorrente abaixo usa só estes
+        // locais, sem acessar propriedades do serviço. Isso elimina o erro de isolamento/concorrência
+        // (Swift 6 / strict concurrency) ao ler aiProxyURL/supabaseAnonKey de dentro do Task.
+        let proxyURL = aiProxyURL
+        let anonKey = supabaseAnonKey
+        let directKey = apiKey
+        let directURL = openRouterURL
+        let model = openRouterModel
+        let sysPrompt = systemPrompt
+        return AsyncThrowingStream { continuation in
             Task {
-                guard aiProxyURL != nil || !apiKey.isEmpty else {
+                guard proxyURL != nil || !directKey.isEmpty else {
                     continuation.finish(throwing: AIError.missingAPIKey)
                     return
                 }
@@ -159,7 +168,7 @@ final class AIService {
                 do {
                     // Build OpenAI-compatible messages array
                     var messages: [[String: String]] = [
-                        ["role": "system", "content": systemPrompt]
+                        ["role": "system", "content": sysPrompt]
                     ]
                     for (i, ctx) in context.suffix(8).enumerated() {
                         messages.append(["role": i % 2 == 0 ? "user" : "assistant", "content": ctx])
@@ -167,7 +176,7 @@ final class AIService {
                     messages.append(["role": "user", "content": message])
 
                     let body: [String: Any] = [
-                        "model": openRouterModel,
+                        "model": model,
                         "messages": messages,
                         "stream": true,
                         "max_tokens": 512,
@@ -175,18 +184,18 @@ final class AIService {
                     ]
 
                     let bodyData = try JSONSerialization.data(withJSONObject: body)
-                    var useProxy = (aiProxyURL != nil)
+                    var useProxy = (proxyURL != nil)
                     func makeRequest() -> URLRequest {
-                        var request = URLRequest(url: useProxy ? aiProxyURL! : openRouterURL)
+                        var request = URLRequest(url: useProxy ? proxyURL! : directURL)
                         request.httpMethod = "POST"
                         request.httpBody = bodyData
                         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                         request.setValue("Trucker Easy App", forHTTPHeaderField: "X-Title")
                         if useProxy {
-                            request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-                            request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+                            request.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")
+                            request.setValue(anonKey, forHTTPHeaderField: "apikey")
                         } else {
-                            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                            request.setValue("Bearer \(directKey)", forHTTPHeaderField: "Authorization")
                         }
                         return request
                     }
@@ -194,7 +203,7 @@ final class AIService {
                     var (asyncBytes, response) = try await URLSession.shared.bytes(for: makeRequest())
                     var http = response as? HTTPURLResponse
                     // Proxy ainda não publicado (503/404) e há chave direta → fallback direto (transição).
-                    if useProxy, let h = http, (h.statusCode == 503 || h.statusCode == 404), !apiKey.isEmpty {
+                    if useProxy, let h = http, (h.statusCode == 503 || h.statusCode == 404), !directKey.isEmpty {
                         useProxy = false
                         (asyncBytes, response) = try await URLSession.shared.bytes(for: makeRequest())
                         http = response as? HTTPURLResponse
