@@ -106,10 +106,12 @@ struct trucker_easy_appApp: App {
         let fm = FileManager.default
         guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
         let mapboxDir = appSupport.appendingPathComponent(".mapbox", isDirectory: true)
-        guard fm.fileExists(atPath: mapboxDir.path) else { return }
+        guard fm.fileExists(atPath: mapboxDir.path) else { LaunchTrace.mark("selfheal: no .mapbox dir"); return }
         let limit: UInt64 = 150 * 1024 * 1024   // 150 MB — só apaga quando REALMENTE inchado
         let bytes = directorySizeBytes(mapboxDir)
-        guard bytes > limit else { return }
+        LaunchTrace.mark("selfheal: .mapbox = \(bytes / 1024 / 1024) MB")
+        guard bytes > limit else { LaunchTrace.mark("selfheal: under limit, keep"); return }
+        LaunchTrace.mark("selfheal: renaming oversized cache")
         // CRÍTICO: NÃO apagar 344 MB em linha aqui — removeItem recursivo síncrono na main thread
         // durante o launch trava o app (o próprio bug que queremos matar). Em vez disso RENOMEIA
         // (operação O(1), instantânea, mesmo volume) → o Mapbox vê o dir sumido e recria limpo;
@@ -139,8 +141,11 @@ struct trucker_easy_appApp: App {
     }
 
     init() {
+        LaunchTrace.reset()
+        LaunchTrace.mark("init.start")
         // PRIMEIRA coisa no boot: auto-cura do cache de mapas inchado (antes de tocar no Mapbox).
         Self.purgeOversizedMapboxCacheAtLaunch()
+        LaunchTrace.mark("init.afterPurge")
         #if DEBUG
         validateBuildConfig()
         #if arch(arm64)
@@ -151,6 +156,7 @@ struct trucker_easy_appApp: App {
         AppAccessPolicy.applyTestingDefaultsIfNeeded()
         MapProviderConfig.configureIfAvailable()
         _ = MapProviderConfig.verifyProviderHealth()
+        LaunchTrace.mark("init.afterMapboxConfig")
         #if DEBUG
         if AppAccessPolicy.unlockAllFeaturesForTesting {
             print("[AppAccess] 🧪 Testing mode ON — Premium unlocked, Valhalla truck routing only")
@@ -158,7 +164,9 @@ struct trucker_easy_appApp: App {
         print("[Routing] Valhalla-only for truck routes: \(AppAccessPolicy.enforceTruckOnlyRouting ? "ON" : "OFF") — no MapKit/OSRM fallback on failure")
         #endif
         modelContainer = Self.makeModelContainerAtLaunch()
+        LaunchTrace.mark("init.afterModelContainer")
         FuelPriceService.shared.bootstrap()
+        LaunchTrace.mark("init.afterFuelBootstrap")
         // MapKit tile cache uses the OS system cache (separate); this governs API responses.
         URLCache.shared = URLCache(
             memoryCapacity: 10 * 1024 * 1024,

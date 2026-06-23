@@ -540,6 +540,7 @@ struct HorizonView: View {
     @ViewBuilder private var withLifecycleModifiers: some View {
         mainStack
             .onAppear {
+                LaunchTrace.mark("horizon.onAppear.start")
                 #if DEBUG
                 horizonLogDebugWorkingDirectory()
                 #endif

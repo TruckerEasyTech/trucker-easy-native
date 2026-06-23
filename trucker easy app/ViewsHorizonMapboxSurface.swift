@@ -128,25 +128,57 @@ final class HorizonMapboxMapHostView: UIView {
 
     @objc private func appDidBecomeActive() {
         applySafeContentScale()
-        mapView?.mapboxMap.triggerRepaint()
+        kickRepaint()
+    }
+
+    /// ANTI-TELA-PRETA (device): o CAMetalLayer do Mapbox às vezes recebe drawableSize 0×0 durante a
+    /// transição splash→mapa e NÃO se recupera sozinho no device (log: "CAMetalLayer ignoring invalid
+    /// setDrawableSize width=0 height=0") → mapa preto mesmo com o app rodando. Forçar frame válido +
+    /// triggerRepaint algumas vezes, DEPOIS do layout assentar, faz o Metal reconfigurar o drawable.
+    private func kickRepaint() {
+        guard let mapView else { return }
+        if bounds.width > 1, bounds.height > 1 { mapView.frame = bounds }
+        applySafeContentScale()
+        mapView.mapboxMap.triggerRepaint()
+        // Re-tenta nos próximos frames (a transição de opacidade do SwiftUI ainda pode estar rodando).
+        for delay in [0.1, 0.35, 0.8, 1.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, let mv = self.mapView else { return }
+                if self.bounds.width > 1, self.bounds.height > 1, mv.frame.size != self.bounds.size {
+                    mv.frame = self.bounds
+                }
+                self.applySafeContentScale()
+                mv.mapboxMap.triggerRepaint()
+            }
+        }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // Mantém o mapa preenchendo o host SEMPRE que o host ganha tamanho válido (evita drawable 0×0).
+        if let mv = mapView, bounds.width > 1, bounds.height > 1, mv.frame.size != bounds.size {
+            mv.frame = bounds
+            mv.mapboxMap.triggerRepaint()
+        }
         if mapView == nil, bounds.width > 100, bounds.height > 100, let opts = pendingInitOptions {
             // ANTI-TELA-PRETA no launch: a init do MapboxMaps.MapView (Metal + style + tile store) é
             // pesada e SÍNCRONA. Criá-la aqui, no mesmo ciclo, congelava o frame da transição
             // splash→mapa = tela preta travada. Deferimos pro próximo runloop: o fundo branco + chrome
             // já desenham, então o mapa entra. UI nunca fica num preto congelado.
             pendingInitOptions = nil
+            LaunchTrace.mark("mapview.layoutSubviews scheduling create")
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.mapView == nil, self.bounds.width > 100, self.bounds.height > 100 else { return }
+                LaunchTrace.mark("mapview.creating")
                 let mv = MapboxMaps.MapView(frame: self.bounds, mapInitOptions: opts)
+                LaunchTrace.mark("mapview.created")
                 mv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                 self.addSubview(mv)
                 self.mapView = mv
                 self.onMapViewReady?(mv)
                 self.applySafeContentScale()
+                self.kickRepaint()   // garante drawable válido após criar (anti-preto no device)
+                LaunchTrace.mark("mapview.ready")
             }
         }
         applySafeContentScale()
@@ -448,7 +480,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     }
 
     private func loadMapStyle(_ style: MapStyleOption, on mapView: MapboxMaps.MapView, coordinator: Coordinator) {
-        mapView.mapboxMap.loadStyle(style.mapboxStyleURI) { _ in
+        LaunchTrace.mark("mapstyle.loadStyle called")
+        mapView.mapboxMap.loadStyle(style.mapboxStyleURI) { error in
+            LaunchTrace.mark("mapstyle.loaded err=\(error == nil ? "none" : "\(error!)")")
             DispatchQueue.main.async {
                 self.applyUserLocationPuck(on: mapView, navigating: coordinator.isNavigatingMode)
                 coordinator.installManagers(on: mapView)
