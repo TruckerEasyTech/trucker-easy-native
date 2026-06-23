@@ -97,7 +97,39 @@ struct trucker_easy_appApp: App {
         }
     }
 
+    /// Self-heal do launch: se o tile store offline do Mapbox passou de um limite, o load dele no
+    /// startup TRAVA o app ("não abre" / tela preta). Aqui apagamos SÓ o diretório de cache de mapas
+    /// (`Application Support/.mapbox`) ANTES de o Mapbox abrir o DB. NÃO toca SwiftData — viagens,
+    /// HOS, combustível, documentos ficam INTACTOS (ficam no store do SwiftData, outro diretório).
+    /// O cache de mapas re-popula sozinho por rota. Roda 1x no boot, antes de qualquer init do Mapbox.
+    nonisolated private static func purgeOversizedMapboxCacheAtLaunch() {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let mapboxDir = appSupport.appendingPathComponent(".mapbox", isDirectory: true)
+        guard fm.fileExists(atPath: mapboxDir.path) else { return }
+        let limit: UInt64 = 150 * 1024 * 1024   // 150 MB — só apaga quando REALMENTE inchado
+        let bytes = directorySizeBytes(mapboxDir)
+        guard bytes > limit else { return }
+        try? fm.removeItem(at: mapboxDir)
+        #if DEBUG
+        print("[MapboxCache] tile store inchado (\(bytes / 1024 / 1024) MB) > 150 MB — apagado no launch (self-heal). SwiftData intacto.")
+        #endif
+    }
+
+    nonisolated private static func directorySizeBytes(_ url: URL) -> UInt64 {
+        let fm = FileManager.default
+        guard let en = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey],
+                                     options: [.skipsHiddenFiles], errorHandler: nil) else { return 0 }
+        var total: UInt64 = 0
+        for case let f as URL in en {
+            if let sz = try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize { total += UInt64(sz) }
+        }
+        return total
+    }
+
     init() {
+        // PRIMEIRA coisa no boot: auto-cura do cache de mapas inchado (antes de tocar no Mapbox).
+        Self.purgeOversizedMapboxCacheAtLaunch()
         #if DEBUG
         validateBuildConfig()
         #if arch(arm64)
