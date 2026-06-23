@@ -110,9 +110,20 @@ struct trucker_easy_appApp: App {
         let limit: UInt64 = 150 * 1024 * 1024   // 150 MB — só apaga quando REALMENTE inchado
         let bytes = directorySizeBytes(mapboxDir)
         guard bytes > limit else { return }
-        try? fm.removeItem(at: mapboxDir)
+        // CRÍTICO: NÃO apagar 344 MB em linha aqui — removeItem recursivo síncrono na main thread
+        // durante o launch trava o app (o próprio bug que queremos matar). Em vez disso RENOMEIA
+        // (operação O(1), instantânea, mesmo volume) → o Mapbox vê o dir sumido e recria limpo;
+        // o lixo renomeado é apagado DEPOIS, numa thread de background.
+        let trash = appSupport.appendingPathComponent(".mapbox_trash", isDirectory: true)
+        try? fm.removeItem(at: trash)   // remove um lixo anterior, se sobrou
+        do {
+            try fm.moveItem(at: mapboxDir, to: trash)
+            DispatchQueue.global(qos: .utility).async { try? FileManager.default.removeItem(at: trash) }
+        } catch {
+            try? fm.removeItem(at: mapboxDir)   // fallback se o rename falhar
+        }
         #if DEBUG
-        print("[MapboxCache] tile store inchado (\(bytes / 1024 / 1024) MB) > 150 MB — apagado no launch (self-heal). SwiftData intacto.")
+        print("[MapboxCache] tile store inchado (\(bytes / 1024 / 1024) MB) > 150 MB — renomeado+purgado no launch (self-heal, sem travar). SwiftData intacto.")
         #endif
     }
 
