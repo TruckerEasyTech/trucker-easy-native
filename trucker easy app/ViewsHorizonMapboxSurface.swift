@@ -753,12 +753,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         private var lastRouteArrowUpdateAt: Date = .distantPast
         private var lastRouteArrowUserLoc: CLLocation?
 
-        /// Cache p/ o "vanishing line" por DISTÂNCIA (não por índice de vértice): distância cumulativa
-        /// em metros até cada vértice da rota desenhada + total. Computado 1× em `refreshRoute` (na
-        /// troca de rota), não por fix de GPS. Assim o trim apaga EXATAMENTE atrás do caminhão.
-        private var routeCumDistancesMeters: [Double] = []
-        private var routeTotalDistanceMeters: Double = 0
-
         private var smoothedRouteCoord: CLLocationCoordinate2D?
         private var smoothedRouteBearing: Double = 0
         /// Last bearing emitted to the puck — reused when GPS course is invalid (stationary).
@@ -839,8 +833,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             guard let coords, coords.count >= 2 else {
                 mgr.annotations = []
                 routeArrowManager?.annotations = []
-                routeCumDistancesMeters = []
-                routeTotalDistanceMeters = 0
                 return
             }
             // During a reroute the old line is faded out so it never reads as the active route.
@@ -870,16 +862,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             // não dá p/ tingir de cinza; transparente atende "não continuar toda aparecendo".) Reset aqui
             // p/ rota nova começar 100% viva.
             mgr.lineTrimOffset = [0, 0]
-            // Pré-computa as distâncias cumulativas (metros) dos vértices desta rota → o trim no emit
-            // usa fração-por-DISTÂNCIA real, apagando exatamente atrás do caminhão (suave em curvas).
-            var cum = [Double](repeating: 0, count: coords.count)
-            for i in 1..<coords.count {
-                let a = CLLocation(latitude: coords[i - 1].latitude, longitude: coords[i - 1].longitude)
-                let b = CLLocation(latitude: coords[i].latitude, longitude: coords[i].longitude)
-                cum[i] = cum[i - 1] + a.distance(from: b)
-            }
-            routeCumDistancesMeters = cum
-            routeTotalDistanceMeters = cum.last ?? 0
             if fitCameraToRoute {
                 fitCameraToRouteBounds(mapView: mapView, coords: coords)
             }
@@ -927,24 +909,12 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 emitRawLocation(user: user)
                 return
             }
-            let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
             // "Vanishing route line" (igual Google/Waze/Trucker Path): a parte JÁ percorrida (atrás do
             // puck) fica apagada; só o trecho À FRENTE segue laranja vivo. Atualiza só o trim (float
-            // 0…1), SEM redesenhar a polilinha. Fração por DISTÂNCIA real (metros até o ponto snap /
-            // total) — apaga EXATAMENTE atrás do caminhão, suave em curvas. Fallback p/ fração-por-
-            // vértice se o cache de distâncias não bater com a rota atual (segurança, nunca trava).
-            let idx = min(max(lastLeadArrowPolyIndex, 0), coords.count - 1)
-            let progressed: Double
-            if routeTotalDistanceMeters > 0, routeCumDistancesMeters.count == coords.count {
-                let base = routeCumDistancesMeters[idx]
-                // distância parcial dentro do segmento atual (vértice → ponto exato do snap) = suavidade
-                let partial = CLLocation(latitude: coords[idx].latitude, longitude: coords[idx].longitude)
-                    .distance(from: snapped)
-                progressed = min(max((base + partial) / routeTotalDistanceMeters, 0), 1)
-            } else {
-                progressed = min(max(Double(idx) / Double(coords.count - 1), 0), 1)
-            }
+            // 0…1), SEM redesenhar a polilinha. Fração ≈ índice-âncora / total de vértices.
+            let progressed = min(max(Double(lastLeadArrowPolyIndex) / Double(coords.count - 1), 0), 1)
             routeLineManager?.lineTrimOffset = [0, progressed]
+            let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
             if snapped.distance(from: user) <= 35 {
                 // Na rota: a seta GRUDA na linha (consistente).
                 lastEmittedBearing = snap.bearingDegrees
