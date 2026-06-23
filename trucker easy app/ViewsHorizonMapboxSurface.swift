@@ -862,6 +862,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             // não dá p/ tingir de cinza; transparente atende "não continuar toda aparecendo".) Reset aqui
             // p/ rota nova começar 100% viva.
             mgr.lineTrimOffset = [0, 0]
+            // LOCK DE COEXISTÊNCIA (linha + seta): ao (re)desenhar a linha, garante que a camada do
+            // puck (seta/caminhão, id nativo "puck" do LocationIndicatorLayer v11) fica ACIMA da linha
+            // de rota ("horizon-route"). NÃO recria o puck (sem flicker) e NÃO mexe na linha. `try?` =
+            // no-op seguro se alguma camada ainda não existir. Assim a linha NUNCA cobre a seta.
+            try? mapView.mapboxMap.moveLayer(withId: "puck", to: .above("horizon-route"))
             if fitCameraToRoute {
                 fitCameraToRouteBounds(mapView: mapView, coords: coords)
             }
