@@ -1,14 +1,13 @@
 //
 //  UtilitiesLaunchTrace.swift
-//  Diagnóstico de launch: grava marcos com timestamp em Documents/launch_trace.txt.
-//  Escrita numa fila de background → captura o ÚLTIMO marco antes de um eventual freeze
-//  da main thread. Puxável do device via `devicectl device copy from` (sem root).
-//  TEMPORÁRIO p/ diagnosticar a tela preta no device — remover depois.
+//  Diagnóstico de launch — NO-OP em Release (compilado fora do bundle de produção).
+//  Em DEBUG grava marcos em Documents/launch_trace.txt para análise de freeze.
 //
 
 import Foundation
 
 enum LaunchTrace {
+#if DEBUG
     private static let queue = DispatchQueue(label: "com.truckereasy.launchtrace")
     private static var fileURL: URL? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
@@ -37,4 +36,8 @@ enum LaunchTrace {
             }
         }
     }
+#else
+    @inline(__always) static func reset() {}
+    @inline(__always) static func mark(_ label: String) {}
+#endif
 }
