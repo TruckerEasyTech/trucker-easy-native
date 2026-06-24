@@ -5,73 +5,74 @@ import MapboxMaps
 #endif
 
 enum MapProviderConfig {
-    /// When Mapbox SPM is linked and `MBXAccessToken` is set, Horizon may use Mapbox as the map renderer.
-    /// Default: MapKit on Horizon (`AppAccessPolicy.useMapKitHorizonMap`) — no Mapbox watermark while driving.
+
+    // MARK: - Token helpers
+
+    /// Lê e valida o MBXAccessToken do Info.plist.
+    /// Retorna nil se não encontrado, não substituído (contém "$(") ou não parece um token Mapbox real.
+    private static var infoPlisToken: String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String else { return nil }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !t.contains("$(") else { return nil }
+        // Token Mapbox público começa com "pk." ou "sk." — rejeita placeholders aleatórios.
+        guard t.hasPrefix("pk.") || t.hasPrefix("sk.") else { return nil }
+        return t
+    }
+
+    // MARK: - Enabled flag
+
+    /// True quando Mapbox está disponível E o token foi configurado com sucesso.
+    /// Checa `MapboxOptions.accessToken` (setado por configureIfAvailable) primeiro;
+    /// fallback no Info.plist para garantir robustez caso a ordem de init mude.
     static var isMapboxHorizonRendererEnabled: Bool {
         #if canImport(MapboxMaps)
         guard !AppAccessPolicy.useMapKitHorizonMap else { return false }
-        let token = (Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { return false }
-        if token.contains("$(") { return false }
-        return true
+        // Fonte primária: token já validado e aplicado por configureIfAvailable().
+        if !MapboxOptions.accessToken.isEmpty { return true }
+        // Fallback: lê diretamente do Info.plist (Mapbox v11 tb lê automaticamente).
+        return infoPlisToken != nil
         #else
         return false
         #endif
     }
 
+    // MARK: - Configuration
+
+    /// Aplica o token no SDK antes de qualquer MapView ser criado.
+    /// Deve ser chamado em app init, antes do SwiftUI body renderizar.
+    static func configureIfAvailable() {
+        #if canImport(MapboxMaps)
+        guard let token = infoPlisToken else {
+            #if DEBUG
+            let raw = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? "<nenhum>"
+            print("[MapProviderConfig] ⚠️ Mapbox NÃO configurado. MBXAccessToken='\(raw.prefix(20))' — verifique xcconfig como Base Configuration no target.")
+            #endif
+            return
+        }
+        // v11: deve ser setado antes de qualquer MapView ser criado.
+        MapboxOptions.accessToken = token
+        #if DEBUG
+        print("[MapProviderConfig] ✅ Mapbox token configurado: \(token.prefix(12))…")
+        #endif
+        #else
+        #if DEBUG
+        print("[MapProviderConfig] MapboxMaps não integrado — usando MapKit.")
+        #endif
+        #endif
+    }
+
+    // MARK: - Health check (diagnóstico, não afeta funcionalidade)
+
     struct ProviderHealth {
         let mapboxConfigured: Bool
     }
 
+    @discardableResult
     static func verifyProviderHealth() -> ProviderHealth {
-        let mapboxToken = (Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !mapboxToken.isEmpty, mapboxToken.contains("$(") {
-            #if DEBUG
-            print("[ProviderHealth] ⚠️ MBXAccessToken não foi substituído no Info.plist (valor com $(...)). O target deve usar Config/TruckerEasy.debug ou .release.xcconfig como Base Configuration.")
-            #endif
-        }
-
-        let mapboxOk = !mapboxToken.isEmpty && !mapboxToken.contains("$(")
-        let health = ProviderHealth(
-            mapboxConfigured: mapboxOk
-        )
+        let health = ProviderHealth(mapboxConfigured: isMapboxHorizonRendererEnabled)
         #if DEBUG
-        print("[ProviderHealth] Mapbox=\(health.mapboxConfigured ? "ok" : "missing")")
-        #endif
-        #if canImport(MapboxMaps)
-        #if DEBUG
-        print("[ProviderHealth] Horizon map renderer: \(isMapboxHorizonRendererEnabled ? "MapboxMaps" : "MapKit (token vazio no Info.plist da build)")")
-        #endif
-        #else
-        #if DEBUG
-        print("[ProviderHealth] Horizon map renderer: MapKit (pacote MapboxMaps não ligado ao target)")
-        #endif
+        print("[ProviderHealth] Mapbox=\(health.mapboxConfigured ? "ok ✅" : "missing ⚠️") · renderer=\(health.mapboxConfigured ? "MapboxMaps" : "MapKit")")
         #endif
         return health
-    }
-
-    static func configureIfAvailable() {
-        #if canImport(MapboxMaps)
-        let token = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String ?? ""
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains("$(") else {
-            #if DEBUG
-            print("[MapProviderConfig] Mapbox not configured: MBXAccessToken missing or not substituted from xcconfig")
-            #endif
-            return
-        }
-        // v11: set before any MapView is created — see https://docs.mapbox.com/ios/maps/guides/install/
-        MapboxOptions.accessToken = trimmed
-        #if DEBUG
-        print("[MapProviderConfig] Mapbox token configured: \(trimmed.prefix(12))…")
-        #endif
-        #else
-        // Mapbox package not integrated; skip configuration safely
-        #if DEBUG
-        print("[MapProviderConfig] MapboxMaps package not integrated — using Apple MapKit")
-        #endif
-        #endif
     }
 }
