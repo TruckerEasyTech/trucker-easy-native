@@ -467,7 +467,7 @@ struct WellnessStarRating: View {
                 }) {
                     Image(systemName: star <= rating ? "star.fill" : "star")
                         .font(.system(size: starSize))
-                        .foregroundColor(star <= rating ? starColor(star) : AppTheme.Colors.textSecondary.opacity(0.3))
+                        .foregroundColor(star <= rating ? starColor(star) : Color.white.opacity(0.25))
                         .te_uniformScale(star == rating ? 1.15 : 1.0)
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: rating)
                 }

@@ -319,6 +319,29 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             coordinator.lastKnownCoordinate = fullLoc.coordinate
             mapView.mapboxMap.setCamera(to: CameraOptions(center: fullLoc.coordinate, zoom: 14, bearing: 0, pitch: 0))
         }
+
+        // FIX LINHA DE ROTA: makePolylineAnnotationManager chama addSource+addPersistentLayer
+        // internamente. Se o estilo ainda não carregou (caso comum — MapView é criado async e o
+        // estilo demora ~200-600ms), essas chamadas falham silenciosamente → a linha nunca aparece.
+        // Quando o estilo carrega, instalamos os managers novamente (idempotente) e redesenhamos.
+        // `observeNext` dispara UMA vez; as próximas trocas de estilo já são cobertas por `loadMapStyle`.
+        _ = mapView.mapboxMap.onStyleLoaded.observeNext { [self, weak coordinator] _ in
+            guard let coordinator else { return }
+            coordinator.installManagers(on: mapView)
+            coordinator.resetLeadArrowAnchor()
+            coordinator.refreshRoute(
+                mapView: mapView,
+                coords: self.activeRouteCoordinates(),
+                fingerprint: self.routeFingerprint(),
+                quantumAccent: self.routeQuantumLineAccent,
+                fitCameraToRoute: !coordinator.isNavigatingMode,
+                dimmed: self.dimRoute
+            )
+            coordinator.refreshPoints(mapView: mapView,
+                                      truckStops: self.truckStops,
+                                      alerts: self.mapAlerts,
+                                      cameras: self.cameras)
+        }
     }
 
     func makeUIView(context: Context) -> HorizonMapboxMapHostView {

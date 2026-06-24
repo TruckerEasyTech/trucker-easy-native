@@ -114,7 +114,12 @@ final class NavigationEngine {
         maxReachedRouteIndex = 0
         lastClosestCoordinateIndex = 0
         vertexDistanceFromStart = Self.computePrefixDistances(route.coordinates)
-        var stepAcc = 0.0
+        // O passo "depart" (tipo 0 do Valhalla) é removido da lista de steps antes de chegar aqui,
+        // mas a polilinha inclui a distância dele. Recalculamos o offset: rota total − soma dos steps
+        // retidos = distância do passo depart (que falta na tabela). Sem isso o engine acha que está
+        // no km 0 quando na verdade já percorreu X metros só de "depart" → instrução/voz atrasados.
+        let retainedStepsSum = route.steps.reduce(0.0) { $0 + $1.distanceMeters }
+        var stepAcc = max(0.0, route.distanceMeters - retainedStepsSum)
         stepCumulativeEndDistance = route.steps.map { stepAcc += $0.distanceMeters; return stepAcc }
 
         if route.durationSeconds > 0 {
