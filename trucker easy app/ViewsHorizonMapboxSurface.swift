@@ -323,9 +323,12 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         // FIX LINHA DE ROTA: makePolylineAnnotationManager chama addSource+addPersistentLayer
         // internamente. Se o estilo ainda não carregou (caso comum — MapView é criado async e o
         // estilo demora ~200-600ms), essas chamadas falham silenciosamente → a linha nunca aparece.
-        // Quando o estilo carrega, instalamos os managers novamente (idempotente) e redesenhamos.
-        // `observeNext` dispara UMA vez; as próximas trocas de estilo já são cobertas por `loadMapStyle`.
-        _ = mapView.mapboxMap.onStyleLoaded.observeNext { [self, weak coordinator] _ in
+        // Quando o estilo carrega, reinstalamos os managers e redesenhamos.
+        // IMPORTANTE: o AnyCancelable DEVE ser mantido vivo no Coordinator — descartá-lo com
+        // `_ =` cancela a subscrição imediatamente antes de disparar.
+        // `observeNext` dispara UMA vez; trocas de estilo explícitas já são cobertas por loadMapStyle.
+        coordinator.styleLoadedToken = mapView.mapboxMap.onStyleLoaded.observeNext { [self, weak coordinator] _ in
+            coordinator?.styleLoadedToken = nil   // libera o token após disparar
             guard let coordinator else { return }
             coordinator.installManagers(on: mapView)
             coordinator.resetLeadArrowAnchor()
@@ -542,6 +545,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         private var followPuckAllowedAfter: Date = .distantPast
         private var weatherRadarEnabled = false
         private var weatherRadarTimer: Timer?
+        /// Mantém o token do observer de estilo carregado vivo até disparar (AnyCancelable
+        /// cancela a subscrição ao ser desalocado — não pode ser descartado com `_ =`).
+        var styleLoadedToken: AnyCancelable?
 
         // MARK: - Tráfego ao vivo (Mapbox Traffic v1) + declutter por zoom
         private let trafficSourceId = "mapbox-traffic-src"
