@@ -158,13 +158,12 @@ enum RouteEasyEngine {
                         mpg: mpg,
                         fuelStop: cheapestFuelStop,
                         compareTo: fastRoute,
-                        decisionSummary: "Premium AI balances time, tolls, diesel price, and suggested fuel stops.",
-                        // Sem parada de combustível real comparável, NÃO inventar economia (era 15%
-                        // do pedágio = número fabricado). nil → o subtítulo cai no honesto
-                        // "balances time, tolls, fuel and HOS", sem "$X" falso.
+                        decisionSummary: "Cost-optimized: compares tolls, diesel price, and driver time to pick the lowest total operating cost.",
+                        // Sem parada de combustível real comparável, NÃO inventar economia.
+                        // nil → o subtítulo cai no honesto "balances time, tolls, fuel and HOS".
                         estimatedSavingsUSD: nil,
                         recommendedStopsCount: cheapestFuelStop == nil ? 0 : 1,
-                        subtitleOverride: "Premium · AI cost-benefit route"
+                        subtitleOverride: "Premium · Cost-optimized route"
                     )
                 )
             }

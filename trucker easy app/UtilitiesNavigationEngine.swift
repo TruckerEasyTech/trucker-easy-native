@@ -99,8 +99,43 @@ final class NavigationEngine {
         activeRoute?.steps[safe: currentStepIndex]?.instruction
     }
 
+    // MARK: - GPS Odometer (DOT 49 CFR: position every 5 miles)
+    /// Milhas GPS acumuladas nesta sessão de navegação — fonte: distância real entre fixes de GPS
+    /// (não é a distância da rota Valhalla). Alimenta o registro de viagem (IFTA / logbook DOT).
+    private(set) var gpsOdometerMiles: Double = 0
+    /// Último fix de GPS para cálculo incremental de distância.
+    private var lastOdometerLocation: CLLocation?
+    /// Acumulador de distância desde o último log de posição (ponto a cada 5mi = 49 CFR).
+    private var milesSinceLastPositionLog: Double = 0
+    /// Log de posições a cada ~5 milhas (49 CFR ELD spec). Máximo 200 pontos por sessão.
+    private(set) var positionLog: [(coordinate: CLLocationCoordinate2D, timestamp: Date, miles: Double)] = []
+
+    private func updateGPSOdometer(with location: CLLocation) {
+        guard let prev = lastOdometerLocation else {
+            lastOdometerLocation = location
+            return
+        }
+        let distMeters = location.distance(from: prev)
+        guard distMeters > 5, distMeters < 500 else { return }  // ignora jumps GPS irreais (>500m num fix)
+        let distMiles = distMeters / 1609.34
+        gpsOdometerMiles += distMiles
+        milesSinceLastPositionLog += distMiles
+        lastOdometerLocation = location
+        // Log a cada 5 milhas conforme 49 CFR — para auditorias DOT / logbook
+        if milesSinceLastPositionLog >= 5.0 {
+            milesSinceLastPositionLog = 0
+            if positionLog.count < 200 {
+                positionLog.append((coordinate: location.coordinate, timestamp: Date(), miles: gpsOdometerMiles))
+            }
+        }
+    }
+
     func startNavigation(route: TruckRoute) {
         activeRoute = route
+        gpsOdometerMiles = 0
+        lastOdometerLocation = nil
+        milesSinceLastPositionLog = 0
+        positionLog = []
         currentStepIndex = 0
         state = .navigating
         lastSpokenStepIndex = -1
@@ -186,6 +221,7 @@ final class NavigationEngine {
         guard let route = activeRoute, !route.coordinates.isEmpty else { return }
 
         lastLocation = location
+        updateGPSOdometer(with: location)
 
         if let lastCoord = route.coordinates.last {
             let destination = CLLocation(latitude: lastCoord.latitude, longitude: lastCoord.longitude)

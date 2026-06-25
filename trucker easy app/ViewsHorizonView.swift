@@ -1138,6 +1138,19 @@ struct HorizonView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Color(hex: "#22d474"))
                         .multilineTextAlignment(.center).lineLimit(2)
+                    // Milhas GPS reais percorridas (odômetro por fix de GPS, não a distância da rota).
+                    // Útil para logbook DOT e relatório IFTA.
+                    if navigationEngine.gpsOdometerMiles > 0.1 {
+                        HStack(spacing: 12) {
+                            Label(String(format: "%.1f mi driven", navigationEngine.gpsOdometerMiles),
+                                  systemImage: "gauge.with.needle")
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(10)
+                    }
                     Button(action: {
                         withAnimation { showingArrival = false }
                         truckRoute = nil; route = nil; routeSteps = []; currentStepIndex = 0
