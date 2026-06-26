@@ -327,23 +327,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         // IMPORTANTE: o AnyCancelable DEVE ser mantido vivo no Coordinator — descartá-lo com
         // `_ =` cancela a subscrição imediatamente antes de disparar.
         // `observeNext` dispara UMA vez; trocas de estilo explícitas já são cobertas por loadMapStyle.
-        coordinator.styleLoadedToken = mapView.mapboxMap.onStyleLoaded.observeNext { [self, weak coordinator] _ in
+        coordinator.styleLoadedToken = mapView.mapboxMap.onStyleLoaded.observeNext { [weak coordinator] _ in
             coordinator?.styleLoadedToken = nil   // libera o token após disparar
             guard let coordinator else { return }
+            // O estilo carregou: reinstala os managers (addSource+addPersistentLayer precisam do
+            // estilo carregado). NÃO redesenhamos a rota aqui com `self` capturado (struct stale
+            // da criação do MapView — pode ter rota nil mesmo com rota ativa). Em vez disso,
+            // invalidamos o fingerprint → o próximo updateUIView redesenha com dados ATUAIS.
             coordinator.installManagers(on: mapView)
-            coordinator.resetLeadArrowAnchor()
-            coordinator.refreshRoute(
-                mapView: mapView,
-                coords: self.activeRouteCoordinates(),
-                fingerprint: self.routeFingerprint(),
-                quantumAccent: self.routeQuantumLineAccent,
-                fitCameraToRoute: !coordinator.isNavigatingMode,
-                dimmed: self.dimRoute
-            )
-            coordinator.refreshPoints(mapView: mapView,
-                                      truckStops: self.truckStops,
-                                      alerts: self.mapAlerts,
-                                      cameras: self.cameras)
+            coordinator.lastRouteFingerprint = ""   // força redesenho da rota no próximo update
         }
     }
 
