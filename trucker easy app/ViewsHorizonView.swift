@@ -2466,9 +2466,8 @@ struct HorizonView: View {
         let tollResult = TollResult(totalCost: result.tollCostUSD, currency: result.tollCurrency, tolls: result.tollPoints)
         currentTollResult = tollResult.hasTolls ? tollResult : TollResult.zero
 
-        let dieselPrice = publicDieselPrice?.dieselPrice ?? 3.85
-        let mpg: Double = (truckProfile.truckType == .straight) ? 10.0 : 6.5
-        let fuelCost = TripProfitability.estimateFuelCost(distanceMeters: distanceM, mpg: mpg, dieselPricePerGallon: dieselPrice)
+        let dieselPrice = publicDieselPrice?.dieselPrice ?? 4.10
+        let fuelCost = TripProfitability.estimateFuelCost(distanceMeters: distanceM, mpg: truckProfile.fuelEfficiencyMPG, dieselPricePerGallon: dieselPrice)
         if freightVal > 0 {
             currentProfitability = TripProfitability(freightValueUSD: freightVal, estimatedFuelCostUSD: fuelCost, tollCostUSD: result.tollCostUSD, otherExpensesUSD: 0)
         }
@@ -3696,9 +3695,10 @@ struct HorizonView: View {
     ) {
         isCalculatingRoute = true
         bottomSheetExpanded = false
-        let diesel = publicDieselPrice?.dieselPrice ?? 3.85
-        let mpg: Double = (truckProfile.truckType == .straight) ? 10.0 : 6.5
-        let fuelStop = cheapestDieselStop
+        // Preço real de diesel (EIA/NRCan) ou fallback conservador DOE 2024
+        let diesel = publicDieselPrice?.dieselPrice ?? 4.10
+        // MPG real do perfil do motorista (adicionado ao TruckProfile — não mais hardcoded)
+        let mpg: Double = truckProfile.fuelEfficiencyMPG
         let usesTruck = subscriptionPlan.hasTruckRoutes || AppAccessPolicy.unlockAllFeaturesForTesting
 
         Task { @MainActor in
@@ -3716,6 +3716,17 @@ struct HorizonView: View {
                 routeEasyPendingCoordinate = coordinate
                 routeEasyPendingAddress = address
 
+                // Rota inteligente: busca o posto de diesel mais barato NO CORREDOR da rota
+                // (não só o mais perto da posição atual). Usa distanceToPolyline do signage
+                // service — o mesmo algoritmo que filtra semáforos no corredor. Corredor = 8km
+                // (5 milhas) e lookahead = 80% da rota (para não recomendar parada no fim).
+                let corridorFuelStop = Self.cheapestFuelStopInCorridor(
+                    stops: truckStopService.nearbyStops,
+                    routeCoords: fast.coordinates,
+                    corridorMeters: 8_000,
+                    maxFractionAlongRoute: 0.80
+                ) ?? cheapestDieselStop  // fallback ao mais barato perto
+
                 // "Mostrar os 3 na hora": monta Rápida + Sem Pedágio + Easy/AI e ABRE o seletor —
                 // o motorista escolhe ANTES de navegar (não aplica a Rápida sozinho).
                 do {
@@ -3726,7 +3737,7 @@ struct HorizonView: View {
                         profile: truckProfile,
                         dieselPricePerGallon: diesel,
                         mpg: mpg,
-                        cheapestFuelStop: fuelStop,
+                        cheapestFuelStop: corridorFuelStop,
                         effectivePlan: subscriptionPlan,
                         includeFuelSmart: routeEasyIncludesFuelSmart,
                         prefetchedFastest: fast,
@@ -3774,6 +3785,69 @@ struct HorizonView: View {
                 print("[RouteEasy] failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Posto de diesel mais barato DENTRO DO CORREDOR da rota — não o mais perto da posição atual.
+    /// Usa projeção ponto-segmento (equirretangular) para medir distância perpendicular à polilinha.
+    /// `corridorMeters` = largura do corredor (5mi = 8km típico). `maxFractionAlongRoute` evita
+    /// recomendar parada já perto do destino (onde não compensa desviar).
+    private static func cheapestFuelStopInCorridor(
+        stops: [TruckStopItem],
+        routeCoords: [CLLocationCoordinate2D],
+        corridorMeters: Double,
+        maxFractionAlongRoute: Double
+    ) -> TruckStopItem? {
+        guard routeCoords.count >= 2 else { return nil }
+        let n = routeCoords.count
+        let maxIndex = Int(Double(n - 1) * maxFractionAlongRoute)
+
+        // Calcula comprimento total da rota para determinar onde fica cada ponto
+        var totalLength = 0.0
+        var segLengths = [Double]()
+        for i in 0..<(n - 1) {
+            let d = CLLocation(latitude: routeCoords[i].latitude, longitude: routeCoords[i].longitude)
+                .distance(from: CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+            segLengths.append(d)
+            totalLength += d
+        }
+        let maxDistAlongRoute = totalLength * maxFractionAlongRoute
+
+        var best: TruckStopItem?
+        var bestPrice = Double.infinity
+
+        for stop in stops {
+            guard let price = stop.amenities.dieselPrice, price < bestPrice else { continue }
+            let pt = stop.coordinate
+            var minDist = Double.infinity
+            var distAlongRoute = 0.0
+            var closestFraction = 0.0
+
+            for i in 0..<(n - 1) {
+                let a = routeCoords[i], b = routeCoords[i+1]
+                // Distância perpendicular ao segmento (equirretangular local)
+                let ax = a.longitude, ay = a.latitude, bx = b.longitude, by = b.latitude
+                let dx = bx - ax, dy = by - ay
+                let len2 = dx*dx + dy*dy
+                var t = len2 > 0 ? ((pt.longitude - ax)*dx + (pt.latitude - ay)*dy) / len2 : 0
+                t = max(0, min(1, t))
+                let px = ax + t*dx, py = ay + t*dy
+                let projLoc = CLLocation(latitude: py, longitude: px)
+                let ptLoc = CLLocation(latitude: pt.latitude, longitude: pt.longitude)
+                let d = ptLoc.distance(from: projLoc)
+                let fractionAlong = distAlongRoute + t * segLengths[i]
+                if d < minDist {
+                    minDist = d
+                    closestFraction = fractionAlong
+                }
+                if i < maxIndex { distAlongRoute += segLengths[i] }
+            }
+
+            // Aceita o stop se: (1) dentro do corredor E (2) não passados 80% da rota
+            guard minDist <= corridorMeters, closestFraction <= maxDistAlongRoute else { continue }
+            best = stop
+            bestPrice = price
+        }
+        return best
     }
 
     /// Shared step filter for turn-by-turn UI + `NavigationEngine` (same indices).

@@ -38,6 +38,15 @@ struct HorizonTruckSettingsSheet: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                Section("Fuel Economy") {
+                    HStack {
+                        Text("MPG (Miles per Gallon)")
+                        Spacer()
+                        TextField("6.5", value: $profile.fuelEfficiencyMPG, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
                 Section("Cargo") {
                     Toggle("HAZMAT", isOn: $profile.hasHazmat)
                 }

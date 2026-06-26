@@ -95,6 +95,12 @@ final class NavigationEngine {
     /// the old uniform-density index estimate (which drifted badly on compressed/uneven polylines).
     private var stepCumulativeEndDistance: [Double] = []
 
+    /// Distância do início da rota até o ponto de ação do step 0.
+    /// = distância do passo "depart" (removido do array de steps, mas presente na polilinha).
+    /// Usado em calculateDistanceToNextStep para step 0: a ação de step 0 ocorre em
+    /// departOffset metros da origem, NÃO em stepCumulativeEndDistance[0] que é o FIM do step 0.
+    private var departOffset: Double = 0
+
     var currentInstruction: String? {
         activeRoute?.steps[safe: currentStepIndex]?.instruction
     }
@@ -154,7 +160,8 @@ final class NavigationEngine {
         // retidos = distância do passo depart (que falta na tabela). Sem isso o engine acha que está
         // no km 0 quando na verdade já percorreu X metros só de "depart" → instrução/voz atrasados.
         let retainedStepsSum = route.steps.reduce(0.0) { $0 + $1.distanceMeters }
-        var stepAcc = max(0.0, route.distanceMeters - retainedStepsSum)
+        departOffset = max(0.0, route.distanceMeters - retainedStepsSum)
+        var stepAcc = departOffset
         stepCumulativeEndDistance = route.steps.map { stepAcc += $0.distanceMeters; return stepAcc }
 
         if route.durationSeconds > 0 {
@@ -184,6 +191,7 @@ final class NavigationEngine {
         lastClosestCoordinateIndex = 0
         vertexDistanceFromStart = []
         stepCumulativeEndDistance = []
+        departOffset = 0
         eta = nil
         distanceToNextStep = 0
         distanceRemaining = 0
@@ -431,26 +439,44 @@ final class NavigationEngine {
         return out
     }
 
-    /// Road distance (m) to the next maneuver. Accurate path: cumulative distance to the end of the
-    /// current step minus how far along the polyline the driver already is — so the banner counts
-    /// down "0.5 mi → 0.4 → … → now" as the truck approaches the turn. Falls back to the old
-    /// straight-line estimate only if the per-step / prefix tables aren't ready yet (transient).
+    /// Road distance (m) to the current maneuver action point (where the driver needs to turn/act).
+    ///
+    /// SEMÂNTICA VALHALLA: cada step[N].instruction descreve a ação a realizar no INÍCIO do step N.
+    /// O step N começa exatamente onde o step N-1 termina. Portanto a distância até a ação de step N
+    /// é a distância até o INÍCIO de step N, não até o FIM:
+    ///   • step 0 → ação em departOffset metros da origem
+    ///   • step N>0 → ação em stepCumulativeEndDistance[N-1] metros da origem
+    ///
+    /// Antes este campo devolvia a distância até o FIM do step (stepCumulativeEndDistance[N]), que é
+    /// o PRÓXIMO ponto de ação — fazendo a voz dizer "vire em 2mi" quando a curva ficava a 0.5mi.
     private func calculateDistanceToNextStep(from location: CLLocation, route: TruckRoute, startIndex: Int) -> Double {
         if currentStepIndex < stepCumulativeEndDistance.count,
            startIndex >= 0, startIndex < vertexDistanceFromStart.count {
-            let turnAlongRoute = stepCumulativeEndDistance[currentStepIndex]
+            // Posição DA AÇÃO do step atual na polilinha
+            let actionAlongRoute: Double
+            if currentStepIndex == 0 {
+                actionAlongRoute = departOffset          // início do step 0 = fim do depart
+            } else {
+                actionAlongRoute = stepCumulativeEndDistance[currentStepIndex - 1] // fim do step anterior
+            }
             let userAlongRoute = vertexDistanceFromStart[startIndex]
-            return max(0, turnAlongRoute - userAlongRoute)
+            return max(0, actionAlongRoute - userAlongRoute)
         }
-        // Fallback (tables not built): straight-line to an estimated step-end coordinate.
+        // Fallback (tabelas não construídas): linha reta até a coordenada inicial estimada do step.
         guard currentStepIndex < route.steps.count, route.distanceMeters > 0,
               !route.coordinates.isEmpty else { return 0 }
-        let stepDistance = route.steps[currentStepIndex].distanceMeters
-        let coordsPerMeter = Double(route.coordinates.count) / route.distanceMeters
-        let estimatedIndex = min(startIndex + Int(stepDistance * coordsPerMeter), route.coordinates.count - 1)
-        let stepCoordinate = route.coordinates[estimatedIndex]
-        let stepLocation = CLLocation(latitude: stepCoordinate.latitude, longitude: stepCoordinate.longitude)
-        return location.distance(from: stepLocation)
+        // Estima o índice de início do step (onde a ação acontece)
+        let priorDistance: Double
+        if currentStepIndex == 0 {
+            priorDistance = departOffset
+        } else {
+            priorDistance = stepCumulativeEndDistance[currentStepIndex - 1]
+        }
+        let coordsPerMeter = Double(route.coordinates.count) / max(route.distanceMeters, 1)
+        let estimatedActionIndex = min(Int(priorDistance * coordsPerMeter), route.coordinates.count - 1)
+        let actionCoordinate = route.coordinates[estimatedActionIndex]
+        let actionLocation = CLLocation(latitude: actionCoordinate.latitude, longitude: actionCoordinate.longitude)
+        return location.distance(from: actionLocation)
     }
 
     private func updateRemainingStats(from location: CLLocation, route: TruckRoute, routeIndex: Int) {

@@ -18,6 +18,10 @@ struct TruckProfile: Codable, Equatable {
     var axleWeightTonnes: Double
     var hasHazmat: Bool
     var truckType: TruckType
+    /// Eficiência real de combustível em milhas por galão (MPG). Usado na rota inteligente para
+    /// calcular custo de diesel da viagem e economia com paradas mais baratas.
+    /// Padrões realistas DOE/EIA 2024: semi = 6.5 MPG, straight = 10.5 MPG.
+    var fuelEfficiencyMPG: Double = 6.5
     
     // MARK: - Predefined Profiles
     
@@ -43,12 +47,13 @@ struct TruckProfile: Codable, Equatable {
     
     /// Straight truck (box truck)
     static let straightTruck = TruckProfile(
-        heightMeters: 3.96,      // 13'
-        weightTonnes: 11.793,    // 26,000 lbs
-        lengthMeters: 7.92,      // 26'
+        heightMeters: 3.96,       // 13'
+        weightTonnes: 11.793,     // 26,000 lbs
+        lengthMeters: 7.92,       // 26'
         axleWeightTonnes: 5.897,
         hasHazmat: false,
-        truckType: .straight
+        truckType: .straight,
+        fuelEfficiencyMPG: 10.5   // DOE/EIA 2024 médio para straight truck / box truck
     )
     
     /// Tanker truck
@@ -103,18 +108,27 @@ struct TruckProfile: Codable, Equatable {
 
 extension TruckProfile {
     private enum CodingKeys: String, CodingKey {
-        case heightMeters, weightTonnes, lengthMeters, widthMeters, axleWeightTonnes, hasHazmat, truckType
+        case heightMeters, weightTonnes, lengthMeters, widthMeters, axleWeightTonnes, hasHazmat, truckType, fuelEfficiencyMPG
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        heightMeters     = try c.decode(Double.self, forKey: .heightMeters)
-        weightTonnes     = try c.decode(Double.self, forKey: .weightTonnes)
-        lengthMeters     = try c.decode(Double.self, forKey: .lengthMeters)
-        widthMeters      = try c.decodeIfPresent(Double.self, forKey: .widthMeters) ?? 2.59
-        axleWeightTonnes = try c.decode(Double.self, forKey: .axleWeightTonnes)
-        hasHazmat        = try c.decode(Bool.self, forKey: .hasHazmat)
-        truckType        = try c.decode(TruckType.self, forKey: .truckType)
+        heightMeters       = try c.decode(Double.self, forKey: .heightMeters)
+        weightTonnes       = try c.decode(Double.self, forKey: .weightTonnes)
+        lengthMeters       = try c.decode(Double.self, forKey: .lengthMeters)
+        widthMeters        = try c.decodeIfPresent(Double.self, forKey: .widthMeters) ?? 2.59
+        axleWeightTonnes   = try c.decode(Double.self, forKey: .axleWeightTonnes)
+        hasHazmat          = try c.decode(Bool.self, forKey: .hasHazmat)
+        truckType          = try c.decode(TruckType.self, forKey: .truckType)
+        // MPG adicionado depois — fallback por tipo de caminhão (DOE/EIA 2024)
+        if let saved = try c.decodeIfPresent(Double.self, forKey: .fuelEfficiencyMPG), saved > 0 {
+            fuelEfficiencyMPG = saved
+        } else {
+            switch truckType {
+            case .straight: fuelEfficiencyMPG = 10.5
+            default:        fuelEfficiencyMPG = 6.5
+            }
+        }
     }
 }
 
