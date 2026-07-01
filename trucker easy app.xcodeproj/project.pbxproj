@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		54054F4B2F7B76E8002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh in Resources */ = {isa = PBXBuildFile; fileRef = 54054F4A2F7B76E7002446D4 /* REMOVER_ARQUIVOS_EXAMPLES.sh */; };
+		545FDF952FF48B2A0011FEA0 /* MapboxDirections in Frameworks */ = {isa = PBXBuildFile; productRef = 545FDF942FF48B2A0011FEA0 /* MapboxDirections */; };
+		545FDF972FF48B2A0011FEA0 /* MapboxNavigationCore in Frameworks */ = {isa = PBXBuildFile; productRef = 545FDF962FF48B2A0011FEA0 /* MapboxNavigationCore */; };
+		545FDF992FF48B2A0011FEA0 /* MapboxNavigationUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = 545FDF982FF48B2A0011FEA0 /* MapboxNavigationUIKit */; };
 		5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 5498D4AB2F527E73007240ED /* MapboxMaps */; };
 		6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24A64F6F67DD7751D79CB181 /* Pods_trucker_easy_app.framework */; };
 /* End PBXBuildFile section */
@@ -145,7 +148,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				545FDF972FF48B2A0011FEA0 /* MapboxNavigationCore in Frameworks */,
 				6EA1DA91F7E0BF5A1B9AFC06 /* Pods_trucker_easy_app.framework in Frameworks */,
+				545FDF992FF48B2A0011FEA0 /* MapboxNavigationUIKit in Frameworks */,
+				545FDF952FF48B2A0011FEA0 /* MapboxDirections in Frameworks */,
 				5498D4AC2F527E73007240ED /* MapboxMaps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -259,6 +265,9 @@
 			name = "trucker easy app";
 			packageProductDependencies = (
 				5498D4AB2F527E73007240ED /* MapboxMaps */,
+				545FDF942FF48B2A0011FEA0 /* MapboxDirections */,
+				545FDF962FF48B2A0011FEA0 /* MapboxNavigationCore */,
+				545FDF982FF48B2A0011FEA0 /* MapboxNavigationUIKit */,
 			);
 			productName = "trucker easy app";
 			productReference = 5498CBE32F527E73007240ED /* trucker easy app.app */;
@@ -290,6 +299,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
+				545FDF932FF48B2A0011FEA0 /* XCRemoteSwiftPackageReference "mapbox-navigation-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5498CBE42F527E73007240ED /* Products */;
@@ -492,7 +502,7 @@
 				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy app.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -546,7 +556,7 @@
 				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_ENTITLEMENTS = "trucker easy app/trucker easy appRelease.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 5K8B4JY4WT;
 				ENABLE_PREVIEWS = YES;
@@ -617,6 +627,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		545FDF932FF48B2A0011FEA0 /* XCRemoteSwiftPackageReference "mapbox-navigation-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mapbox/mapbox-navigation-ios.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.0;
+			};
+		};
 		5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/mapbox/mapbox-maps-ios";
@@ -628,6 +646,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		545FDF942FF48B2A0011FEA0 /* MapboxDirections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 545FDF932FF48B2A0011FEA0 /* XCRemoteSwiftPackageReference "mapbox-navigation-ios" */;
+			productName = MapboxDirections;
+		};
+		545FDF962FF48B2A0011FEA0 /* MapboxNavigationCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 545FDF932FF48B2A0011FEA0 /* XCRemoteSwiftPackageReference "mapbox-navigation-ios" */;
+			productName = MapboxNavigationCore;
+		};
+		545FDF982FF48B2A0011FEA0 /* MapboxNavigationUIKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 545FDF932FF48B2A0011FEA0 /* XCRemoteSwiftPackageReference "mapbox-navigation-ios" */;
+			productName = MapboxNavigationUIKit;
+		};
 		5498D4AB2F527E73007240ED /* MapboxMaps */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5498D4AA2F527E73007240ED /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
