@@ -400,6 +400,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         Self.tuckMapboxOrnaments(mapView, bottomInset: mapboxBottomInset)
         let coord = context.coordinator
         coord.isNavigatingMode = isNavigating
+        coord.syncDeadReckoning(isNavigating: isNavigating)
         coord.syncWeatherRadar(enabled: weatherRadarEnabled, on: mapView)
         coord.onTruckStopTapped = onTruckStopTapped
         coord.onCameraTapped = onCameraTapped
@@ -470,6 +471,25 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             )
         }
 
+        // WATCHDOG DA LINHA DE ROTA (chão-da-verdade, roda a cada tick de GPS ≈1s):
+        // no device o estilo pode recarregar / o Metal resetar / o addLayer falhar SEM nenhum
+        // evento que a gente escute — o sintoma era "linha some e nunca volta" mesmo com a rota
+        // ativa. Aqui checamos o estado REAL do mapa: camada "horizon-route" existe E o manager
+        // tem annotations. Qualquer falha → reinstala managers e redesenha JÁ, com os dados
+        // ATUAIS deste updateUIView (struct fresco — sem o bug de captura stale dos callbacks).
+        // Converge em ≤2s para linha visível, qualquer que seja a causa da perda.
+        if let coords = activeRouteCoordinates(), coords.count >= 2,
+           !coord.routeLineIsAlive(on: mapView) {
+            coord.installManagers(on: mapView)
+            coord.refreshRoute(
+                mapView: mapView,
+                coords: coords,
+                fingerprint: fp,
+                quantumAccent: routeQuantumLineAccent,
+                fitCameraToRoute: false,
+                dimmed: dimRoute
+            )
+        }
 
         coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts,
                             signage: isNavigating ? routeSignage : [], cameras: cameras)
@@ -794,12 +814,78 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
         var hasRouteNavigationAnchor: Bool { smoothedRouteCoord != nil }
 
+        // MARK: - Dead-reckoning (P0 #2 da auditoria de segurança): continuidade em túnel/cânion.
+        // Quando o GPS para de chegar (3s…35s) e o último fix REAL estava NA ROTA em velocidade de
+        // via (≥5 m/s), o puck continua avançando pela polilinha na última velocidade conhecida —
+        // igual CoPilot/Google em túnel. ESCOPO VISUAL APENAS: o NavigationEngine NÃO recebe posição
+        // sintética (sem avanço de passo, sem reroute em dado estimado — zero falso positivo).
+        // Parado no túnel (speed<5) NÃO deriva. GPS volta → snap real reassume no próximo fix.
+        private var deadReckonTimer: Timer?
+        private var lastRealFixAt: Date?
+        private var lastRealSpeed: Double = 0
+        private var lastEmitWasSnap = false
+        private var lastRouteCoordsForDR: [CLLocationCoordinate2D] = []
+
+        deinit {
+            deadReckonTimer?.invalidate()
+            weatherRadarTimer?.invalidate()
+        }
+
+        /// Liga/desliga o timer de dead-reckoning conforme o modo de navegação (idempotente por tick).
+        func syncDeadReckoning(isNavigating: Bool) {
+            if isNavigating {
+                guard deadReckonTimer == nil else { return }
+                deadReckonTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                    self?.deadReckonTick()
+                }
+            } else {
+                deadReckonTimer?.invalidate()
+                deadReckonTimer = nil
+            }
+        }
+
+        private func deadReckonTick() {
+            guard isNavigatingMode, lastEmitWasSnap,
+                  let fixAt = lastRealFixAt,
+                  let cur = smoothedRouteCoord,
+                  lastRouteCoordsForDR.count >= 2 else { return }
+            let age = Date().timeIntervalSince(fixAt)
+            // Janela: começa após 3s sem fix (interpolação do Mapbox cobre até aí) e para em 35s
+            // (além disso a estimativa vira chute — o puck congela e a UI mostra "SEM GPS").
+            guard age >= 3, age <= 35 else { return }
+            // Só com velocidade de via plausível (5…42 m/s ≈ 11…94 mph); parado não deriva.
+            guard lastRealSpeed >= 5, lastRealSpeed <= 42 else { return }
+
+            var anchor = lastLeadArrowPolyIndex
+            guard let ahead = PolylineLeadArrow.lookaheadPoint(
+                coords: lastRouteCoordsForDR,
+                user: CLLocation(latitude: cur.latitude, longitude: cur.longitude),
+                lookaheadMeters: lastRealSpeed * 1.0,   // 1 tick = 1s na última velocidade real
+                anchorIndex: &anchor
+            ) else { return }
+            lastLeadArrowPolyIndex = anchor
+            smoothedRouteCoord = ahead.coordinate
+            smoothedRouteBearing = ahead.bearingDegrees
+            lastEmittedBearing = ahead.bearingDegrees
+            let progressed = min(max(Double(anchor) / Double(lastRouteCoordsForDR.count - 1), 0), 1)
+            routeLineManager?.lineTrimOffset = [0, progressed]
+            snapProvider.emit(coordinate: ahead.coordinate, bearing: ahead.bearingDegrees, speed: lastRealSpeed)
+        }
+
         func resetLeadArrowAnchor() {
             lastLeadArrowPolyIndex = 0
             lastRouteArrowUserLoc = nil
             lastRouteArrowUpdateAt = .distantPast
             smoothedRouteCoord = nil
             smoothedRouteBearing = 0
+        }
+
+        /// Watchdog: GROUND TRUTH da linha de rota no mapa real — a camada "horizon-route"
+        /// existe E o manager tem annotations. false = linha perdida (qualquer causa) →
+        /// o updateUIView reinstala e redesenha com dados atuais.
+        func routeLineIsAlive(on mapView: MapboxMaps.MapView) -> Bool {
+            guard let mgr = routeLineManager, !mgr.annotations.isEmpty else { return false }
+            return mapView.mapboxMap.layerExists(withId: "horizon-route")
         }
 
         func clearRouteNavigationArrow() {
@@ -948,20 +1034,27 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 emitRawLocation(user: user)
                 return
             }
-            // "Vanishing route line" (igual Google/Waze/Trucker Path): a parte JÁ percorrida (atrás do
-            // puck) fica apagada; só o trecho À FRENTE segue laranja vivo. Atualiza só o trim (float
-            // 0…1), SEM redesenhar a polilinha. Fração ≈ índice-âncora / total de vértices.
-            let progressed = min(max(Double(lastLeadArrowPolyIndex) / Double(coords.count - 1), 0), 1)
-            routeLineManager?.lineTrimOffset = [0, progressed]
             let snapped = CLLocation(latitude: snap.coordinate.latitude, longitude: snap.coordinate.longitude)
+            // Alimenta o dead-reckoning com o estado REAL deste fix (timestamp/velocidade/na-rota).
+            lastRealFixAt = Date()
+            lastRealSpeed = max(0, user.speed)
+            lastRouteCoordsForDR = coords
             if snapped.distance(from: user) <= 35 {
+                // "Vanishing route line": a parte JÁ percorrida (atrás do puck) fica apagada.
+                // Trim SÓ atualiza quando o snap é USADO (na rota) — antes atualizava também no
+                // caminho off-route, com âncora possivelmente errada, apagando trecho errado da linha.
+                let progressed = min(max(Double(lastLeadArrowPolyIndex) / Double(coords.count - 1), 0), 1)
+                routeLineManager?.lineTrimOffset = [0, progressed]
                 // Na rota: a seta GRUDA na linha (consistente).
+                lastEmitWasSnap = true
                 lastEmittedBearing = snap.bearingDegrees
                 smoothedRouteCoord = snap.coordinate
                 smoothedRouteBearing = snap.bearingDegrees
                 snapProvider.emit(coordinate: snap.coordinate, bearing: snap.bearingDegrees, speed: max(0, user.speed))
             } else {
                 // Fora da rota de verdade: GPS real honesto (o reroute religa a linha).
+                // Dead-reckoning DESLIGADO fora da rota — projetar pela polilinha seria mentira.
+                lastEmitWasSnap = false
                 let bearing = user.course >= 0 ? user.course : lastEmittedBearing
                 lastEmittedBearing = bearing
                 smoothedRouteCoord = user.coordinate
@@ -974,6 +1067,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// between fixes, so the idle puck stays smooth. Uses the last known bearing when the
         /// GPS course is invalid (course < 0 when stationary).
         func emitRawLocation(user: CLLocation) {
+            lastEmitWasSnap = false   // idle/sem rota: dead-reckoning não se aplica
+            lastRealFixAt = Date()
             let bearing: CLLocationDirection = user.course >= 0 ? user.course : lastEmittedBearing
             lastEmittedBearing = bearing
             snapProvider.emit(

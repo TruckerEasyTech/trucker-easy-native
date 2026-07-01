@@ -2885,49 +2885,12 @@ struct HorizonView: View {
                 await MainActor.run { upcomingScales = capped }
             }
 
-            // 2) MapKit fallback when Supabase has no weigh POI nearby
-            if distMeters > limits.alertMeters {
-                let queries = countryCompliance.weighQueries
-                let region = MKCoordinateRegion(
-                    center: location.coordinate,
-                    latitudinalMeters: limits.searchMeters,
-                    longitudinalMeters: limits.searchMeters
-                )
-                var allItems: [MKMapItem] = []
-                for query in queries {
-                    let req = MKLocalSearch.Request(); req.naturalLanguageQuery = query; req.region = region
-                    let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
-                    allItems.append(contentsOf: items)
-                }
-                var deduped: [MKMapItem] = []
-                for item in allItems {
-                    let loc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
-                    if !deduped.contains(where: { CLLocation(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).distance(from: loc) < 500 }) {
-                        deduped.append(item)
-                    }
-                }
-                let nearest = deduped.map { item in
-                    let itemLoc = CLLocation(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
-                    let dist = location.distance(from: itemLoc)
-                    let isAhead = isScaleAhead(
-                        of: location,
-                        target: item.placemark.coordinate,
-                        headingTolerance: limits.headingTolerance
-                    )
-                    return (item, dist, isAhead)
-                }.filter { $0.2 }.filter { $0.1 < limits.searchMeters }.sorted { $0.1 < $1.1 }.first
-
-                guard let (nearestItem, d, _) = nearest, d <= limits.alertMeters else {
-                    await MainActor.run {
-                        withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }
-                    }
-                    return
-                }
-                stationName = nearestItem.name ?? stationName
-                distMeters = d
-                stationCoord = nearestItem.placemark.coordinate
-            }
-
+            // FALLBACK MAPKIT REMOVIDO (era FABRICAÇÃO de balança): MKLocalSearch com query de
+            // texto ("weigh station"/"truck scale") retorna QUALQUER negócio com nome parecido —
+            // balança CAT privada de posto, empresa com "scale" no nome — e disparava o banner
+            // oficial "WEIGH STATION AHEAD" + voz para algo que NÃO é fiscalização DOT.
+            // Fonte única agora: Supabase poi_places (OSM weigh_station + USDOT NTAD, dado real).
+            // Sem balança real no raio = SEM alerta. "Desconhecido" nunca vira invenção.
             guard distMeters <= limits.alertMeters else {
                 await MainActor.run {
                     withAnimation(.easeOut(duration: 0.2)) { showingScaleAlert = false }

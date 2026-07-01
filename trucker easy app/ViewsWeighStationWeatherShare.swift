@@ -1153,9 +1153,10 @@ struct WeighStationStatusSheet: View {
             ) {
                 targets = rows.map { WeighStationReportTarget.from($0) }
             }
-            if targets.isEmpty {
-                targets = await mapKitWeighTargets(near: location)
-            }
+            // MapKit fallback REMOVIDO (mesma fabricação do alerta): busca por texto trazia
+            // "balanças" que não são fiscalização DOT como alvo do report. Sem POI real da base,
+            // o fluxo cai no fallback honesto abaixo ("balança na minha posição" — o motorista
+            // está fisicamente vendo a balança que quer reportar).
             await service.fetchRemoteReports(near: location.coordinate, radiusKm: 150)
         } else {
             await service.fetchRemoteReports()
@@ -1181,55 +1182,6 @@ struct WeighStationStatusSheet: View {
         }
     }
 
-    private func mapKitWeighTargets(near location: CLLocation) async -> [WeighStationReportTarget] {
-        let queries = await MainActor.run { CountryComplianceManager.shared.weighQueries }
-        let region = MKCoordinateRegion(
-            center: location.coordinate,
-            latitudinalMeters: 120_000,
-            longitudinalMeters: 120_000
-        )
-        var allItems: [MKMapItem] = []
-        for query in queries {
-            let req = MKLocalSearch.Request()
-            req.naturalLanguageQuery = query
-            req.region = region
-            let items = (try? await MKLocalSearch(request: req).start())?.mapItems ?? []
-            allItems.append(contentsOf: items)
-        }
-        var deduped: [MKMapItem] = []
-        for item in allItems {
-            let itemLoc = CLLocation(
-                latitude: item.placemark.coordinate.latitude,
-                longitude: item.placemark.coordinate.longitude
-            )
-            if !deduped.contains(where: {
-                CLLocation(
-                    latitude: $0.placemark.coordinate.latitude,
-                    longitude: $0.placemark.coordinate.longitude
-                ).distance(from: itemLoc) < 500
-            }) {
-                deduped.append(item)
-            }
-        }
-        return deduped.map { item in
-            let coord = item.placemark.coordinate
-            let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            return WeighStationReportTarget(
-                id: UUID(),
-                name: item.name ?? lang.horizonGenericWeighStation,
-                latitude: coord.latitude,
-                longitude: coord.longitude,
-                poiPlaceId: nil,
-                distanceMeters: location.distance(from: itemLoc),
-                govStatus: nil,
-                govSource: nil,
-                countryCode: item.placemark.isoCountryCode
-            )
-        }
-        .sorted { ($0.distanceMeters ?? .greatestFiniteMagnitude) < ($1.distanceMeters ?? .greatestFiniteMagnitude) }
-        .prefix(25)
-        .map { $0 }
-    }
 }
 
 // MARK: - Agrupamento anti-poluição (reports similares consecutivos)
