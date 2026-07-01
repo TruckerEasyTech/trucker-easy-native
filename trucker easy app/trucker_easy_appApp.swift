@@ -48,7 +48,7 @@ struct trucker_easy_appApp: App {
             Trip.self, FuelPurchase.self, Expense.self, IFTAReport.self,
             TruckDocument.self, GeofenceRegion.self, ChatMessage.self,
             ChatChannel.self, CommunityPost.self, PostComment.self, WellnessLog.self,
-            Medication.self,
+            Medication.self, ReeferTempLog.self,
         ])
     }
 

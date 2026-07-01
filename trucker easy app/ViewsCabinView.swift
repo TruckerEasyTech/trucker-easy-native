@@ -206,6 +206,12 @@ struct CabinView: View {
                         TruckSignsShortcutCard()
                             .padding(.horizontal, AppTheme.Spacing.md)
 
+                        // MARK: Reefer temperature monitor — só para perfil frigorífico
+                        if TruckProfile.loadSaved().truckType == .refrigerated {
+                            ReeferShortcutCard()
+                                .padding(.horizontal, AppTheme.Spacing.md)
+                        }
+
                         Spacer(minLength: AppTheme.Spacing.xxl)
                     }
                 }
@@ -631,6 +637,71 @@ struct TruckSignsShortcutCard: View {
     }
 }
 
+
+// MARK: - Reefer Monitor Shortcut Card (só aparece para perfil frigorífico)
+
+struct ReeferShortcutCard: View {
+    @State private var showingReefer = false
+    private var monitor: ReeferMonitorService { ReeferMonitorService.shared }
+
+    var body: some View {
+        Button(action: { showingReefer = true }) {
+            HStack(spacing: AppTheme.Spacing.md) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppTheme.Radius.sm)
+                        .fill(Color(hex: "#5aa9e6").opacity(0.15))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "thermometer.snowflake")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(Color(hex: "#5aa9e6"))
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Reefer Monitor")
+                        .font(AppTheme.Typography.bodyBold())
+                        .foregroundColor(.white)
+                    // Estado honesto: temperatura real ao vivo, ou convite pra conectar/registrar
+                    if let c = monitor.currentTempCelsius {
+                        Text(String(format: "%.1f°F ao vivo · %@", c * 9 / 5 + 32,
+                                    monitor.isOutOfRange ? "FORA DA FAIXA" : "na faixa"))
+                            .font(AppTheme.Typography.caption())
+                            .foregroundColor(monitor.isOutOfRange ? Color(hex: "#ef4444") : Color(hex: "#22d474"))
+                    } else {
+                        Text("Temperatura da carga · sensor BLE + registro FSMA")
+                            .font(AppTheme.Typography.caption())
+                            .foregroundColor(AppTheme.Colors.textSecondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(AppTheme.Colors.textSecondary)
+            }
+            .padding(AppTheme.Spacing.md)
+            .background(AppTheme.Colors.backgroundCard)
+            .cornerRadius(AppTheme.Radius.md)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                    .stroke(Color(hex: "#5aa9e6").opacity(0.2), lineWidth: 1)
+            )
+        }
+        .sheet(isPresented: $showingReefer) {
+            NavigationStack {
+                ReeferMonitorView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showingReefer = false }
+                                .foregroundColor(AppTheme.Colors.accent)
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
+    }
+}
 
 #Preview {
     CabinView()

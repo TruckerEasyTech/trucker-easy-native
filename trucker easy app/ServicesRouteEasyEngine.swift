@@ -54,7 +54,7 @@ enum RouteEasyEngine {
         profile: TruckProfile,
         dieselPricePerGallon: Double,
         mpg: Double,
-        cheapestFuelStop: TruckStopItem?,
+        nearbyFuelStops: [TruckStopItem] = [],
         effectivePlan: TruckerEasyPlan,
         includeFuelSmart: Bool = true,
         prefetchedFastest: TruckRoute? = nil,
@@ -144,11 +144,13 @@ enum RouteEasyEngine {
                 noTollProvider: tollRoute == nil ? fastProvider : tollProvider,
                 dieselPrice: dieselPricePerGallon,
                 mpg: mpg,
-                stop: cheapestFuelStop,
+                nearbyFuelStops: nearbyFuelStops,
                 compareTo: fastRoute
             ) {
                 options.append(smart)
             } else {
+                // Sem preço de diesel de referência (aiSmartOption exige dieselPrice > 0):
+                // card honesto sem números fabricados.
                 options.append(
                     makeOption(
                         kind: .fuelSmart,
@@ -156,13 +158,11 @@ enum RouteEasyEngine {
                         provider: tollRoute == nil ? fastProvider : tollProvider,
                         dieselPrice: dieselPricePerGallon,
                         mpg: mpg,
-                        fuelStop: cheapestFuelStop,
+                        fuelStop: nil,
                         compareTo: fastRoute,
                         decisionSummary: "Cost-optimized: compares tolls, diesel price, and driver time to pick the lowest total operating cost.",
-                        // Sem parada de combustível real comparável, NÃO inventar economia.
-                        // nil → o subtítulo cai no honesto "balances time, tolls, fuel and HOS".
                         estimatedSavingsUSD: nil,
-                        recommendedStopsCount: cheapestFuelStop == nil ? 0 : 1,
+                        recommendedStopsCount: 0,
                         subtitleOverride: "Premium · Cost-optimized route"
                     )
                 )
@@ -356,6 +356,14 @@ enum RouteEasyEngine {
         )
     }
 
+    /// Rota inteligente por CUSTO TOTAL DE OPERAÇÃO real, por candidata:
+    ///   total(candidata) = pedágio + diesel(distância ÷ MPG × preço) + tempo do motorista
+    ///                      − economia abastecendo no posto mais barato NO CORREDOR DAQUELA rota.
+    /// O posto é buscado no corredor de CADA candidata separadamente — o posto barato da rota
+    /// rápida pode nem existir na rota sem pedágio (estradas diferentes). A escolha da rota já
+    /// considera a economia do posto (antes a economia era somada DEPOIS da escolha — se o posto
+    /// barato só existia numa candidata, a comparação ignorava isso).
+    /// Nada fabricado: sem preço de posto real no corredor → candidata compete sem essa economia.
     private static func aiSmartOption(
         fastRoute: TruckRoute,
         fastProvider: RoutingService.RoutingProvider,
@@ -363,44 +371,59 @@ enum RouteEasyEngine {
         noTollProvider: RoutingService.RoutingProvider,
         dieselPrice: Double,
         mpg: Double,
-        stop: TruckStopItem?,
+        nearbyFuelStops: [TruckStopItem],
         compareTo: TruckRoute
     ) -> RouteEasyOption? {
-        guard stop != nil || dieselPrice > 0 else { return nil }
+        guard dieselPrice > 0 else { return nil }
 
-        let fastFuel = TripProfitability.estimateFuelCost(
-            distanceMeters: fastRoute.distanceMeters,
-            mpg: mpg,
-            dieselPricePerGallon: dieselPrice
+        // Posto mais barato no corredor de CADA candidata (8 km ≈ 5 mi; até 80% da rota,
+        // para não recomendar parada colada no destino).
+        let fastStop = cheapestFuelStopInCorridor(
+            stops: nearbyFuelStops, routeCoords: fastRoute.coordinates,
+            corridorMeters: 8_000, maxFractionAlongRoute: 0.80
         )
-        let noTollFuel = TripProfitability.estimateFuelCost(
-            distanceMeters: noTollRoute.distanceMeters,
-            mpg: mpg,
-            dieselPricePerGallon: dieselPrice
+        let noTollStop = (noTollRoute == fastRoute) ? fastStop : cheapestFuelStopInCorridor(
+            stops: nearbyFuelStops, routeCoords: noTollRoute.coordinates,
+            corridorMeters: 8_000, maxFractionAlongRoute: 0.80
         )
-        let tollSavings = max(0, fastRoute.tollCostUSD - noTollRoute.tollCostUSD)
+
+        // Economia REAL abastecendo no posto do corredor (só se o preço do posto < referência − 2¢).
+        func stopSavings(_ stop: TruckStopItem?, route: TruckRoute) -> Double {
+            guard let stop, let p = stop.amenities.dieselPrice, p < dieselPrice - 0.02 else { return 0 }
+            let gallons = (route.distanceMeters / 1609.34) / max(mpg, 0.1)
+            return (dieselPrice - p) * gallons
+        }
+        func routeCost(_ route: TruckRoute, stop: TruckStopItem?) -> Double {
+            let fuel = TripProfitability.estimateFuelCost(
+                distanceMeters: route.distanceMeters, mpg: mpg, dieselPricePerGallon: dieselPrice)
+            return max(0, route.tollCostUSD) + fuel - stopSavings(stop, route: route)
+        }
+
+        // Tempo do motorista: $0.75/min (~$45/h) sobre o tempo EXTRA vs a mais rápida.
+        let fastTotal = routeCost(fastRoute, stop: fastStop)
         let extraMinutes = max(0, (noTollRoute.durationSeconds - fastRoute.durationSeconds) / 60.0)
-        let extraFuelCost = max(0, noTollFuel - fastFuel)
-        let driverTimePenalty = extraMinutes * 0.75
-        let noTollNetSavings = tollSavings - extraFuelCost - driverTimePenalty
-        let shouldUseNoTollBase = noTollNetSavings > 5
+        let noTollTotal = routeCost(noTollRoute, stop: noTollStop) + extraMinutes * 0.75
 
-        let selectedRoute = shouldUseNoTollBase ? noTollRoute : fastRoute
-        let selectedProvider = shouldUseNoTollBase ? noTollProvider : fastProvider
-        var savings = max(0, noTollNetSavings)
-        var stopCount = 0
-        var summary = shouldUseNoTollBase
-            ? "Chooses the lower operating cost route after toll savings, added fuel and driver time."
-            : "Chooses the fastest truck-safe base, then optimizes fuel/rest decisions along it."
+        // Sem-pedágio só vence com vantagem REAL (> $5) — empate técnico fica com a mais rápida.
+        let useNoToll = noTollTotal + 5 < fastTotal
+        let selectedRoute = useNoToll ? noTollRoute : fastRoute
+        let selectedProvider = useNoToll ? noTollProvider : fastProvider
+        let selectedStop = useNoToll ? noTollStop : fastStop
+        let selectedStopSavings = stopSavings(selectedStop, route: selectedRoute)
 
-        if let stop,
-           let stopPrice = stop.amenities.dieselPrice,
-           stopPrice < dieselPrice - 0.02 {
-            let gallons = (selectedRoute.distanceMeters / 1609.34) / max(mpg, 0.1)
-            let fuelSavings = (dieselPrice - stopPrice) * gallons
-            savings += max(0, fuelSavings)
-            stopCount = 1
-            summary = "Recommends \(stop.name) because diesel is lower and the stop can support fuel/rest planning."
+        // Economia total vs baseline honesto: rota rápida abastecendo a preço de referência.
+        let baseline = max(0, fastRoute.tollCostUSD) + TripProfitability.estimateFuelCost(
+            distanceMeters: fastRoute.distanceMeters, mpg: mpg, dieselPricePerGallon: dieselPrice)
+        let chosenTotal = useNoToll ? noTollTotal : fastTotal
+        let savings = max(0, baseline - chosenTotal)
+
+        var summary = useNoToll
+            ? String(format: "No-toll base wins on total cost: $%.0f vs $%.0f for the fastest (tolls + fuel + %d min extra).",
+                     noTollTotal, fastTotal, Int(extraMinutes))
+            : "Fastest truck-safe base already has the lowest total operating cost."
+        if let stop = selectedStop, let p = stop.amenities.dieselPrice, selectedStopSavings > 1 {
+            summary += String(format: " Fuel at %@ ($%.2f/gal vs $%.2f avg) saves ~$%.0f.",
+                              stop.name, p, dieselPrice, selectedStopSavings)
         }
 
         return makeOption(
@@ -409,12 +432,69 @@ enum RouteEasyEngine {
             provider: selectedProvider,
             dieselPrice: dieselPrice,
             mpg: mpg,
-            fuelStop: stop,
+            fuelStop: selectedStop,
             compareTo: compareTo,
             decisionSummary: summary,
             estimatedSavingsUSD: savings > 1 ? savings : nil,
-            recommendedStopsCount: stopCount
+            recommendedStopsCount: selectedStop == nil ? 0 : 1
         )
+    }
+
+    /// Posto de diesel mais barato DENTRO DO CORREDOR da rota — projeção ponto-segmento
+    /// (equirretangular local) contra a polilinha. `maxFractionAlongRoute` evita recomendar
+    /// parada já perto do destino. Retorna nil quando nenhum posto com preço REAL qualifica.
+    static func cheapestFuelStopInCorridor(
+        stops: [TruckStopItem],
+        routeCoords: [CLLocationCoordinate2D],
+        corridorMeters: Double,
+        maxFractionAlongRoute: Double
+    ) -> TruckStopItem? {
+        guard routeCoords.count >= 2 else { return nil }
+        let n = routeCoords.count
+
+        var totalLength = 0.0
+        var segLengths = [Double]()
+        segLengths.reserveCapacity(n - 1)
+        for i in 0..<(n - 1) {
+            let d = CLLocation(latitude: routeCoords[i].latitude, longitude: routeCoords[i].longitude)
+                .distance(from: CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+            segLengths.append(d)
+            totalLength += d
+        }
+        let maxDistAlongRoute = totalLength * maxFractionAlongRoute
+
+        var best: TruckStopItem?
+        var bestPrice = Double.infinity
+
+        for stop in stops {
+            guard let price = stop.amenities.dieselPrice, price < bestPrice else { continue }
+            let pt = stop.coordinate
+            var minDist = Double.infinity
+            var distAlongRoute = 0.0
+            var closestFraction = 0.0
+
+            for i in 0..<(n - 1) {
+                let a = routeCoords[i], b = routeCoords[i+1]
+                let ax = a.longitude, ay = a.latitude, bx = b.longitude, by = b.latitude
+                let dx = bx - ax, dy = by - ay
+                let len2 = dx*dx + dy*dy
+                var t = len2 > 0 ? ((pt.longitude - ax)*dx + (pt.latitude - ay)*dy) / len2 : 0
+                t = max(0, min(1, t))
+                let px = ax + t*dx, py = ay + t*dy
+                let d = CLLocation(latitude: pt.latitude, longitude: pt.longitude)
+                    .distance(from: CLLocation(latitude: py, longitude: px))
+                if d < minDist {
+                    minDist = d
+                    closestFraction = distAlongRoute + t * segLengths[i]
+                }
+                distAlongRoute += segLengths[i]
+            }
+
+            guard minDist <= corridorMeters, closestFraction <= maxDistAlongRoute else { continue }
+            best = stop
+            bestPrice = price
+        }
+        return best
     }
 }
 
