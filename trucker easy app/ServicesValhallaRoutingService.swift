@@ -295,7 +295,15 @@ final class ValhallaRoutingService {
             "width":  profile.widthMeters,              // meters (driver profile; defaults to 2.59 = 8'6")
             "length": profile.lengthMeters,             // meters
             "weight": profile.weightTonnes * 0.907185,  // short tons → metric tonnes
-            "axle_load": profile.axleWeightTonnes * 0.907185  // short tons → metric tonnes per axle
+            "axle_load": profile.axleWeightTonnes * 0.907185,  // short tons → metric tonnes per axle
+            // 🎯 FIX "SAÍDAS FANTASMA" (road test 01/07, Ogallala NE): sem isto o Valhalla 3.5
+            // dava custo IGUAL à I-80 e às paralelas (US-30/links) e saía da interstate em quase
+            // toda interchange — "Take exit 133 toward Roscoe" numa viagem NE→NJ (+130mi, 234
+            // manobras). `use_truck_route:1` dá preferência aos corredores hgv=designated (rede
+            // nacional de caminhão: interstates) → rota fica na I-80 igual Trucker Path.
+            // VALIDADO no Valhalla prod: 1583.7mi/234 manobras → 1561.2mi/70 manobras, desvio
+            // exit-133 eliminado. (curl de verificação em docs/EXIT_GUIDANCE_VALIDATION.md)
+            "use_truck_route": 1.0
         ]
 
         if avoidTolls {
