@@ -3669,6 +3669,21 @@ struct HorizonView: View {
         }
     }
 
+    /// GPS fresco antes de rotear: se o fix atual está velho (>30s) ou impreciso (>150m),
+    /// espera até 3s por um melhor. GPS saudável (fix por segundo) retorna imediatamente —
+    /// só espera quando o fix está de fato ruim. Rota parte de onde o caminhão ESTÁ.
+    private func freshOrigin(_ initial: CLLocation) async -> CLLocation {
+        var best = initial
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if let cur = locationManager.currentLocation { best = cur }
+            let age = Date().timeIntervalSince(best.timestamp)
+            if age <= 30, best.horizontalAccuracy > 0, best.horizontalAccuracy <= 150 { return best }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+        return best
+    }
+
     private func runRouteEasyPlanning(
         from origin: CLLocation,
         to coordinate: CLLocationCoordinate2D,
@@ -3684,6 +3699,10 @@ struct HorizonView: View {
 
         Task { @MainActor in
             do {
+                // GPS FRESCO antes de rotear: fix velho/impreciso = rota calculada de onde o
+                // caminhão ESTAVA, com as primeiras instruções erradas. Espera até 3s por um
+                // fix atual (GPS fluindo = retorna na hora).
+                let origin = await freshOrigin(origin)
                 let routing = RoutingService.shared
                 let fast = try await routing.calculateTruckRoute(
                     from: origin,
@@ -3697,6 +3716,15 @@ struct HorizonView: View {
                 routeEasyPendingCoordinate = coordinate
                 routeEasyPendingAddress = address
 
+                // DIESEL AO LONGO DA ROTA INTEIRA (dor real das frotas): amostra a polilinha
+                // completa (1 ponto/~150mi) e junta com os postos locais — a rota inteligente
+                // enxerga o posto barato do MEIO do caminho de 1500mi, não só o raio local.
+                let alongRouteFuel = await truckStopService.fuelStopsAlongRoute(
+                    routeCoords: fast.coordinates, origin: origin)
+                var fuelSeen = Set<UUID>()
+                let fuelPool = (truckStopService.nearbyStops + alongRouteFuel)
+                    .filter { fuelSeen.insert($0.id).inserted }
+
                 // "Mostrar os 3 na hora": monta Rápida + Sem Pedágio + Easy/AI e ABRE o seletor —
                 // o motorista escolhe ANTES de navegar (não aplica a Rápida sozinho).
                 // Os postos vão inteiros pro engine: ele busca o mais barato no corredor de CADA
@@ -3709,7 +3737,7 @@ struct HorizonView: View {
                         profile: truckProfile,
                         dieselPricePerGallon: diesel,
                         mpg: mpg,
-                        nearbyFuelStops: truckStopService.nearbyStops,
+                        nearbyFuelStops: fuelPool,
                         effectivePlan: subscriptionPlan,
                         includeFuelSmart: routeEasyIncludesFuelSmart,
                         prefetchedFastest: fast,
@@ -3794,6 +3822,9 @@ struct HorizonView: View {
         }
         Task { @MainActor in
             do {
+                // GPS fresco: reroute/rota parte de onde o caminhão ESTÁ (fix por segundo em
+                // nav = retorna na hora; só espera até 3s quando o fix está velho/impreciso).
+                let origin = await freshOrigin(origin)
                 let routing = RoutingService.shared
                 let result = try await routing.calculateTruckRoute(
                     from: origin,

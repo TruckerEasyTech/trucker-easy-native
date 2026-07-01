@@ -535,6 +535,61 @@ final class TruckStopService {
         lastDataSource = .mapKit
     }
 
+    /// A DOR REAL DAS FROTAS: o diesel mais barato fica no MEIO da rota de 1500mi, não no raio
+    /// local do motorista. Amostra a polilinha INTEIRA (um ponto a cada ~150mi, máx 8 queries de
+    /// 20km em paralelo — cada uma sob o timeout do Supabase) e devolve SÓ postos com preço REAL
+    /// de diesel (diesel_price_usd escavado/crowd). Não toca em nearbyStops (pool separado do
+    /// planejamento de rota). Distância calculada da posição ATUAL do motorista.
+    func fuelStopsAlongRoute(
+        routeCoords: [CLLocationCoordinate2D],
+        origin: CLLocation,
+        maxSamples: Int = 8
+    ) async -> [TruckStopItem] {
+        guard SupabaseConfig.isConfigured, routeCoords.count >= 2 else { return [] }
+
+        // Comprimento total + pontos de amostra igualmente espaçados ao longo da polilinha.
+        var segLengths: [Double] = []
+        var totalLen = 0.0
+        for i in 0..<(routeCoords.count - 1) {
+            let d = CLLocation(latitude: routeCoords[i].latitude, longitude: routeCoords[i].longitude)
+                .distance(from: CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+            segLengths.append(d); totalLen += d
+        }
+        guard totalLen > 30_000 else { return [] }   // rota curta: o pool local já cobre
+        let sampleCount = min(maxSamples, max(2, Int(totalLen / 240_000)))   // 1 amostra / ~150mi
+        let step = totalLen / Double(sampleCount + 1)
+        var samples: [CLLocation] = []
+        var nextAt = step, acc = 0.0
+        for i in 0..<segLengths.count {
+            acc += segLengths[i]
+            while acc >= nextAt, samples.count < sampleCount {
+                samples.append(CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+                nextAt += step
+            }
+        }
+
+        // Queries em paralelo — cada amostra pede só truck_stop/fuel num raio de 20km.
+        let rows: [PlacesNearRow] = await withTaskGroup(of: [PlacesNearRow].self) { group in
+            for pt in samples {
+                group.addTask {
+                    (try? await PoiPlacesService.shared.fetchPlacesNear(
+                        location: pt, radiusMeters: 20_000,
+                        poiTypes: ["truck_stop", "fuel"], limit: 20)) ?? []
+                }
+            }
+            var all: [PlacesNearRow] = []
+            for await r in group { all.append(contentsOf: r) }
+            return all
+        }
+
+        // Só postos com PREÇO REAL de diesel; dedup por id; distância da posição atual.
+        var seen = Set<UUID>()
+        return rows.compactMap { row -> TruckStopItem? in
+            guard row.diesel_price_usd != nil, seen.insert(row.id).inserted else { return nil }
+            return item(from: row, origin: origin, forceRecomputeDistance: true)
+        }
+    }
+
     private func item(from row: PlacesNearRow, origin: CLLocation, forceRecomputeDistance: Bool = false) -> TruckStopItem {
         let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
         let dist = forceRecomputeDistance

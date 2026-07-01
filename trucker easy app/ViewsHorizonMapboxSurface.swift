@@ -701,18 +701,41 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// Zoom da câmera navegando — ajustável pelos botões +/− (o FollowPuck é dono da câmera,
         /// então setCamera manual era sobrescrito; o ajuste tem que ser no próprio viewport).
         var navigationZoom: CGFloat = 16.5
+        /// Zoom manual (+/−) tem prioridade sobre o auto-zoom por 45s.
+        private var lastManualNavZoomAt: Date = .distantPast
 
-        func setNavigationZoom(_ zoom: CGFloat, on mapView: MapboxMaps.MapView) {
-            navigationZoom = min(max(zoom, 11), 20)
-            guard followPuckActive else { return }
+        /// LOOK-AHEAD: puck ancorado no TERÇO INFERIOR da tela (padding top pesado) — a maior
+        /// parte da tela mostra a estrada À FRENTE (course-up = frente é pra cima). O motorista
+        /// vê as saídas chegando com muito mais antecedência (pedido do road test 01/07).
+        private var navPadding: UIEdgeInsets {
+            UIEdgeInsets(top: 300, left: 0, bottom: 120, right: 0)
+        }
+
+        /// Auto-zoom por velocidade REAL do GPS: rodovia (≥52mph) afasta pra ver saídas/contexto
+        /// a quilômetros; cidade aproxima pro detalhe de cruzamento. Zoom manual pausa por 45s.
+        private func autoNavZoomTarget() -> CGFloat {
+            if lastRealSpeed >= 23.5 { return 15.0 }    // ≥ ~52 mph: rodovia — visão ampla
+            if lastRealSpeed >= 16.5 { return 15.75 }   // ~37-52 mph: via expressa
+            return 16.5                                  // cidade — detalhe de cruzamento
+        }
+
+        private func makeFollowOptions() -> FollowPuckViewportStateOptions {
             var opts = FollowPuckViewportStateOptions()
             opts.zoom = navigationZoom
+            opts.padding = navPadding      // puck embaixo → estrada à frente ocupa a tela
             opts.pitch = 50                // visão inclinada pra frente (GPS de verdade)
             // `.course` lê `location.bearing` (o rumo do corredor que emitimos), NÃO o heading da
             // bússola. iPad sem bússola / sem sinal de heading não gira com `.heading`, mas o
             // `location.bearing` flui igual (o puck anda) → câmera gira course-up em qualquer device.
             opts.bearing = .course
-            let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
+            return opts
+        }
+
+        func setNavigationZoom(_ zoom: CGFloat, on mapView: MapboxMaps.MapView) {
+            navigationZoom = min(max(zoom, 11), 20)
+            lastManualNavZoomAt = Date()   // respeita o zoom manual: auto-zoom pausa 45s
+            guard followPuckActive else { return }
+            let state = mapView.viewport.makeFollowPuckViewportState(options: makeFollowOptions())
             followPuckState = state
             mapView.viewport.transition(to: state)
         }
@@ -744,15 +767,20 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
         func updateNavigationViewport(mapView: MapboxMaps.MapView, isNavigating: Bool) {
             if isNavigating {
-                guard !followPuckActive else { return }
-                var opts = FollowPuckViewportStateOptions()
-                opts.zoom = navigationZoom
-                // Course-up: o mapa GIRA pro sentido da viagem e inclina pra frente (GPS de verdade).
-                // `.course` lê `location.bearing` (rumo do corredor ESTÁVEL que emitimos) em vez do
-                // heading da bússola — corrige o iPad ("rota de lado") sem mexer no iPhone (mesmo valor).
-                opts.pitch = 50
-                opts.bearing = .course
-                let state = mapView.viewport.makeFollowPuckViewportState(options: opts)
+                // AUTO-ZOOM por velocidade: alvo muda de classe (cidade↔rodovia) → recria o
+                // viewport com o novo zoom. Zoom manual (+/−) tem prioridade por 45s.
+                if followPuckActive {
+                    let target = autoNavZoomTarget()
+                    if abs(target - navigationZoom) >= 0.7,
+                       Date().timeIntervalSince(lastManualNavZoomAt) > 45 {
+                        navigationZoom = target
+                        let state = mapView.viewport.makeFollowPuckViewportState(options: makeFollowOptions())
+                        followPuckState = state
+                        mapView.viewport.transition(to: state)
+                    }
+                    return
+                }
+                let state = mapView.viewport.makeFollowPuckViewportState(options: makeFollowOptions())
                 followPuckState = state
                 followPuckActive = true
                 mapView.viewport.transition(to: state)
