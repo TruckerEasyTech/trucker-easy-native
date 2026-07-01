@@ -265,6 +265,10 @@ final class NavigationEngine {
             state = .navigating
             offRouteStreak = 0
             offRouteSince = nil
+            // Restaura a opacidade da linha: sem isto, quem desviava por segundos (ruído de GPS
+            // disparava .rerouting) e voltava ao corredor sozinho ficava com a linha ESMAECIDA
+            // (22% de opacidade ≈ "transparente") pelo resto da viagem.
+            shouldDimOldRoute = false
         }
 
         lastDistanceToRoute = distanceToRoute

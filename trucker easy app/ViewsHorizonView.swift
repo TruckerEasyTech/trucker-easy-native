@@ -2288,6 +2288,9 @@ struct HorizonView: View {
                         if case RoutingServiceError.allProvidersFailed = error {
                             lastRerouteAt = Date().addingTimeInterval(150)
                         }
+                        // Se o engine estava em .rerouting (detecção off-route), re-arma e restaura
+                        // a linha — no-op seguro quando o estado é .navigating (guard interno).
+                        navigationEngine.cancelPendingReroute()
                     } else {
                         bottomSheetExpanded = false
                         if let parsed = parseCoordinateAddress(address) {
