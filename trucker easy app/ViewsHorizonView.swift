@@ -1894,8 +1894,15 @@ struct HorizonView: View {
         // and clears route polyline annotations on device.
         hosContext.beginRouteSession(estimatedDrivingSeconds: activeDurationSeconds)
         guard let loc = locationManager.currentLocation else { return }
+        // Início da navegação: já busca ao longo do corredor (não só o raio local) — os postos
+        // do caminho aparecem no mapa desde o primeiro quilômetro.
+        let corridorCoords = truckRoute?.coordinates
         Task {
-            await truckStopService.searchNearby(location: loc)
+            if let coords = corridorCoords, coords.count >= 2 {
+                await truckStopService.searchAlongRoute(location: loc, routeCoords: coords)
+            } else {
+                await truckStopService.searchNearby(location: loc)
+            }
             await MainActor.run {
                 truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
                 checkForNearbyScales(from: loc)
@@ -2000,8 +2007,16 @@ struct HorizonView: View {
         if shouldRefresh {
             lastNearbySearchAttemptAt = now
             lastScaleCheckLocation = loc
+            // Navegando com rota: busca também ao longo do corredor à frente (2ª query ~28km
+            // adiante na polilinha) — o motorista vê postos/paradas do caminho no mapa e se
+            // orienta visualmente mesmo se a navegação falhar.
+            let corridorCoords = isNavigating ? truckRoute?.coordinates : nil
             Task {
-                await truckStopService.searchNearby(location: loc)
+                if let coords = corridorCoords, coords.count >= 2 {
+                    await truckStopService.searchAlongRoute(location: loc, routeCoords: coords)
+                } else {
+                    await truckStopService.searchNearby(location: loc)
+                }
                 await MainActor.run {
                     truckStopService.applyOperationalSignals(operationalFeedService.parkingSignals)
                     updateCheapestDiesel(); checkForNearbyScales(from: loc); refreshNearestParking(from: loc)

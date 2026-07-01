@@ -596,8 +596,15 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// rodovia, detalhado na cidade. Alertas de SEGURANÇA (pesagem etc.) ficam de fora: sempre visíveis.
         private func applyIconZoomFilters(on mapView: MapboxMaps.MapView) {
             guard let map = mapView.mapboxMap else { return }
-            for id in ["horizon-signage", "horizon-stops", "horizon-cameras"] where map.layerExists(withId: id) {
+            // Detalhe de rua (semáforo/PARE/câmera): só a partir do zoom 14 — limpo na rodovia.
+            for id in ["horizon-signage", "horizon-cameras"] where map.layerExists(withId: id) {
                 try? map.setLayerProperty(for: id, property: "minzoom", value: 14)
+            }
+            // Truck stops/postos: a partir do zoom 10 — quando o motorista AFASTA o zoom para se
+            // orientar ("onde estou?"), os postos do corredor continuam visíveis como referência.
+            // (O clamp do zoom de navegação vai até 11; com minzoom 14 o mapa ficava VAZIO.)
+            if map.layerExists(withId: "horizon-stops") {
+                try? map.setLayerProperty(for: "horizon-stops", property: "minzoom", value: 10)
             }
         }
 

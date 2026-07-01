@@ -470,9 +470,76 @@ final class TruckStopService {
         lastDataSource = .mapKit
     }
 
-    private func item(from row: PlacesNearRow, origin: CLLocation) -> TruckStopItem {
+    /// Navegação: cobre o corredor À FRENTE além do raio local. Uma query de 40km estourava o
+    /// statement timeout do Supabase (~16s > 15s) — então fazemos DUAS queries de 20km: uma na
+    /// posição atual e outra centrada num ponto ~28km adiante AO LONGO da polilinha da rota
+    /// (PolylineLeadArrow.lookaheadPoint — mesmo utilitário do snap). Merge + dedup por id.
+    /// Distância de TODOS os stops recalculada da posição ATUAL do motorista (o `distance_m`
+    /// da 2ª query viria do ponto à frente — número falso pro driver; recomputamos sempre).
+    /// Assim o motorista vê postos/paradas reais no mapa ao longo do caminho — orientação
+    /// visual mesmo se a navegação falhar. Sem rota (rota curta) = comportamento antigo.
+    func searchAlongRoute(
+        location: CLLocation,
+        routeCoords: [CLLocationCoordinate2D],
+        limit: Int = 30
+    ) async {
+        let now = Date()
+        if let prev = lastSearchLocation,
+           location.distance(from: prev) < 400,
+           now.timeIntervalSince(lastSearchAt) < 20 {
+            return
+        }
+        lastSearchLocation = location
+        lastSearchAt = now
+
+        isLoading = true
+        defer { isLoading = false }
+
+        guard SupabaseConfig.isConfigured else {
+            await searchNearbyMapKit(location: location, radiusMeters: 20_000)
+            lastDataSource = .mapKit
+            return
+        }
+
+        // Ponto ~28km à frente ao longo da rota (rota mais curta → retorna o fim da rota, útil tb).
+        var anchor = 0
+        let aheadCoord = PolylineLeadArrow.lookaheadPoint(
+            coords: routeCoords, user: location, lookaheadMeters: 28_000, anchorIndex: &anchor
+        )?.coordinate
+
+        let poiTypes = ["truck_stop", "fuel", "weigh_station", "rest_area"]
+        do {
+            var rows = try await PoiPlacesService.shared.fetchPlacesNear(
+                location: location, radiusMeters: 20_000, poiTypes: poiTypes, limit: limit)
+            if let aheadCoord,
+               location.distance(from: CLLocation(latitude: aheadCoord.latitude, longitude: aheadCoord.longitude)) > 12_000 {
+                // 2ª query só quando o ponto à frente está fora do raio local (sem overlap inútil).
+                let aheadLoc = CLLocation(latitude: aheadCoord.latitude, longitude: aheadCoord.longitude)
+                let aheadRows = (try? await PoiPlacesService.shared.fetchPlacesNear(
+                    location: aheadLoc, radiusMeters: 20_000, poiTypes: poiTypes, limit: limit)) ?? []
+                rows.append(contentsOf: aheadRows)
+            }
+            if !rows.isEmpty {
+                let deduped = Self.dedupePlacesRows(rows)
+                nearbyStops = deduped.map { item(from: $0, origin: location, forceRecomputeDistance: true) }
+                lastDataSource = .supabase
+                return
+            }
+        } catch {
+            #if DEBUG
+            print("[TruckStop] searchAlongRoute Supabase failed, MapKit fallback: \(error.localizedDescription)")
+            #endif
+        }
+
+        await searchNearbyMapKit(location: location, radiusMeters: 20_000)
+        lastDataSource = .mapKit
+    }
+
+    private func item(from row: PlacesNearRow, origin: CLLocation, forceRecomputeDistance: Bool = false) -> TruckStopItem {
         let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
-        let dist = row.distance_m ?? origin.distance(from: CLLocation(latitude: row.lat, longitude: row.lon))
+        let dist = forceRecomputeDistance
+            ? origin.distance(from: CLLocation(latitude: row.lat, longitude: row.lon))
+            : (row.distance_m ?? origin.distance(from: CLLocation(latitude: row.lat, longitude: row.lon)))
         let displayName = row.name ?? row.brand ?? row.poi_type.replacingOccurrences(of: "_", with: " ").capitalized
         let network = TruckStopNetwork.from(databaseNetwork: row.network, name: displayName, brand: row.brand)
         var amenities = amenitiesFromOsmRow(row, network: network)
