@@ -296,8 +296,12 @@ final class NavigationEngine {
         }
         #endif
 
-        // Advance step at 20m — gives enough lead-in for trucks at highway speed
-        if nextTurnDistance < 20 && currentStepIndex < route.steps.count - 1 {
+        // Advance step at 20m — gives enough lead-in for trucks at highway speed.
+        // Guard `distanceToRoute`: fora da via (>60m, ex: perdeu a saída e está pinado na zona da
+        // manobra) NÃO avança a instrução — mostrar o passo seguinte seria orientação falsa; o
+        // detector de off-route/missed-maneuver assume e recalcula.
+        if nextTurnDistance < 20 && distanceToRoute <= hardOffRouteThreshold
+            && currentStepIndex < route.steps.count - 1 {
             moveToNextStep()
         }
     }
@@ -640,15 +644,23 @@ final class NavigationEngine {
         }
     }
 
-    /// True when the GPS has advanced past where the next maneuver point sits on the polyline —
-    /// i.e. the driver drove past the turn they were supposed to take.
+    /// True quando o motorista CHEGOU (ou passou) do ponto de ação da manobra atual ao longo da
+    /// rota, estando claramente fora da via — a assinatura de saída/curva perdida.
+    /// Usa a MESMA matemática de ponto-de-ação do calculateDistanceToNextStep (início do step).
+    ///
+    /// Nota: a versão anterior ancorava a manobra em `lastClosestCoordinateIndex + stepDistance`
+    /// (o índice do usuário + comprimento do step) — como o índice do usuário se move junto, a
+    /// condição só era verdadeira com step≈0 → o reroute de "saída perdida" NUNCA disparava.
     private func hasPassedUpcomingManeuver(routeIndex: Int, route: TruckRoute) -> Bool {
-        guard currentStepIndex < route.steps.count, route.distanceMeters > 0, route.coordinates.count > 1 else { return false }
-        let stepDistance = route.steps[currentStepIndex].distanceMeters
-        let coordsPerMeter = Double(route.coordinates.count) / route.distanceMeters
-        let maneuverIndex = min(lastClosestCoordinateIndex + Int(stepDistance * coordsPerMeter), route.coordinates.count - 1)
-        // We consider the maneuver "passed" once our furthest reached index is at/after it.
-        return maxReachedRouteIndex >= maneuverIndex && routeIndex >= maneuverIndex
+        guard currentStepIndex < stepCumulativeEndDistance.count,
+              routeIndex >= 0, routeIndex < vertexDistanceFromStart.count else { return false }
+        let actionAlongRoute = currentStepIndex == 0
+            ? departOffset
+            : stepCumulativeEndDistance[currentStepIndex - 1]
+        // "Na zona da manobra ou além" (tolerância 40m p/ ruído de GPS). O chamador já garante
+        // distanceToRoute > 60m E divergindo — fora da via, na altura da curva = perdeu a manobra.
+        let userAlongRoute = vertexDistanceFromStart[routeIndex]
+        return userAlongRoute >= actionAlongRoute - 40
     }
 
     private func requestReroute(reason: String, location: CLLocation, distanceToRoute: Double, elapsed: TimeInterval) {

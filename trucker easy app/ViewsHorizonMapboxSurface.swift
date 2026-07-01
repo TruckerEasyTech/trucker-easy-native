@@ -505,6 +505,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 self.applyUserLocationPuck(on: mapView, navigating: coordinator.isNavigatingMode)
                 coordinator.installManagers(on: mapView)
                 coordinator.resetLeadArrowAnchor()
+                // Redesenho imediato (caminho rápido — normalmente os dados estão atuais)...
                 coordinator.refreshRoute(
                     mapView: mapView,
                     coords: self.activeRouteCoordinates(),
@@ -513,6 +514,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                     fitCameraToRoute: !coordinator.isNavigatingMode
                 )
                 coordinator.refreshPoints(mapView: mapView, truckStops: self.truckStops, alerts: self.mapAlerts, cameras: self.cameras)
+                // ...mas `self` aqui é o struct capturado na TROCA de estilo. Se a rota mudou
+                // durante o load (~300ms — ex: reroute), desenhamos a rota VELHA acima. Invalidar
+                // o fingerprint garante que o próximo updateUIView (todo tick de GPS) redesenhe
+                // com os dados ATUAIS — mesma proteção do onStyleLoaded no bootstrapMap.
+                coordinator.lastRouteFingerprint = ""
             }
         }
     }
