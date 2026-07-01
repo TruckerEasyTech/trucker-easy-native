@@ -867,8 +867,6 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             smoothedRouteCoord = ahead.coordinate
             smoothedRouteBearing = ahead.bearingDegrees
             lastEmittedBearing = ahead.bearingDegrees
-            let progressed = min(max(Double(anchor) / Double(lastRouteCoordsForDR.count - 1), 0), 1)
-            routeLineManager?.lineTrimOffset = [0, progressed]
             snapProvider.emit(coordinate: ahead.coordinate, bearing: ahead.bearingDegrees, speed: lastRealSpeed)
         }
 
@@ -878,6 +876,10 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             lastRouteArrowUpdateAt = .distantPast
             smoothedRouteCoord = nil
             smoothedRouteBearing = 0
+            // Rota nova = estado de dead-reckoning zerado (âncora/coords antigos não podem
+            // projetar o puck na geometria errada durante a troca).
+            lastEmitWasSnap = false
+            lastRouteCoordsForDR = []
         }
 
         /// Watchdog: GROUND TRUTH da linha de rota no mapa real — a camada "horizon-route"
@@ -977,11 +979,14 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             main.lineSortKey = 1
 
             mgr.annotations = [casing, main]
-            // Parte JÁ percorrida SOME (fica transparente) — "vanishing line" do Google/Waze; o
-            // `lineTrimOffset` (0…1) é avançado a cada tick no emit. (lineTrimColor é @_spi na v11.23 →
-            // não dá p/ tingir de cinza; transparente atende "não continuar toda aparecendo".) Reset aqui
-            // p/ rota nova começar 100% viva.
-            mgr.lineTrimOffset = [0, 0]
+            // ⚠️ VANISHING LINE (lineTrimOffset) REMOVIDA — CAUSA-RAIZ da linha invisível no DEVICE.
+            // A spec do Mapbox exige `lineMetrics: true` na fonte GeoJSON para `line-trim-offset`
+            // funcionar; a fonte dos annotation managers NUNCA habilita lineMetrics (verificado no
+            // SDK v11.23: AnnotationManagerImpl não seta) → comportamento INDEFINIDO: o simulador
+            // degrada benigno (linha aparece), o Metal do device renderia a linha INTEIRA invisível.
+            // Timeline confirma: linha funcionava na era da seta (sem trim); morreu quando o trim
+            // entrou junto com o puck de caminhão (20/06). NUNCA reintroduzir lineTrimOffset em
+            // PolylineAnnotationManager — só com camada própria (addSource lineMetrics:true).
             // LOCK DE COEXISTÊNCIA (linha + seta): ao (re)desenhar a linha, garante que a camada do
             // puck (seta/caminhão, id nativo "puck" do LocationIndicatorLayer v11) fica ACIMA da linha
             // de rota ("horizon-route"). NÃO recria o puck (sem flicker) e NÃO mexe na linha. `try?` =
@@ -1040,11 +1045,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
             lastRealSpeed = max(0, user.speed)
             lastRouteCoordsForDR = coords
             if snapped.distance(from: user) <= 35 {
-                // "Vanishing route line": a parte JÁ percorrida (atrás do puck) fica apagada.
-                // Trim SÓ atualiza quando o snap é USADO (na rota) — antes atualizava também no
-                // caminho off-route, com âncora possivelmente errada, apagando trecho errado da linha.
-                let progressed = min(max(Double(lastLeadArrowPolyIndex) / Double(coords.count - 1), 0), 1)
-                routeLineManager?.lineTrimOffset = [0, progressed]
+                // (Trim da "vanishing line" removido daqui — ver comentário no refreshRoute:
+                // line-trim-offset sem lineMetrics na fonte = linha invisível no device.)
                 // Na rota: a seta GRUDA na linha (consistente).
                 lastEmitWasSnap = true
                 lastEmittedBearing = snap.bearingDegrees
