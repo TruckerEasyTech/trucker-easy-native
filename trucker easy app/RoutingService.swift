@@ -110,7 +110,8 @@ final class RoutingService {
         destinationName: String,
         profile: TruckProfile,
         avoidTolls: Bool = false,
-        accessMode: RoutingAccessMode = .truckAware
+        accessMode: RoutingAccessMode = .truckAware,
+        via: CLLocationCoordinate2D? = nil
     ) async throws -> TruckRoute {
         let startedAt = Date()
         isCalculating = true
@@ -171,7 +172,8 @@ final class RoutingService {
                             destinationName: destinationName,
                             profile: profile,
                             avoidTolls: avoidTolls,
-                            serverBaseURL: base
+                            serverBaseURL: base,
+                            via: via
                         )
                         #if DEBUG
                         print("[TRACE-NAV] 1 · Valhalla retornou ao RoutingService")

@@ -347,6 +347,12 @@ struct HorizonView: View {
     /// Balanças À FRENTE na rota (até ~100 mi) p/ os badges laterais com distância regressiva.
     /// Aditivo ao alerta único; status só de dado gov REAL (aberto/fechado/desconhecido), nunca inventado.
     @State private var upcomingScales: [UpcomingScale] = []
+
+    // SUGESTÃO de parada de diesel (rota inteligente): aparece como banner NA navegação;
+    // a rota SÓ muda se o motorista aceitar ("Add stop" → waypoint through + recalculo).
+    @State private var suggestedFuelStop: TruckStopItem?
+    @State private var suggestedFuelSavingsUSD: Double?
+    @State private var fuelSuggestionHandledIds: Set<UUID> = []
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
@@ -1213,6 +1219,66 @@ struct HorizonView: View {
             .zIndex(404)
             .transition(.move(edge: .leading).combined(with: .opacity))
         }
+
+        // SUGESTÃO de diesel barato (rota inteligente): banner com aceite explícito.
+        // A rota NUNCA desvia sozinha — "Add stop" recalcula passando pelo posto (waypoint);
+        // "Not now" dispensa (1x por posto). Só aparece com PREÇO REAL no banco.
+        if isNavigating, let stop = suggestedFuelStop, let price = stop.amenities.dieselPrice,
+           !fuelSuggestionHandledIds.contains(stop.id) {
+            VStack {
+                Spacer()
+                HStack(spacing: 10) {
+                    Image(systemName: "fuelpump.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(Color(hex: "#22d474"))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stop.name).font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white).lineLimit(1)
+                        Text(String(format: "$%.2f/gal · %.0f mi ahead%@", price,
+                                    stop.distanceMeters / 1609.34,
+                                    (suggestedFuelSavingsUSD ?? 0) > 1
+                                        ? String(format: " · save ~$%.0f", suggestedFuelSavingsUSD!) : ""))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(Color(hex: "#22d474"))
+                    }
+                    Spacer(minLength: 6)
+                    Button {
+                        fuelSuggestionHandledIds.insert(stop.id)
+                        let stopCoord = stop.coordinate
+                        suggestedFuelStop = nil
+                        guard let loc = locationManager.currentLocation,
+                              let dest = activeRouteDestination else { return }
+                        // Aceito: recalcula PASSANDO pelo posto (through) — mesma cadeia do reroute.
+                        runSingleTruckRoute(from: loc, to: dest,
+                                            address: truckRoute?.destinationName ?? destinationAddress,
+                                            isReroute: true, via: stopCoord)
+                    } label: {
+                        Text("Add stop").font(.system(size: 13, weight: .black))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(Color(hex: "#22d474")).cornerRadius(9)
+                    }
+                    Button {
+                        fuelSuggestionHandledIds.insert(stop.id)
+                        suggestedFuelStop = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white.opacity(0.7))
+                            .frame(width: 30, height: 30)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(Color(hex: "#0d1f16"))
+                .cornerRadius(14)
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(hex: "#22d474").opacity(0.35), lineWidth: 1))
+                .padding(.horizontal, 12)
+                .padding(.bottom, navigatingMapChromeBottomInset + 6)
+            }
+            .zIndex(406)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     // MARK: - Alert Overlays
@@ -1876,6 +1942,8 @@ struct HorizonView: View {
             scaleAlertNotifiedTierKeys.removeAll()
             routeSignageService.clear()
             hosContext.endRouteSession()
+            suggestedFuelStop = nil
+            suggestedFuelSavingsUSD = nil
             return
         }
         // P0 #5: navegação com a tela bloqueada / app em 2º plano só recebe GPS com permissão
@@ -3816,7 +3884,8 @@ struct HorizonView: View {
         from origin: CLLocation,
         to coordinate: CLLocationCoordinate2D,
         address: String,
-        isReroute: Bool
+        isReroute: Bool,
+        via: CLLocationCoordinate2D? = nil
     ) {
         if !isReroute {
             isCalculatingRoute = true
@@ -3834,7 +3903,8 @@ struct HorizonView: View {
                     destinationName: address,
                     profile: truckProfile,
                     avoidTolls: false,
-                    accessMode: routingAccessMode
+                    accessMode: routingAccessMode,
+                    via: via
                 )
                 #if DEBUG
                 print("[TRACE-NAV] 7 · rota chegou ao runSingleTruckRoute")
@@ -3893,6 +3963,16 @@ struct HorizonView: View {
             return
         }
         destinationAddress = address
+        // Rota inteligente com posto real no corredor → vira SUGESTÃO na navegação (banner).
+        // A geometria aplicada é a da candidata vencedora SEM desvio — só muda se aceitar.
+        if option.kind == .fuelSmart, let stop = option.fuelStopItem,
+           stop.amenities.dieselPrice != nil, !fuelSuggestionHandledIds.contains(stop.id) {
+            suggestedFuelStop = stop
+            suggestedFuelSavingsUSD = option.fuelSavingsUSD ?? option.estimatedSavingsUSD
+        } else {
+            suggestedFuelStop = nil
+            suggestedFuelSavingsUSD = nil
+        }
         applyRoute(result, suppressUIErrors: isReroute, destinationCoordinate: coordinate)
         print("[RouteEasy] Applied \(option.kind.rawValue) via \(routing.lastProvider.rawValue) · \(Int(result.distanceMeters / 1609)) mi")
     }

@@ -116,7 +116,8 @@ final class ValhallaRoutingService {
         to destination: CLLocationCoordinate2D,
         destinationName: String,
         profile: TruckProfile,
-        avoidTolls: Bool = false
+        avoidTolls: Bool = false,
+        via: CLLocationCoordinate2D? = nil
     ) async throws -> TruckRoute {
         guard let first = prioritizedServerBaseURLs.first else {
             throw ValhallaError.serverNotConfigured
@@ -127,7 +128,8 @@ final class ValhallaRoutingService {
             destinationName: destinationName,
             profile: profile,
             avoidTolls: avoidTolls,
-            serverBaseURL: first
+            serverBaseURL: first,
+            via: via
         )
     }
 
@@ -138,7 +140,8 @@ final class ValhallaRoutingService {
         destinationName: String,
         profile: TruckProfile,
         avoidTolls: Bool,
-        serverBaseURL: String
+        serverBaseURL: String,
+        via: CLLocationCoordinate2D? = nil
     ) async throws -> TruckRoute {
         let base = serverBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else {
@@ -156,7 +159,8 @@ final class ValhallaRoutingService {
             from: origin.coordinate,
             to: destination,
             profile: profile,
-            avoidTolls: avoidTolls
+            avoidTolls: avoidTolls,
+            via: via
         )
 
         let hostLabel: String
@@ -287,7 +291,8 @@ final class ValhallaRoutingService {
         from origin: CLLocationCoordinate2D,
         to destination: CLLocationCoordinate2D,
         profile: TruckProfile,
-        avoidTolls: Bool
+        avoidTolls: Bool,
+        via: CLLocationCoordinate2D? = nil
     ) throws -> Data {
         // Valhalla truck costing options — maps directly to TruckProfile dimensions
         var costingOptions: [String: Any] = [
@@ -315,11 +320,15 @@ final class ValhallaRoutingService {
             costingOptions["hazmat"] = true
         }
 
+        // WAYPOINT ACEITO PELO MOTORISTA (parada de diesel sugerida): tipo "through" — a rota
+        // PASSA pelo posto sem virar multi-destino (sem "you have arrived" no meio da viagem).
+        var locations: [[String: Any]] = [["lon": origin.longitude, "lat": origin.latitude, "type": "break"]]
+        if let via {
+            locations.append(["lon": via.longitude, "lat": via.latitude, "type": "through", "radius": 300])
+        }
+        locations.append(["lon": destination.longitude, "lat": destination.latitude, "type": "break"])
         let body: [String: Any] = [
-            "locations": [
-                ["lon": origin.longitude, "lat": origin.latitude, "type": "break"],
-                ["lon": destination.longitude, "lat": destination.latitude, "type": "break"]
-            ],
+            "locations": locations,
             "costing": "truck",
             "costing_options": ["truck": costingOptions],
             // type 0 = depart now. Required for Valhalla to apply time-conditional

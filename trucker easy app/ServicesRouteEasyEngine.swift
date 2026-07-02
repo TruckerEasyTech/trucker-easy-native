@@ -23,6 +23,9 @@ struct RouteEasyOption: Identifiable {
     /// Poupança estimada vs diesel de referência ao abastecer no posto sugerido.
     let fuelSavingsUSD: Double?
     let fuelStopName: String?
+    /// Posto completo (coordenada + preço real) — usado pela SUGESTÃO em navegação: o driver
+    /// aceita e a rota recalcula passando pelo posto (waypoint through). NUNCA desvia sozinho.
+    var fuelStopItem: TruckStopItem? = nil
     let subtitle: String
     let decisionSummary: String?
     let estimatedSavingsUSD: Double?
@@ -348,6 +351,7 @@ enum RouteEasyEngine {
             fuelUSD: fuelUSD,
             fuelSavingsUSD: savings,
             fuelStopName: stopName,
+            fuelStopItem: fuelStop,
             subtitle: subtitle,
             decisionSummary: decisionSummary,
             estimatedSavingsUSD: estimatedSavingsUSD,
