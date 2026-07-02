@@ -296,6 +296,16 @@ def main() -> None:
                 wim_rows.append(row)
         print(f"  WIM features: {len(wim_features)} → {len(wim_rows)} weigh rows")
 
+    # A fonte NTAD contém ids duplicados no mesmo dataset → o Postgres rejeita o lote inteiro
+    # ("ON CONFLICT DO UPDATE cannot affect row a second time", SQLSTATE 21000). Dedup pela
+    # chave de conflito (external_source, external_id, poi_type), mantendo a última ocorrência.
+    unique: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for r in rows:
+        unique[(r["external_source"], r["external_id"], r["poi_type"])] = r
+    if len(unique) != len(rows):
+        print(f"Deduped {len(rows)} → {len(unique)} rows (fonte NTAD tem ids repetidos)")
+    rows = list(unique.values())
+
     print(f"Total rows to upsert: {len(rows)}")
     if args.dry_run:
         print(json.dumps(rows[:2], indent=2))
