@@ -20,17 +20,24 @@ struct RouteSignageItem: Identifiable, Equatable {
         case trafficSignal   // OSM highway=traffic_signals
         case stop            // OSM highway=stop
         case railCrossing    // OSM railway=level_crossing — passagem de nível (crítico p/ caminhão preso no trilho)
+        case lowBridge       // FHWA NBI — ponte com altura livre restritiva (<16ft); alerta por altura do perfil
     }
 
     let id: String          // estável por tipo+coordenada (~1 m) → render incremental sem churn
     let kind: Kind
     let coordinate: CLLocationCoordinate2D
     let distanceMeters: Double
+    /// Ponte baixa: altura livre REAL do NBI (metros / texto "12'4\""). nil nos demais tipos.
+    var clearanceMeters: Double? = nil
+    var clearanceText: String? = nil
 
-    init(kind: Kind, coordinate: CLLocationCoordinate2D, distanceMeters: Double) {
+    init(kind: Kind, coordinate: CLLocationCoordinate2D, distanceMeters: Double,
+         clearanceMeters: Double? = nil, clearanceText: String? = nil) {
         self.kind = kind
         self.coordinate = coordinate
         self.distanceMeters = distanceMeters
+        self.clearanceMeters = clearanceMeters
+        self.clearanceText = clearanceText
         let lat = (coordinate.latitude * 100_000).rounded() / 100_000
         let lon = (coordinate.longitude * 100_000).rounded() / 100_000
         self.id = "\(kind.rawValue)|\(lat)|\(lon)"
@@ -55,7 +62,8 @@ final class RouteSignageService {
     /// Janela curta à frente (cidade) — limita densidade e mantém só o que é relevante agora.
     private let lookaheadMeters: Double = 1_500
     /// Raio da busca de rede (um pouco maior que a janela para reaproveitar entre ticks).
-    private let fetchRadiusMeters: Double = 3_000
+    /// 5km: ponte baixa precisa entrar no corredor ANTES do aviso de voz a ~1.8km.
+    private let fetchRadiusMeters: Double = 5_000
 
     private var lastFetchAt: Date = .distantPast
     private var lastFetchLocation: CLLocation?
@@ -92,7 +100,7 @@ final class RouteSignageService {
                 let rows = try await PoiPlacesService.shared.fetchPlacesNear(
                     location: location,
                     radiusMeters: fetchRadiusMeters,
-                    poiTypes: ["traffic_signals", "stop", "rail_crossing"],
+                    poiTypes: ["traffic_signals", "stop", "rail_crossing", "low_bridge"],
                     limit: 80
                 )
                 var merged = Self.filterToCorridor(
@@ -154,14 +162,21 @@ final class RouteSignageService {
             case "traffic_signals": kind = .trafficSignal
             case "stop":            kind = .stop
             case "rail_crossing":   kind = .railCrossing
+            case "low_bridge":      kind = .lowBridge
             default:                return nil
             }
             let coord = CLLocationCoordinate2D(latitude: row.lat, longitude: row.lon)
             let userDist = row.distance_m
                 ?? user.distance(from: CLLocation(latitude: row.lat, longitude: row.lon))
-            guard userDist <= lookaheadMeters else { return nil }
-            guard distanceToPolyline(coord, route) <= corridorMeters else { return nil }
-            return RouteSignageItem(kind: kind, coordinate: coord, distanceMeters: userDist)
+            // Ponte baixa: janela maior (aviso de voz a ~1.8km precisa dela no corredor antes)
+            // e corredor mais largo (o ponto NBI é a ESTRUTURA, pode ficar ~40m do eixo da via).
+            let maxAhead = kind == .lowBridge ? 3_200.0 : lookaheadMeters
+            let maxCorridor = kind == .lowBridge ? 45.0 : corridorMeters
+            guard userDist <= maxAhead else { return nil }
+            guard distanceToPolyline(coord, route) <= maxCorridor else { return nil }
+            return RouteSignageItem(kind: kind, coordinate: coord, distanceMeters: userDist,
+                                    clearanceMeters: row.tags?.clearance_m,
+                                    clearanceText: row.tags?.clearance_ftin)
         }
         .sorted { $0.distanceMeters < $1.distanceMeters }
     }

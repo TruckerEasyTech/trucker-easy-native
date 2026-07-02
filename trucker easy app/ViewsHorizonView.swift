@@ -353,6 +353,8 @@ struct HorizonView: View {
     @State private var suggestedFuelStop: TruckStopItem?
     @State private var suggestedFuelSavingsUSD: Double?
     @State private var fuelSuggestionHandledIds: Set<UUID> = []
+    /// Pontes baixas já anunciadas por voz nesta rota (1 aviso por ponte, sem nag).
+    @State private var announcedLowBridgeIds: Set<String> = []
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
@@ -1945,6 +1947,7 @@ struct HorizonView: View {
             hosContext.endRouteSession()
             suggestedFuelStop = nil
             suggestedFuelSavingsUSD = nil
+            announcedLowBridgeIds = []
             return
         }
         // P0 #5: navegação com a tela bloqueada / app em 2º plano só recebe GPS com permissão
@@ -1983,6 +1986,26 @@ struct HorizonView: View {
 
     // MARK: - Location Update Handler
 
+    /// AVISO DE PONTE BAIXA (dado FHWA NBI, real): voz quando a ponte no corredor à frente tem
+    /// altura livre MENOR que a altura do caminhão do perfil + 15cm de margem. 1 aviso por ponte.
+    /// Sem altura real no banco = SEM alerta (nunca inventa). O Valhalla já evita no roteamento;
+    /// isto é a rede de segurança auditiva (rota antiga/desvio manual/dado novo).
+    private func checkLowBridgeWarnings() {
+        let truckHeight = truckProfile.heightMeters
+        for item in routeSignageService.onRouteSignage where item.kind == .lowBridge {
+            guard item.distanceMeters < 1_800,
+                  !announcedLowBridgeIds.contains(item.id),
+                  let clearance = item.clearanceMeters else { continue }
+            if clearance < truckHeight + 0.15 {
+                announcedLowBridgeIds.insert(item.id)
+                let clrText = item.clearanceText ?? String(format: "%.1f meters", clearance)
+                let distText = regionalSettings.formatDistance(item.distanceMeters)
+                VoiceNavigationManager.shared.announceLowBridge(
+                    clearanceText: clrText, distanceText: distText, lang: lang)
+            }
+        }
+    }
+
     private func handleLocationUpdate() {
         guard let loc = locationManager.currentLocation else { return }
         let now = Date()
@@ -1996,6 +2019,7 @@ struct HorizonView: View {
         truckWarnings = restrictionWarningManager.activeWarnings
         if isNavigating, let coords = truckRoute?.coordinates, coords.count >= 2 {
             routeSignageService.refresh(location: loc, routeCoordinates: coords)
+            checkLowBridgeWarnings()
         }
         evaluateTruckSpeedCompliance(using: loc)
         evaluateGeofenceEvents(using: loc)

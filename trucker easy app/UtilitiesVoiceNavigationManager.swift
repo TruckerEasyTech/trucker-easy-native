@@ -123,6 +123,22 @@ final class VoiceNavigationManager {
     }
 
     /// ETA × HOS — fala se a chegada cabe (ou não) nas horas de direção restantes do DOT.
+    /// Ponte baixa à frente com altura REAL do NBI menor que a altura do caminhão (+margem).
+    /// Prioridade máxima — segurança física da carga/cabine.
+    func announceLowBridge(clearanceText: String, distanceText: String, lang: AppLanguage) {
+        guard isEnabled else { return }
+        let phrase: String
+        switch lang {
+        case .portuguese:
+            phrase = "Atenção! Ponte baixa em \(distanceText). Altura livre \(clearanceText). Verifique a altura do caminhão."
+        case .spanish, .spanishLatam:
+            phrase = "¡Atención! Puente bajo en \(distanceText). Altura libre \(clearanceText). Verifique la altura del camión."
+        default:
+            phrase = "Warning! Low bridge in \(distanceText). Clearance \(clearanceText). Check your truck height."
+        }
+        speak(phrase, language: lang.speechLanguageCode, priority: true)
+    }
+
     func announceHosEta(_ phrase: String, lang: AppLanguage) {
         guard isEnabled else { return }
         speak(naturalize(phrase, lang: lang), language: lang.speechLanguageCode, priority: true)

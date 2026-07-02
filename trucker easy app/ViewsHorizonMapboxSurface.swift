@@ -624,9 +624,11 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// rodovia, detalhado na cidade. Alertas de SEGURANÇA (pesagem etc.) ficam de fora: sempre visíveis.
         private func applyIconZoomFilters(on mapView: MapboxMaps.MapView) {
             guard let map = mapView.mapboxMap else { return }
-            // Detalhe de rua (semáforo/PARE/câmera): só a partir do zoom 14 — limpo na rodovia.
-            for id in ["horizon-signage", "horizon-cameras"] where map.layerExists(withId: id) {
-                try? map.setLayerProperty(for: id, property: "minzoom", value: 14)
+            // Detalhe de rua (câmeras): só a partir do zoom 14 — limpo na rodovia.
+            // ("horizon-signage" NÃO entra: ponte baixa é SEGURANÇA e fica visível em todo zoom;
+            //  semáforo/PARE são filtrados por item no refreshSignage a partir do zoom 13.5.)
+            if map.layerExists(withId: "horizon-cameras") {
+                try? map.setLayerProperty(for: "horizon-cameras", property: "minzoom", value: 14)
             }
             // Truck stops/postos: a partir do zoom 10 — quando o motorista AFASTA o zoom para se
             // orientar ("onde estou?"), os postos do corredor continuam visíveis como referência.
@@ -1285,7 +1287,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         func refreshSignage(mapView: MapboxMaps.MapView, signage: [RouteSignageItem]) {
             guard let mgr = signageManager else { return }
             let zoom = mapView.mapboxMap.cameraState.zoom
-            let visible = zoom >= 13.5 ? signage : []
+            // Semáforo/PARE só no zoom de rua; PONTE BAIXA sempre visível (segurança).
+            let visible = signage.filter { $0.kind == .lowBridge || zoom >= 13.5 }
 
             var hasher = Hasher()
             for s in visible { hasher.combine(s.id) }
@@ -1302,6 +1305,16 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 if let img = signageImageCache[key] ?? HorizonMapboxPinImages.signageImage(for: s.kind) {
                     signageImageCache[key] = img
                     ann.image = img
+                }
+                // Ponte baixa: a ALTURA REAL (NBI) vai como texto no pin — "12'4\"".
+                if s.kind == .lowBridge, let clr = s.clearanceText {
+                    ann.textField = clr
+                    ann.textSize = 11
+                    ann.textAnchor = .top
+                    ann.textOffset = [0, 1.1]
+                    ann.textColor = StyleColor(UIColor.black)
+                    ann.textHaloColor = StyleColor(UIColor.systemYellow)
+                    ann.textHaloWidth = 1.6
                 }
                 anns.append(ann)
             }
@@ -1361,6 +1374,27 @@ private enum HorizonMapboxPinImages {
                 let inset = size * 0.30
                 c.move(to: CGPoint(x: inset, y: inset)); c.addLine(to: CGPoint(x: size - inset, y: size - inset))
                 c.move(to: CGPoint(x: size - inset, y: inset)); c.addLine(to: CGPoint(x: inset, y: size - inset))
+                c.strokePath()
+            case .lowBridge:
+                // Ponte baixa — losango amarelo MUTCD (sinal de aviso US) com arco de ponte e
+                // linha de "teto"; a ALTURA em texto vai no textField do pin (dado real do NBI).
+                let cxp = size / 2, cyp = size / 2, rad = size * 0.48
+                let diamond = UIBezierPath()
+                diamond.move(to: CGPoint(x: cxp, y: cyp - rad))
+                diamond.addLine(to: CGPoint(x: cxp + rad, y: cyp))
+                diamond.addLine(to: CGPoint(x: cxp, y: cyp + rad))
+                diamond.addLine(to: CGPoint(x: cxp - rad, y: cyp))
+                diamond.close()
+                c.setFillColor(UIColor.systemYellow.cgColor); c.addPath(diamond.cgPath); c.fillPath()
+                c.setStrokeColor(UIColor.black.cgColor); c.setLineWidth(1.4); c.addPath(diamond.cgPath); c.strokePath()
+                // teto + seta pra baixo (altura limitada)
+                c.setStrokeColor(UIColor.black.cgColor); c.setLineWidth(size * 0.09); c.setLineCap(.round)
+                c.move(to: CGPoint(x: cxp - rad * 0.5, y: cyp - rad * 0.28))
+                c.addLine(to: CGPoint(x: cxp + rad * 0.5, y: cyp - rad * 0.28))
+                c.strokePath()
+                c.move(to: CGPoint(x: cxp, y: cyp - rad * 0.18)); c.addLine(to: CGPoint(x: cxp, y: cyp + rad * 0.38))
+                c.move(to: CGPoint(x: cxp - rad * 0.18, y: cyp + rad * 0.18)); c.addLine(to: CGPoint(x: cxp, y: cyp + rad * 0.38))
+                c.move(to: CGPoint(x: cxp + rad * 0.18, y: cyp + rad * 0.18)); c.addLine(to: CGPoint(x: cxp, y: cyp + rad * 0.38))
                 c.strokePath()
             }
         }

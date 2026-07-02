@@ -3,6 +3,12 @@ import CoreLocation
 
 // MARK: - Supabase poi_places / places_near RPC
 
+/// Subconjunto das tags jsonb que o cliente usa (Decodable ignora o resto).
+struct PoiRowTags: Decodable, Sendable {
+    let clearance_m: Double?
+    let clearance_ftin: String?
+}
+
 struct PlacesNearRow: Decodable, Sendable {
     let id: UUID
     let osm_type: String?
@@ -36,6 +42,8 @@ struct PlacesNearRow: Decodable, Sendable {
     let gov_parking_available: Int?
     let gov_parking_total: Int?
     let poi_source: String?
+    /// Tags jsonb (o RPC já devolve; só não era decodificado) — altura de ponte baixa etc.
+    let tags: PoiRowTags?
 
     enum CodingKeys: String, CodingKey {
         case id, osm_type, osm_id, poi_type, name, brand, network, lat, lon, country_code
@@ -44,6 +52,7 @@ struct PlacesNearRow: Decodable, Sendable {
         case restaurant_names, has_healthy_options
         case gov_weigh_status, gov_weigh_source, gov_weigh_updated_at, gov_site_open
         case gov_parking_available, gov_parking_total, poi_source
+        case tags
         case operator_name = "operator"
     }
 }
