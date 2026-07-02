@@ -886,7 +886,8 @@ struct HorizonView: View {
                         onTruckStopTapped: { stop in selectedTruckStop = stop },
                         onCameraTapped: { selectedCamera = $0 },
                         maneuverMarkerCoordinate: navigationEngine.currentManeuverCoordinate,
-                        maneuverMarkerDirection: navigationEngine.currentManeuverDirection
+                        maneuverMarkerDirection: navigationEngine.currentManeuverDirection,
+                        maneuverSegment: navigationEngine.currentManeuverSegment
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()

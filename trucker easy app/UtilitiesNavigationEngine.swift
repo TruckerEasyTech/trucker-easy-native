@@ -106,6 +106,10 @@ final class NavigationEngine {
     /// em cima da linha, no ponto exato da curva/saída. Recalculado a cada mudança de passo.
     private(set) var currentManeuverCoordinate: CLLocationCoordinate2D?
     private(set) var currentManeuverDirection: String?
+    /// Trecho REAL da polilinha ±80m ao redor do ponto de ação — a UI desenha a SETA BRANCA
+    /// em cima da rota atravessando a curva (estilo Trucker Path/Google). Geometria da rota,
+    /// nada desenhado "por cima" inventado.
+    private(set) var currentManeuverSegment: [CLLocationCoordinate2D] = []
 
     private func recomputeManeuverMarker() {
         guard let route = activeRoute,
@@ -114,6 +118,7 @@ final class NavigationEngine {
               route.coordinates.count >= 2 else {
             currentManeuverCoordinate = nil
             currentManeuverDirection = nil
+            currentManeuverSegment = []
             return
         }
         let action = currentStepIndex == 0 ? departOffset : stepCumulativeEndDistance[currentStepIndex - 1]
@@ -135,6 +140,43 @@ final class NavigationEngine {
         if m.contains("left") { currentManeuverDirection = "left" }
         else if m.contains("right") || m.contains("exit") { currentManeuverDirection = "right" }
         else { currentManeuverDirection = "straight" }
+
+        // Segmento ±80m ao redor da ação, com extremidades interpoladas — a seta branca da UI.
+        currentManeuverSegment = Self.polylineSlice(
+            coords: route.coordinates,
+            prefix: vertexDistanceFromStart,
+            from: action - 80,
+            to: action + 80
+        )
+    }
+
+    /// Fatia da polilinha entre as distâncias `from`…`to` (m), interpolando as pontas.
+    private static func polylineSlice(
+        coords: [CLLocationCoordinate2D],
+        prefix: [Double],
+        from: Double,
+        to: Double
+    ) -> [CLLocationCoordinate2D] {
+        guard coords.count >= 2, prefix.count == coords.count, to > from else { return [] }
+        let total = prefix.last ?? 0
+        let a = max(0, min(from, total)), b = max(0, min(to, total))
+        guard b > a else { return [] }
+        func pointAt(_ d: Double) -> CLLocationCoordinate2D {
+            var lo = 0, hi = prefix.count - 1
+            while lo < hi { let m = (lo + hi) / 2; if prefix[m] < d { lo = m + 1 } else { hi = m } }
+            let i = max(1, lo)
+            let d0 = prefix[i-1], d1 = prefix[i]
+            let t = d1 > d0 ? min(1, max(0, (d - d0) / (d1 - d0))) : 0
+            let p = coords[i-1], q = coords[i]
+            return CLLocationCoordinate2D(latitude: p.latitude + (q.latitude - p.latitude) * t,
+                                          longitude: p.longitude + (q.longitude - p.longitude) * t)
+        }
+        var out: [CLLocationCoordinate2D] = [pointAt(a)]
+        for i in 0..<coords.count where prefix[i] > a && prefix[i] < b {
+            out.append(coords[i])
+        }
+        out.append(pointAt(b))
+        return out
     }
 
     var currentInstruction: String? {
@@ -231,6 +273,7 @@ final class NavigationEngine {
         departOffset = 0
         currentManeuverCoordinate = nil
         currentManeuverDirection = nil
+        currentManeuverSegment = []
         eta = nil
         distanceToNextStep = 0
         distanceRemaining = 0

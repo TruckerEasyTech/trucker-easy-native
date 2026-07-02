@@ -233,6 +233,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     /// Marcador de manobra NA rota: seta no ponto EXATO da curva/saída (do NavigationEngine).
     var maneuverMarkerCoordinate: CLLocationCoordinate2D? = nil
     var maneuverMarkerDirection: String? = nil
+    /// Trecho da polilinha ±80m na curva — desenhado como SETA BRANCA sobre a rota (estilo TP).
+    var maneuverSegment: [CLLocationCoordinate2D] = []
 
     private func activeRouteCoordinates() -> [CLLocationCoordinate2D]? {
         if let tr = truckRoute, tr.coordinates.count >= 2 { return tr.coordinates }
@@ -500,7 +502,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         // vê NO MAPA onde vai virar, não só no banner). nil (idle/sem manobra) limpa.
         coord.updateManeuverMarker(
             coordinate: isNavigating ? maneuverMarkerCoordinate : nil,
-            direction: maneuverMarkerDirection
+            direction: maneuverMarkerDirection,
+            segment: isNavigating ? maneuverSegment : []
         )
         if isNavigating, let coords = activeRouteCoordinates(), coords.count >= 2,
            let user = locationManager.currentLocation {
@@ -816,6 +819,8 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
         private var routeLineManager: PolylineAnnotationManager?
         private var routeArrowManager: PointAnnotationManager?
+        /// Seta branca da manobra (trecho ±80m sobre a linha) — camada acima da rota.
+        private var maneuverLineManager: PolylineAnnotationManager?
         private var truckStopManager: PointAnnotationManager?
         private var alertManager: PointAnnotationManager?
         private var signageManager: PointAnnotationManager?
@@ -936,18 +941,39 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// Seta de manobra NA rota (ponto exato da curva/saída, do NavigationEngine).
         /// Idempotente por (direção, coordenada) — não recria annotation a cada tick.
         private var lastManeuverMarkerKey: String?
-        func updateManeuverMarker(coordinate: CLLocationCoordinate2D?, direction: String?) {
+        func updateManeuverMarker(coordinate: CLLocationCoordinate2D?, direction: String?,
+                                  segment: [CLLocationCoordinate2D] = []) {
             guard let mgr = routeArrowManager else { return }
             guard let coordinate, let direction else {
                 if lastManeuverMarkerKey != nil {
                     mgr.annotations = []
+                    maneuverLineManager?.annotations = []
                     lastManeuverMarkerKey = nil
                 }
                 return
             }
-            let key = String(format: "%@:%.5f,%.5f", direction, coordinate.latitude, coordinate.longitude)
+            let key = String(format: "%@:%.5f,%.5f:%d", direction, coordinate.latitude, coordinate.longitude, segment.count)
             guard key != lastManeuverMarkerKey else { return }
             lastManeuverMarkerKey = key
+
+            // SETA BRANCA sobre a rota (estilo Trucker Path): o trecho REAL da polilinha
+            // atravessando a curva, com contorno escuro p/ contraste em qualquer estilo de mapa.
+            if segment.count >= 2, let lineMgr = maneuverLineManager {
+                var casing = PolylineAnnotation(lineCoordinates: segment)
+                casing.lineColor = StyleColor(UIColor.black.withAlphaComponent(0.55))
+                casing.lineWidth = 13
+                casing.lineJoin = LineJoin.round
+                casing.lineSortKey = 0
+                var arrowLine = PolylineAnnotation(lineCoordinates: segment)
+                arrowLine.lineColor = StyleColor(UIColor.white)
+                arrowLine.lineWidth = 9
+                arrowLine.lineJoin = LineJoin.round
+                arrowLine.lineSortKey = 1
+                lineMgr.annotations = [casing, arrowLine]
+            } else {
+                maneuverLineManager?.annotations = []
+            }
+
             var ann = PointAnnotation(id: "maneuver-marker", coordinate: coordinate)
             ann.iconAnchor = .center
             if let img = HorizonMapboxPinImages.maneuverArrowImage(direction: direction) {
@@ -969,6 +995,7 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 snapProviderInstalled = true
             }
             routeLineManager = mapView.annotations.makePolylineAnnotationManager(id: "horizon-route")
+            maneuverLineManager = mapView.annotations.makePolylineAnnotationManager(id: "horizon-maneuver-line")
             routeArrowManager = mapView.annotations.makePointAnnotationManager(id: "horizon-route-lead-arrow")
             truckStopManager = mapView.annotations.makePointAnnotationManager(id: "horizon-stops")
             cameraManager = mapView.annotations.makePointAnnotationManager(id: "horizon-cameras")
