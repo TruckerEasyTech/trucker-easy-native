@@ -230,6 +230,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
     var cameras: [TrafficCamera] = []
     var onTruckStopTapped: ((TruckStopItem) -> Void)? = nil
     var onCameraTapped: ((TrafficCamera) -> Void)? = nil
+    /// Marcador de manobra NA rota: seta no ponto EXATO da curva/saída (do NavigationEngine).
+    var maneuverMarkerCoordinate: CLLocationCoordinate2D? = nil
+    var maneuverMarkerDirection: String? = nil
 
     private func activeRouteCoordinates() -> [CLLocationCoordinate2D]? {
         if let tr = truckRoute, tr.coordinates.count >= 2 { return tr.coordinates }
@@ -493,10 +496,12 @@ struct HorizonMapboxSurface: UIViewRepresentable {
 
         coord.refreshPoints(mapView: mapView, truckStops: truckStops, alerts: mapAlerts,
                             signage: isNavigating ? routeSignage : [], cameras: cameras)
-        // Feed the native interpolated puck. During navigation it gets route-snapped samples
-        // (stable corridor bearing); idle it gets raw GPS. The custom lead-arrow annotation is
-        // gone — the puck IS the cursor now, so make sure it stays cleared.
-        coord.clearRouteNavigationArrow()
+        // Seta de manobra NA rota: marcador no ponto exato da próxima curva/saída (o motorista
+        // vê NO MAPA onde vai virar, não só no banner). nil (idle/sem manobra) limpa.
+        coord.updateManeuverMarker(
+            coordinate: isNavigating ? maneuverMarkerCoordinate : nil,
+            direction: maneuverMarkerDirection
+        )
         if isNavigating, let coords = activeRouteCoordinates(), coords.count >= 2,
            let user = locationManager.currentLocation {
             coord.emitRouteSnappedLocation(coords: coords, user: user)
@@ -708,7 +713,9 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         /// parte da tela mostra a estrada À FRENTE (course-up = frente é pra cima). O motorista
         /// vê as saídas chegando com muito mais antecedência (pedido do road test 01/07).
         private var navPadding: UIEdgeInsets {
-            UIEdgeInsets(top: 300, left: 0, bottom: 120, right: 0)
+            // top 460: puck a ~70% da altura (referência Trucker Path do road test) — quase a
+            // tela toda vira estrada à frente; bottom 120 limpa a barra de trip.
+            UIEdgeInsets(top: 460, left: 0, bottom: 120, right: 0)
         }
 
         /// Auto-zoom por velocidade REAL do GPS: rodovia (≥52mph) afasta pra ver saídas/contexto
@@ -925,6 +932,29 @@ struct HorizonMapboxSurface: UIViewRepresentable {
         }
 
         func clearLeadNavigationArrow() { clearRouteNavigationArrow() }
+
+        /// Seta de manobra NA rota (ponto exato da curva/saída, do NavigationEngine).
+        /// Idempotente por (direção, coordenada) — não recria annotation a cada tick.
+        private var lastManeuverMarkerKey: String?
+        func updateManeuverMarker(coordinate: CLLocationCoordinate2D?, direction: String?) {
+            guard let mgr = routeArrowManager else { return }
+            guard let coordinate, let direction else {
+                if lastManeuverMarkerKey != nil {
+                    mgr.annotations = []
+                    lastManeuverMarkerKey = nil
+                }
+                return
+            }
+            let key = String(format: "%@:%.5f,%.5f", direction, coordinate.latitude, coordinate.longitude)
+            guard key != lastManeuverMarkerKey else { return }
+            lastManeuverMarkerKey = key
+            var ann = PointAnnotation(id: "maneuver-marker", coordinate: coordinate)
+            ann.iconAnchor = .center
+            if let img = HorizonMapboxPinImages.maneuverArrowImage(direction: direction) {
+                ann.image = img
+            }
+            mgr.annotations = [ann]
+        }
 
         func installManagers(on mapView: MapboxMaps.MapView) {
             // Drive the native puck from our route-snapped provider (once — persists across style
@@ -1179,11 +1209,22 @@ struct HorizonMapboxSurface: UIViewRepresentable {
                 for stop in truckStops {
                     var ann = PointAnnotation(id: stop.id.uuidString, coordinate: stop.coordinate)
                     ann.iconAnchor = .center
-                    let key = String(describing: stop.network)
+                    // Cache por TIPO+rede (rest area não pode reusar o ícone de bomba da rede).
+                    let key = "\(stop.poiType)-\(stop.network)"
                     if let img = stopImageCache[key] ?? HorizonMapboxPinImages.truckStopImage(for: stop) {
                         stopImageCache[key] = img
                         ann.image = img
                     }
+                    // NOME no pin (pedido do road test): motorista identifica o posto/parada
+                    // sem tocar — nome REAL do banco, truncado p/ não poluir.
+                    let label = stop.name.count > 16 ? String(stop.name.prefix(15)) + "…" : stop.name
+                    ann.textField = label
+                    ann.textSize = 10
+                    ann.textAnchor = .top
+                    ann.textOffset = [0, 1.4]
+                    ann.textColor = StyleColor(UIColor.white)
+                    ann.textHaloColor = StyleColor(UIColor.black.withAlphaComponent(0.85))
+                    ann.textHaloWidth = 1.2
                     let captured = stop
                     ann.tapHandler = { [weak self] _ in
                         self?.onTruckStopTapped?(captured)
@@ -1333,25 +1374,36 @@ private enum HorizonMapboxPinImages {
     }
 
     static func truckStopImage(for stop: TruckStopItem) -> PointAnnotation.Image? {
-        let network = stop.network
-        let brand = UIColor(network.brandColor)
+        // Ícone segue o TIPO REAL do POI (road test 01/07: rest areas/marcos históricos
+        // apareciam com bomba de combustível — informação FALSA pro motorista).
         let size: CGFloat = 38
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        let uiImage = renderer.image { ctx in
-            let rect = CGRect(origin: .zero, size: CGSize(width: size, height: size))
-            ctx.cgContext.setFillColor(brand.cgColor)
-            ctx.cgContext.fillEllipse(in: rect)
-            ctx.cgContext.setStrokeColor(UIColor.white.cgColor)
-            ctx.cgContext.setLineWidth(2)
-            ctx.cgContext.strokeEllipse(in: rect.insetBy(dx: 1, dy: 1))
-            let iconName: String
-            switch network {
+        let fill: UIColor
+        let iconName: String
+        switch stop.poiType {
+        case "rest_area":
+            fill = UIColor(red: 0.18, green: 0.42, blue: 0.31, alpha: 1)   // verde rest area
+            iconName = "bed.double.fill"
+        case "weigh_station":
+            fill = UIColor(red: 0.55, green: 0.35, blue: 0.12, alpha: 1)   // âmbar balança
+            iconName = "scalemass.fill"
+        default:   // truck_stop / fuel — ícone da rede
+            fill = UIColor(stop.network.brandColor)
+            switch stop.network {
             case .pilotFlyingJ: iconName = "airplane.departure"
             case .loves: iconName = "heart.fill"
             case .taPetro: iconName = "car.side.fill"
             case .kwikTrip: iconName = "bolt.fill"
             default: iconName = "fuelpump.fill"
             }
+        }
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        let uiImage = renderer.image { ctx in
+            let rect = CGRect(origin: .zero, size: CGSize(width: size, height: size))
+            ctx.cgContext.setFillColor(fill.cgColor)
+            ctx.cgContext.fillEllipse(in: rect)
+            ctx.cgContext.setStrokeColor(UIColor.white.cgColor)
+            ctx.cgContext.setLineWidth(2)
+            ctx.cgContext.strokeEllipse(in: rect.insetBy(dx: 1, dy: 1))
             let cfg = UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
             if let img = UIImage(systemName: iconName, withConfiguration: cfg)?
                 .withTintColor(.white, renderingMode: .alwaysOriginal) {
@@ -1359,8 +1411,38 @@ private enum HorizonMapboxPinImages {
                 img.draw(at: origin)
             }
         }
-        let name = "ts-\(stop.id.uuidString)"
+        let name = "ts-\(stop.poiType)-\(stop.network)"
         return PointAnnotation.Image(image: uiImage, name: name, sdf: false)
+    }
+
+    /// Seta de manobra sobre a rota — disco branco com chevron DIAGONAL (arrow.up.left/right:
+    /// aponta frente+lado; as setas "turn.up.*" liam como "responder" — lição do road test 22/06).
+    static func maneuverArrowImage(direction: String) -> PointAnnotation.Image? {
+        let icon: String
+        switch direction {
+        case "left":  icon = "arrow.up.left"
+        case "right": icon = "arrow.up.right"
+        default:      icon = "arrow.up"
+        }
+        let size: CGFloat = 34
+        let orange = UIColor(red: 0.96, green: 0.49, blue: 0.09, alpha: 1)
+        let ui = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { ctx in
+            let rect = CGRect(x: 0, y: 0, width: size, height: size)
+            ctx.cgContext.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 3,
+                                    color: UIColor.black.withAlphaComponent(0.4).cgColor)
+            ctx.cgContext.setFillColor(UIColor.white.cgColor)
+            ctx.cgContext.fillEllipse(in: rect.insetBy(dx: 1, dy: 1))
+            ctx.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+            ctx.cgContext.setStrokeColor(orange.cgColor)
+            ctx.cgContext.setLineWidth(2.5)
+            ctx.cgContext.strokeEllipse(in: rect.insetBy(dx: 2.5, dy: 2.5))
+            let cfg = UIImage.SymbolConfiguration(pointSize: 15, weight: .black)
+            if let img = UIImage(systemName: icon, withConfiguration: cfg)?
+                .withTintColor(.black, renderingMode: .alwaysOriginal) {
+                img.draw(at: CGPoint(x: (size - img.size.width) / 2, y: (size - img.size.height) / 2))
+            }
+        }
+        return PointAnnotation.Image(image: ui, name: "mn-\(direction)", sdf: false)
     }
 
     static func alertImage(for alert: MapAlert) -> PointAnnotation.Image? {

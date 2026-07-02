@@ -101,6 +101,42 @@ final class NavigationEngine {
     /// departOffset metros da origem, NÃO em stepCumulativeEndDistance[0] que é o FIM do step 0.
     private var departOffset: Double = 0
 
+    /// MARCADOR DE MANOBRA NA ROTA: coordenada REAL (interpolada na polilinha) onde a ação do
+    /// passo atual acontece + direção ("left"/"right"/"straight") — a UI desenha a seta NO mapa,
+    /// em cima da linha, no ponto exato da curva/saída. Recalculado a cada mudança de passo.
+    private(set) var currentManeuverCoordinate: CLLocationCoordinate2D?
+    private(set) var currentManeuverDirection: String?
+
+    private func recomputeManeuverMarker() {
+        guard let route = activeRoute,
+              currentStepIndex < stepCumulativeEndDistance.count,
+              vertexDistanceFromStart.count == route.coordinates.count,
+              route.coordinates.count >= 2 else {
+            currentManeuverCoordinate = nil
+            currentManeuverDirection = nil
+            return
+        }
+        let action = currentStepIndex == 0 ? departOffset : stepCumulativeEndDistance[currentStepIndex - 1]
+        // Busca binária: primeiro vértice com distância acumulada >= ponto de ação.
+        var lo = 0, hi = vertexDistanceFromStart.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if vertexDistanceFromStart[mid] < action { lo = mid + 1 } else { hi = mid }
+        }
+        let i = max(1, lo)
+        let d0 = vertexDistanceFromStart[i - 1], d1 = vertexDistanceFromStart[i]
+        let t = d1 > d0 ? min(1, max(0, (action - d0) / (d1 - d0))) : 0
+        let a = route.coordinates[i - 1], b = route.coordinates[i]
+        currentManeuverCoordinate = CLLocationCoordinate2D(
+            latitude: a.latitude + (b.latitude - a.latitude) * t,
+            longitude: a.longitude + (b.longitude - a.longitude) * t
+        )
+        let m = (route.steps[safe: currentStepIndex]?.maneuver ?? "").lowercased()
+        if m.contains("left") { currentManeuverDirection = "left" }
+        else if m.contains("right") || m.contains("exit") { currentManeuverDirection = "right" }
+        else { currentManeuverDirection = "straight" }
+    }
+
     var currentInstruction: String? {
         activeRoute?.steps[safe: currentStepIndex]?.instruction
     }
@@ -169,6 +205,7 @@ final class NavigationEngine {
             timeRemaining = route.durationSeconds
         }
         distanceRemaining = route.distanceMeters
+        recomputeManeuverMarker()
 
         #if DEBUG
         print("[Navigation] ✅ Started navigation to \(route.destinationName)")
@@ -192,6 +229,8 @@ final class NavigationEngine {
         vertexDistanceFromStart = []
         stepCumulativeEndDistance = []
         departOffset = 0
+        currentManeuverCoordinate = nil
+        currentManeuverDirection = nil
         eta = nil
         distanceToNextStep = 0
         distanceRemaining = 0
@@ -210,6 +249,7 @@ final class NavigationEngine {
         guard clamped != currentStepIndex else { return }
         currentStepIndex = clamped
         lastSpokenStepIndex = -1
+        recomputeManeuverMarker()
         if let step = route.steps[safe: currentStepIndex] {
             onStepChanged?(currentStepIndex, step)
         }
@@ -563,6 +603,7 @@ final class NavigationEngine {
     private func moveToNextStep() {
         currentStepIndex += 1
         lastSpokenStepIndex = -1
+        recomputeManeuverMarker()
 
         if let step = activeRoute?.steps[safe: currentStepIndex] {
             onStepChanged?(currentStepIndex, step)

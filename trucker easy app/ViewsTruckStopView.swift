@@ -194,6 +194,9 @@ struct TruckStopItem: Identifiable {
     let phone: String?
     let network: TruckStopNetwork
     let dataSource: PoiPlacesDataSource
+    /// Tipo REAL do POI vindo do banco ("truck_stop"/"fuel"/"rest_area"/"weigh_station") —
+    /// o ícone no mapa segue o tipo; rest area NUNCA vira bomba de combustível.
+    var poiType: String = "truck_stop"
     var amenities: TruckStopAmenities
     var crowdsourceReports: [CrowdsourceReport] = []
 
@@ -206,6 +209,7 @@ struct TruckStopItem: Identifiable {
         phone: String? = nil,
         network: TruckStopNetwork,
         dataSource: PoiPlacesDataSource = .mapKit,
+        poiType: String = "truck_stop",
         amenities: TruckStopAmenities,
         crowdsourceReports: [CrowdsourceReport] = []
     ) {
@@ -217,6 +221,7 @@ struct TruckStopItem: Identifiable {
         self.phone = phone
         self.network = network
         self.dataSource = dataSource
+        self.poiType = poiType
         self.amenities = amenities
         self.crowdsourceReports = crowdsourceReports
     }
@@ -616,6 +621,7 @@ final class TruckStopService {
             phone: nil,
             network: network,
             dataSource: .supabase,
+            poiType: row.poi_type,
             amenities: amenities
         )
     }
