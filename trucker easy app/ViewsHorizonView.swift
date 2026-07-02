@@ -161,6 +161,17 @@ struct HorizonView: View {
             )
         }
 
+        // ROTA ATIVA: pins do TRAJETO INTEIRO (corridorStops, carregados 1x no applyRoute)
+        // + os locais (nearbyStops) — o motorista vê os postos/paradas do caminho todo,
+        // não só a janela à frente. Dedup por id; cap p/ manter o Mapbox leve no M1 8GB.
+        if truckRoute != nil, !truckStopService.corridorStops.isEmpty {
+            var seen = Set<UUID>()
+            let merged = (truckStopService.corridorStops + stops)
+                .filter { seen.insert($0.id).inserted }
+            return Array(merged.sorted { $0.distanceMeters < $1.distanceMeters }
+                .prefix(Self.navigationPoiDisplayCap))
+        }
+
         let aheadWindowMeters = 64_373.0 // ~40 mi lookahead corridor
         let heading = locationManager.currentHeading?.trueHeading
         let origin = loc.coordinate
@@ -181,7 +192,7 @@ struct HorizonView: View {
     }
 
     /// Pin caps keep Mapbox annotation churn cheap on the 8GB M1.
-    private static let navigationPoiDisplayCap = 20
+    private static let navigationPoiDisplayCap = 40
     private static let idlePoiDisplayCap = 24
 
     /// Upcoming truck stops + weigh ahead (Trucker Path–style corridor rail).
@@ -355,6 +366,9 @@ struct HorizonView: View {
     @State private var fuelSuggestionHandledIds: Set<UUID> = []
     /// Pontes baixas já anunciadas por voz nesta rota (1 aviso por ponte, sem nag).
     @State private var announcedLowBridgeIds: Set<String> = []
+    /// Quick report DURANTE a navegação (botão + → sheet de botões grandes).
+    @State private var showingQuickReport = false
+    @State private var quickReportSentAt: Date? = nil
     @State private var lastScaleVoiceKey: String?
     @State private var lastWeighCrowdSyncAt: Date = .distantPast
     @State private var lastScaleCheckLocation: CLLocation? = nil
@@ -660,6 +674,7 @@ struct HorizonView: View {
                     Task { await trafficCameraService.refreshIfNeeded(near: loc) }
                 }
             }
+            .sheet(isPresented: $showingQuickReport) { quickReportSheet }
             .sheet(item: $selectedCamera) { cam in
                 TrafficCameraSheet(camera: cam, lang: lang)
                     .presentationDetents([.medium])
@@ -1221,6 +1236,32 @@ struct HorizonView: View {
             }
             .zIndex(404)
             .transition(.move(edge: .leading).combined(with: .opacity))
+        }
+
+        // QUICK REPORT durante a navegação (pedido do road test: "o report some navegando").
+        // Botão + fixo à esquerda → sheet de botões grandes (1 toque, seguro pra cabine).
+        if isNavigating {
+            VStack {
+                Spacer()
+                HStack {
+                    Button {
+                        showingQuickReport = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .black))
+                            .foregroundColor(.black)
+                            .frame(width: 46, height: 46)
+                            .background(Color(hex: "#f5c518"))
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.black.opacity(0.25), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                    }
+                    .padding(.leading, 12)
+                    Spacer()
+                }
+                .padding(.bottom, navigatingMapChromeBottomInset + 70)
+            }
+            .zIndex(403)
         }
 
         // SUGESTÃO de diesel barato (rota inteligente): banner com aceite explícito.
@@ -1948,6 +1989,7 @@ struct HorizonView: View {
             suggestedFuelStop = nil
             suggestedFuelSavingsUSD = nil
             announcedLowBridgeIds = []
+            truckStopService.clearCorridorStops()
             return
         }
         // P0 #5: navegação com a tela bloqueada / app em 2º plano só recebe GPS com permissão
@@ -2002,6 +2044,80 @@ struct HorizonView: View {
                 let distText = regionalSettings.formatDistance(item.distanceMeters)
                 VoiceNavigationManager.shared.announceLowBridge(
                     clearanceText: clrText, distanceText: distText, lang: lang)
+            }
+        }
+    }
+
+    /// Sheet de report rápido NA navegação — botões grandes, 1 toque, fecha sozinho.
+    /// Balança abre o sheet completo (status real open/closed/bypass); os demais enviam
+    /// road_report com a POSIÇÃO GPS atual (dado real do motorista, alimenta o crowd).
+    @ViewBuilder private var quickReportSheet: some View {
+        VStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(0.25))
+                .frame(width: 36, height: 4).padding(.top, 10)
+            Text("Report — o que você está vendo?")
+                .font(.system(size: 16, weight: .bold)).foregroundColor(.white)
+            HStack(spacing: 12) {
+                quickReportButton("⚖️", "Balança") {
+                    showingQuickReport = false
+                    openWeighStationReportSheet()
+                }
+                quickReportButton("🅿️", "Parking\nLOTADO") {
+                    submitQuickRoadReport(type: "parkingFull",
+                                          name: nearestParkingName.isEmpty ? "Truck parking" : nearestParkingName)
+                }
+            }
+            HStack(spacing: 12) {
+                quickReportButton("⚠️", "Perigo\nna pista") {
+                    submitQuickRoadReport(type: "hazard", name: "Road hazard")
+                }
+                quickReportButton("🚧", "Obra") {
+                    submitQuickRoadReport(type: "construction", name: "Construction")
+                }
+            }
+            if quickReportSentAt != nil {
+                Label("Report enviado — obrigado!", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Color(hex: "#22d474"))
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .presentationDetents([.height(300)])
+        .presentationDragIndicator(.hidden)
+        .background(Color(hex: "#15151a"))
+        .preferredColorScheme(.dark)
+    }
+
+    private func quickReportButton(_ emoji: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Text(emoji).font(.system(size: 30))
+                Text(label).font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).frame(height: 92)
+            .background(Color.white.opacity(0.07))
+            .cornerRadius(14)
+        }
+    }
+
+    private func submitQuickRoadReport(type: String, name: String) {
+        guard let loc = locationManager.currentLocation else { showingQuickReport = false; return }
+        let payload = RoadReportPayload(
+            driver_id: SupabaseClient.shared.currentDriverId,
+            report_type: type,
+            latitude: loc.coordinate.latitude,
+            longitude: loc.coordinate.longitude,
+            location_name: name
+        )
+        quickReportSentAt = Date()
+        Task {
+            try? await SupabaseClient.shared.submitRoadReport(payload)
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            await MainActor.run {
+                showingQuickReport = false
+                quickReportSentAt = nil
             }
         }
     }
@@ -2541,6 +2657,11 @@ struct HorizonView: View {
         #if DEBUG
         print("[TRACE-NAV] 10 · tiles offline despachados")
         #endif
+        // Pins do trajeto inteiro (1x por rota; não roda no refresh de 2km).
+        if let originLoc = locationManager.currentLocation {
+            let coords = routeForNavigation.coordinates
+            Task { await truckStopService.loadCorridorStops(routeCoords: coords, origin: originLoc) }
+        }
         showingFallbackConfirmation = false
         pendingFallbackRoute = nil
         pendingFallbackProvider = .unknown

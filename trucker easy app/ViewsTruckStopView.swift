@@ -540,6 +540,53 @@ final class TruckStopService {
         lastDataSource = .mapKit
     }
 
+    /// Postos/paradas do TRAJETO INTEIRO (pins no mapa durante a navegação — "logos em todo o
+    /// trajeto"). Carregado 1x quando a rota é aplicada (não no refresh de 2km): amostra a
+    /// polilinha completa (1 ponto/~120km, máx 8 queries de 20km) com os 4 tipos.
+    private(set) var corridorStops: [TruckStopItem] = []
+
+    func clearCorridorStops() { corridorStops = [] }
+
+    func loadCorridorStops(routeCoords: [CLLocationCoordinate2D], origin: CLLocation) async {
+        guard SupabaseConfig.isConfigured, routeCoords.count >= 2 else { return }
+        var segLengths: [Double] = []
+        var totalLen = 0.0
+        for i in 0..<(routeCoords.count - 1) {
+            let d = CLLocation(latitude: routeCoords[i].latitude, longitude: routeCoords[i].longitude)
+                .distance(from: CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+            segLengths.append(d); totalLen += d
+        }
+        guard totalLen > 25_000 else { return }   // rota curta: nearbyStops cobre
+        let sampleCount = min(8, max(2, Int(totalLen / 190_000)))
+        let step = totalLen / Double(sampleCount + 1)
+        var samples: [CLLocation] = []
+        var nextAt = step, acc = 0.0
+        for i in 0..<segLengths.count {
+            acc += segLengths[i]
+            while acc >= nextAt, samples.count < sampleCount {
+                samples.append(CLLocation(latitude: routeCoords[i+1].latitude, longitude: routeCoords[i+1].longitude))
+                nextAt += step
+            }
+        }
+        let poiTypes = ["truck_stop", "fuel", "weigh_station", "rest_area"]
+        let rows: [PlacesNearRow] = await withTaskGroup(of: [PlacesNearRow].self) { group in
+            for pt in samples {
+                group.addTask {
+                    (try? await PoiPlacesService.shared.fetchPlacesNear(
+                        location: pt, radiusMeters: 20_000, poiTypes: poiTypes, limit: 20)) ?? []
+                }
+            }
+            var all: [PlacesNearRow] = []
+            for await r in group { all.append(contentsOf: r) }
+            return all
+        }
+        var seen = Set<UUID>()
+        corridorStops = rows.compactMap { row in
+            guard seen.insert(row.id).inserted else { return nil }
+            return item(from: row, origin: origin, forceRecomputeDistance: true)
+        }
+    }
+
     /// A DOR REAL DAS FROTAS: o diesel mais barato fica no MEIO da rota de 1500mi, não no raio
     /// local do motorista. Amostra a polilinha INTEIRA (um ponto a cada ~150mi, máx 8 queries de
     /// 20km em paralelo — cada uma sob o timeout do Supabase) e devolve SÓ postos com preço REAL
